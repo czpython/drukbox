@@ -133,16 +133,20 @@ jobs:
       - name: Build container image
         run: docker build -t drukbox:validate .
 
+      - name: Verify Docker CLI runs in the image
+        run: docker run --rm drukbox:validate docker --version
+
   api-tests:
     name: Run API Tests (docker provider)
     runs-on: ubuntu-latest
     # Black-box e2e against a real deployment. The docker provider provisions
     # local containers on the runner, so this needs no cloud credentials.
     env:
-      DATABASE_URL: sqlite+aiosqlite:///./drukbox.db
+      DATABASE_URL: sqlite+aiosqlite:////tmp/drukbox.db
       SERVICE_TOKENS: ci-token
       DEFAULT_HOST_PROVIDER: docker
       DOCKER_DEFAULT_IMAGE: drukbox/sandbox:ci
+      UVICORN_HOST: 127.0.0.1
 
     steps:
       - name: Check out repository
@@ -151,33 +155,28 @@ jobs:
       - name: Build sandbox image
         run: docker build -t drukbox/sandbox:ci images/local/
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v8.2.0
-        with:
-          enable-cache: true
-          version: "0.10.9"
-
-      - name: Sync dependencies
-        run: uv sync --locked --no-dev --all-extras
-
-      - name: Apply migrations
-        run: PYTHONPATH=src uv run alembic upgrade head
+      - name: Build drukbox image
+        run: docker build -t drukbox:api-test .
 
       - name: Start drukbox
         run: |
-          PYTHONPATH=src nohup uv run uvicorn api.app:app \
-            --host 127.0.0.1 --port 8780 > /tmp/drukbox.log 2>&1 &
+          docker run --name drukbox-api-test --detach \
+            --network host \
+            --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
+            --group-add "$(stat -c '%g' /var/run/docker.sock)" \
+            --env DATABASE_URL \
+            --env SERVICE_TOKENS \
+            --env DEFAULT_HOST_PROVIDER \
+            --env DOCKER_DEFAULT_IMAGE \
+            --env UVICORN_HOST \
+            drukbox:api-test \
+            /bin/sh -c '.venv/bin/alembic upgrade head && exec .venv/bin/uvicorn api.app:app --port 8780'
           for _ in $(seq 1 60); do
-            curl -fsS http://localhost:8780/healthz >/dev/null 2>&1 && exit 0
+            curl -fsS http://127.0.0.1:8780/healthz >/dev/null 2>&1 && exit 0
             sleep 1
           done
           echo "drukbox failed to start" >&2
-          cat /tmp/drukbox.log
+          docker logs drukbox-api-test
           exit 1
 
       - name: Set up Node
@@ -191,9 +190,21 @@ jobs:
       - name: Run API tests
         run: npm --prefix api-tests test
         env:
-          SERVICE_URL: http://localhost:8780
+          SERVICE_URL: http://127.0.0.1:8780
           SERVICE_TOKEN: ci-token
+
+      - name: Verify sandbox cleanup
+        run: |
+          remaining="$(docker ps -aq --filter label=managed-by=drukbox)"
+          if [ -n "$remaining" ]; then
+            docker ps -a --filter label=managed-by=drukbox
+            exit 1
+          fi
 
       - name: Dump drukbox log on failure
         if: failure()
-        run: cat /tmp/drukbox.log || true
+        run: docker logs drukbox-api-test || true
+
+      - name: Remove drukbox container
+        if: always()
+        run: docker rm -f drukbox-api-test || true

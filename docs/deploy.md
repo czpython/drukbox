@@ -53,13 +53,24 @@ installed.
 ## Local sandboxes with Docker
 
 The `docker` provider runs each sandbox as a local container with sshd,
-so you can try drukbox with no cloud account or API token. It needs a
-Docker-compatible runtime on the host (Docker Desktop, OrbStack, Colima):
+so you can try drukbox with no cloud account or API token. The published
+image includes the Docker CLI. Set `DEFAULT_HOST_PROVIDER=docker`,
+`TAILSCALE_ENABLED=false`, and `UVICORN_HOST=127.0.0.1` in `drukbox.env`,
+then run:
 
 ```bash
-export DEFAULT_HOST_PROVIDER=docker
-export TAILSCALE_ENABLED=false
+docker run --rm --network host \
+  --group-add "$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock)" \
+  --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
+  --env-file drukbox.env \
+  ghcr.io/czpython/drukbox:latest
 ```
+
+Host networking is required because Docker sandboxes publish SSH on the
+host's `127.0.0.1`. The loopback Uvicorn binding makes the API reachable
+only from that host. Do not combine this mode with the generic
+`-p 8780:8780` invocation above. On macOS, if sandbox SSH is
+unreachable, enable host networking in Docker Desktop's settings.
 
 The sandbox image (`DOCKER_DEFAULT_IMAGE`, default
 `ghcr.io/czpython/drukbox/sandbox:latest`) is pulled on first provision.
@@ -75,6 +86,11 @@ This provider is for local development and demos, not production: it
 talks to the host's Docker daemon, and granting drukbox access to that
 socket is host-root-equivalent. Do not expose a docker-backed drukbox to
 untrusted callers.
+
+Janitor and pool one-off containers using the Docker provider need the
+same socket mount and socket-GID supplemental group. `DOCKER_HOST` remains
+available when the daemon is remote or rootless instead of exposed through
+`/var/run/docker.sock`.
 
 ## Choose a networking mode
 
@@ -228,12 +244,9 @@ Docker provider:
 | `DOCKER_SSH_USERNAME` | `root` | In-container user callers SSH as. |
 | `DOCKER_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `30.0` | ssh-keyscan retry budget for a fresh container. |
 
-The docker provider uses the host's configured Docker CLI, so the local
-development path is to run drukbox from source on that host. The
-published API image does not install a Docker CLI. If you containerize
-this mode, build a custom image with a Docker CLI and mount or point it
-at a daemon yourself (`DOCKER_HOST`, Docker Desktop, OrbStack, Colima);
-that access is host-root-equivalent. Drukbox mints a per-VM ed25519 key
-and publishes sshd on a random `127.0.0.1` port. See
-[Local sandboxes with Docker](#local-sandboxes-with-docker) for setup and
-the trust caveat.
+The published image includes the Docker CLI. Mount the local daemon socket
+with its supplemental group on Linux, or use `DOCKER_HOST` for a remote or
+rootless daemon. Drukbox mints a per-VM ed25519 key and publishes sshd on a
+random `127.0.0.1` port. See
+[Local sandboxes with Docker](#local-sandboxes-with-docker) for the
+container command and the trust caveat.

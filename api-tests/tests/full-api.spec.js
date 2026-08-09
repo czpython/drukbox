@@ -151,6 +151,7 @@ test.describe("Drukbox API", () => {
     expectConfiguredHostImage(createdHost, config);
     expect(createdHost.name).toMatch(/^sb-/);
     expect(createdHost.status).toBe("active");
+    expect(createdHost.known_hosts.length).toBeGreaterThan(0);
     expect(createdHost.provider).toBe(config.expectedProvider);
     expect(createdHost.activated_at).not.toBeNull();
     expect(createdHost).not.toHaveProperty("env");
