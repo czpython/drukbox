@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
+FROM docker:29.6.2-cli AS docker-cli
+
 FROM python:3.11-slim AS python-runtime
 
 WORKDIR /app
@@ -28,6 +30,8 @@ COPY alembic/ ./alembic/
 RUN uv sync --frozen --no-dev --all-extras
 
 RUN useradd --system --no-create-home --uid 1001 appuser
+
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 
 USER appuser
 
