@@ -59,12 +59,17 @@ image includes the Docker CLI. Set `DEFAULT_HOST_PROVIDER=docker`,
 then run:
 
 ```bash
+# Linux: match the host socket's group. macOS: use group 0 (see below).
 docker run --rm --network host \
-  --group-add "$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock)" \
+  --group-add "$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo 0)" \
   --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
   --env-file drukbox.env \
   ghcr.io/czpython/drukbox:latest
 ```
+
+On macOS, use `--group-add 0` instead: Docker Desktop mounts the socket into
+the container as `root:root` mode `0660`, so only group 0 grants access — the
+host socket's own gid is irrelevant.
 
 Host networking is required because Docker sandboxes publish SSH on the
 host's `127.0.0.1`. The loopback Uvicorn binding makes the API reachable
