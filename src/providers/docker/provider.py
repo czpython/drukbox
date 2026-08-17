@@ -22,6 +22,9 @@ _RESERVED_ENV_KEYS = frozenset({_AUTHORIZED_KEY_ENV, _ENV_KEYS_ENV})
 class DockerProvider(VMProvider):
     name: ClassVar[str] = "docker"
     diagnose_hint: ClassVar[str] = "check_docker_daemon_is_running"
+    # A local container has no path onto the tailnet; its hosts keep the
+    # published 127.0.0.1 sshd port even on a tailnet-mode service.
+    supports_tailnet: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -64,7 +67,7 @@ class DockerProvider(VMProvider):
         # A setup script only ever arrives when Tailscale is enabled, and a
         # local container has no path onto the tailnet. Fail loud rather than
         # silently start a box that never joins.
-        if setup_script is not None:
+        if setup_script:
             raise ProviderCommandError(
                 "docker provider runs sandboxes locally and does not support "
                 "Tailscale networking; set TAILSCALE_ENABLED=false"
@@ -128,4 +131,4 @@ class DockerProvider(VMProvider):
         return f"docker server {await self.api.server_version()}"
 
     async def aclose(self) -> None:
-        return None
+        return
