@@ -85,7 +85,10 @@ To customize it, build [images/local/](../images/local/) and point
 Containers publish sshd on a random `127.0.0.1` port and are reachable
 only from the host that runs drukbox; the per-host key is the auth
 boundary. Tailscale is not supported — a local container has no path
-onto the tailnet, so `POST /hosts` fails fast if `TAILSCALE_ENABLED=true`.
+onto the tailnet, so docker hosts stay local under a tailnet-mode
+service: no join, no `internal_ssh_host`, the published port is the only
+path. One drukbox can serve tailnet VMs and local containers side by
+side.
 
 This provider is for local development and demos, not production: it
 talks to the host's Docker daemon, and granting drukbox access to that

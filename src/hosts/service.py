@@ -76,7 +76,7 @@ class HostService:
         # tailscale_enabled is true. Tests can inject a mock Tailscale via
         # the kwarg regardless of the flag — useful for exercising the
         # tailnet path without real credentials.
-        if tailscale is not None:
+        if tailscale:
             self.tailscale: Tailscale | None = tailscale
         elif self.settings.tailscale_enabled:
             self.tailscale = Tailscale.from_settings()
@@ -110,7 +110,7 @@ class HostService:
 
         if idempotency_key:
             existing = await self._lookup_idempotency_key(idempotency_key)
-            if existing is not None:
+            if existing:
                 return existing
 
         host: Host | None = None
@@ -119,12 +119,12 @@ class HostService:
         # doesn't customize the host: default image, no env, and no per-request
         # sizing — pool members are warmed at the provider's default size.
         requested_provider = provider or self.settings.default_host_provider
-        customized = env or image is not None or instance_type or disk_gb
+        customized = env or image or instance_type or disk_gb
         if not customized and self.settings.get_pool_targets().get(requested_provider):
             host = await self._try_claim_pool_host(
                 provider=requested_provider, expires_at=expires_at
             )
-        if host is None:
+        if not host:
             host = await self.create_host(
                 env=env,
                 image=image,
@@ -143,7 +143,7 @@ class HostService:
             )
             await self._release_idempotency_loser(host)
             winner = await self._lookup_idempotency_key(idempotency_key)
-            if winner is None:
+            if not winner:
                 raise HostStateError("idempotency race could not be resolved") from None
             return winner
         return host
@@ -170,8 +170,8 @@ class HostService:
                 .limit(1)
             )
         ).scalar_one_or_none()
-        if candidate_id is None:
-            return None
+        if not candidate_id:
+            return
 
         if expires_at is ...:
             expires_at = self._default_lease_expires_at()
@@ -187,9 +187,9 @@ class HostService:
         )
         host = result.scalar_one_or_none()
         await self.session.commit()
-        if host is None:
+        if not host:
             # Lost the race to another claimant; let the caller fall through.
-            return None
+            return
         log.info("pool: claimed host_id=%s name=%s", host.id, host.name)
         return host
 
@@ -279,12 +279,12 @@ class HostService:
             await self.session.execute(select(IdempotencyKey).where(IdempotencyKey.key == key))
         ).scalar_one_or_none()
 
-        if record is None:
+        if not record:
             return
 
         if record.expires_at > utc_now():
             host = await self.session.get(Host, record.host_id)
-            if host is not None:
+            if host:
                 return host
         # Stale: expired, or the host vanished without the FK cascade firing.
         # GC in a dedicated session so we don't autoflush the caller's pending
@@ -322,10 +322,10 @@ class HostService:
         # janitor reaps it (delete_host refuses PROVISIONING).
         async with async_session_factory() as fix_session:
             fresh = await fix_session.get(Host, host.id)
-            if fresh is None:
+            if not fresh:
                 return
             now = utc_now()
-            if fresh.claimed_at is not None:
+            if fresh.claimed_at:
                 fresh.claimed_at = None
                 fresh.expires_at = now + timedelta(hours=self.settings.pool_host_max_age_hours)
                 fresh.updated_at = now
@@ -358,7 +358,7 @@ class HostService:
     async def renew_host(self, host_id: uuid.UUID, *, expires_at: datetime | None = None) -> Host:
         host = await self.get_host_for_update(host_id)
 
-        if host is None:
+        if not host:
             raise ResourceNotFoundError("host not found")
 
         if host.pool_member and not host.claimed_at:
@@ -384,7 +384,7 @@ class HostService:
         """Delete the host; return False when a maintenance guard spared it."""
         host = await self.get_host_for_update(host_id)
 
-        if host is None:
+        if not host:
             raise ResourceNotFoundError("host not found")
 
         if pool_shed and host.claimed_at:
@@ -404,7 +404,7 @@ class HostService:
             # force is the janitor reaping an abandoned provision: attempt
             # teardown even from an early state, since a row stranded in
             # CREATING_VM may already have a VM (delete_vm no-ops if it doesn't).
-            if host.tailscale_device_id and self.tailscale is not None:
+            if host.tailscale_device_id and self.tailscale:
                 # Clear and commit the device_id before deleting the VM:
                 # a later delete_vm transport error must not retry the
                 # already-completed release. Hosts provisioned under
@@ -435,20 +435,24 @@ class HostService:
     async def provision(self, host_id: str) -> None:
         host = await self.get_host(uuid.UUID(host_id))
 
-        if host is None:
+        if not host:
             raise ResourceNotFoundError("host not found")
 
         host.status = HostStatus.CREATING_NETWORK.value
         host.updated_at = utc_now()
         await self.session.commit()
 
+        tailscale: Tailscale | None = None
+        if get_vm_provider(host.provider).supports_tailnet:
+            tailscale = self.tailscale
+
         join_env: dict[str, str] = {}
         setup_script: str | None = None
-        if self.tailscale is not None:
+        if tailscale:
             # The bootstrap script hard-requires TAILSCALE_AUTHKEY; only
             # deliver it (and mint a key) when Tailscale is in play.
             try:
-                join_credentials = await self.tailscale.issue_join_credentials(host_name=host.name)
+                join_credentials = await tailscale.issue_join_credentials(host_name=host.name)
             except NetworkError as exc:
                 await self.mark_failed(host, exc)
                 return
@@ -483,15 +487,15 @@ class HostService:
         # GET that loads a fresh row sees the class default (None) and
         # never echoes the key back.
         host.private_key = vm_result.private_key
-        if self.tailscale is not None:
-            host.internal_ssh_host = self.tailscale.build_ssh_host(host.name)
+        if tailscale:
+            host.internal_ssh_host = tailscale.build_ssh_host(host.name)
         host.status = HostStatus.BOOTSTRAPPING.value
         host.updated_at = utc_now()
         await self.session.commit()
 
-        if self.tailscale is not None:
+        if tailscale:
             try:
-                device_id = await self.tailscale.wait_for_device(
+                device_id = await tailscale.wait_for_device(
                     host_name=host.name,
                     timeout=self.settings.device_discovery_timeout_seconds,
                 )

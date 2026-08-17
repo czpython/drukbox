@@ -6,9 +6,11 @@ shaped the way it is. For turning these modes on, read
 
 ## Two modes
 
-`TAILSCALE_ENABLED` selects between two networking models. The API
-response carries both addresses; which is populated depends on the
-mode:
+`TAILSCALE_ENABLED` selects between two networking models. A provider
+whose hosts cannot join a tailnet (docker — local containers) always
+takes the external path, whatever the mode. The API response carries
+both addresses; which is populated depends on the mode and the
+provider:
 
 - `external_ssh_host` / `external_ssh_port` — the provider-given
   public path. Always present (empty for an AWS host with Tailscale

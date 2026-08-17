@@ -23,6 +23,10 @@ class VMProvider(abc.ABC):
     # target provider leaves these False.
     supports_instance_type: ClassVar[bool] = False
     supports_disk_gb: ClassVar[bool] = False
+    # Whether this provider's hosts can join the tailnet when the service runs
+    # in Tailscale mode. A local provider leaves it False and its hosts keep
+    # the external path only, even on a tailnet-mode service.
+    supports_tailnet: ClassVar[bool] = True
 
     @classmethod
     @abc.abstractmethod
