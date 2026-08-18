@@ -16,6 +16,14 @@ from .exceptions import (
 )
 from .settings import ExeSettings
 
+# VM creation is legitimately slow: a healthy create_host measured ~21s through
+# the full stack (ENG-821 probe, 2026-08-06). The default 30s general budget sits
+# too close to that ceiling, so minor exe.dev degradation trips the read timeout.
+# Give VM creation a read-timeout floor with real headroom while leaving connect,
+# write, and pool budgets — and every other exe.dev command — on the configured
+# general timeout.
+_CREATE_VM_READ_TIMEOUT_FLOOR = 90.0
+
 
 def _encode_setup_script(script: str) -> str:
     """Encode a multi-line script as a double-quoted exe.dev argument value.
@@ -91,7 +99,26 @@ class ExeAPI:
         if env:
             for key, value in env.items():
                 command_parts.extend(["--env", shlex.quote(f"{key}={value}")])
-        return await self._exec_dict(" ".join(command_parts))
+        return await self._exec_dict(" ".join(command_parts), timeout=self._creation_timeout())
+
+    def _creation_timeout(self) -> httpx.Timeout:
+        """Read-timeout floor for VM creation, derived from the general timeout.
+
+        Raise only the read budget when it falls below the creation floor; never
+        shorten a configured read timeout already at or above it, and preserve the
+        connect, write, and pool budgets. Returns a per-request timeout — the
+        cached client is never mutated, so ordinary commands keep the general
+        timeout.
+        """
+        read = self.timeout.read
+        if read is None or read >= _CREATE_VM_READ_TIMEOUT_FLOOR:
+            return self.timeout
+        return httpx.Timeout(
+            connect=self.timeout.connect,
+            read=_CREATE_VM_READ_TIMEOUT_FLOOR,
+            write=self.timeout.write,
+            pool=self.timeout.pool,
+        )
 
     async def list_vms(
         self,
@@ -211,19 +238,29 @@ class ExeAPI:
         await self._client.aclose()
         self._client = None
 
-    async def _exec_dict(self, command: str) -> dict[str, Any]:
-        response = await self._request(command)
+    async def _exec_dict(
+        self, command: str, *, timeout: httpx.Timeout | None = None
+    ) -> dict[str, Any]:
+        response = await self._request(command, timeout=timeout)
         payload = self._parse_json_response(response.text)
 
         if not isinstance(payload, dict):
             raise ExeResponseError("exe.dev API returned non-object JSON output")
         return payload
 
-    async def _request(self, command: str) -> httpx.Response:
+    async def _request(
+        self, command: str, *, timeout: httpx.Timeout | None = None
+    ) -> httpx.Response:
+        client = self._get_client()
         try:
-            response = await self._get_client().post("/exec", content=command)
+            if timeout is None:
+                response = await client.post("/exec", content=command)
+            else:
+                response = await client.post("/exec", content=command, timeout=timeout)
         except httpx.RequestError as exc:
-            raise ExeResponseError(f"exe.dev API transport failed: {exc}") from exc
+            # str(exc) is empty for bare transport errors like httpx.ReadTimeout();
+            # {exc!r} always names the exception type so the failure is diagnosable.
+            raise ExeResponseError(f"exe.dev API transport failed: {exc!r}") from exc
 
         if response.status_code == 401:
             raise ExeAuthError("exe.dev API authentication failed")
