@@ -190,7 +190,7 @@ exe.dev provider:
 | `EXE_API_TOKEN` | — (required) | Bearer token for the exe.dev exec API. |
 | `EXE_DEFAULT_IMAGE` | — (required) | Image used when the caller omits `image`. |
 | `EXE_API_URL` | `https://exe.dev` | API base URL. |
-| `EXE_API_TIMEOUT` | `30.0` | General timeout for exe.dev API calls. VM creation is legitimately slow, so it applies an internal per-request read-timeout floor (currently 90s) when this general timeout is lower; a configured value above the floor is used as-is. Connect, write, and pool budgets always follow this setting. No separate creation setting exists. |
+| `EXE_API_TIMEOUT` | `30.0` | Timeout for exe.dev API calls. |
 | `EXE_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `30.0` | ssh-keyscan retry budget for a fresh exe.dev sandbox. |
 | `EXE_SSH_USERNAME` | `exedev` | In-VM user callers SSH as. |
 

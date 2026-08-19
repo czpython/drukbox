@@ -16,12 +16,10 @@ from .exceptions import (
 )
 from .settings import ExeSettings
 
-# VM creation is legitimately slow: a healthy create_host measured ~21s through
-# the full stack (ENG-821 probe, 2026-08-06). The default 30s general budget sits
-# too close to that ceiling, so minor exe.dev degradation trips the read timeout.
-# Give VM creation a read-timeout floor with real headroom while leaving connect,
-# write, and pool budgets — and every other exe.dev command — on the configured
-# general timeout.
+# Creating the VM itself is fast, but `new` waits on the setup script, and the
+# tailscale join inside it is slow: ~21s healthy, uncomfortably close to the
+# default 30s budget. Creation alone gets this read floor; a configured timeout
+# above it wins.
 _CREATE_VM_READ_TIMEOUT_FLOOR = 90.0
 
 
@@ -51,6 +49,9 @@ class ExeAPI:
         self.token = token
         self.default_image = default_image
         self.timeout = httpx.Timeout(timeout, connect=connect_timeout)
+        self.create_vm_timeout = httpx.Timeout(
+            timeout, connect=connect_timeout, read=max(timeout, _CREATE_VM_READ_TIMEOUT_FLOOR)
+        )
         self._client: httpx.AsyncClient | None = None
 
     @classmethod
@@ -99,26 +100,7 @@ class ExeAPI:
         if env:
             for key, value in env.items():
                 command_parts.extend(["--env", shlex.quote(f"{key}={value}")])
-        return await self._exec_dict(" ".join(command_parts), timeout=self._creation_timeout())
-
-    def _creation_timeout(self) -> httpx.Timeout:
-        """Read-timeout floor for VM creation, derived from the general timeout.
-
-        Raise only the read budget when it falls below the creation floor; never
-        shorten a configured read timeout already at or above it, and preserve the
-        connect, write, and pool budgets. Returns a per-request timeout — the
-        cached client is never mutated, so ordinary commands keep the general
-        timeout.
-        """
-        read = self.timeout.read
-        if read is None or read >= _CREATE_VM_READ_TIMEOUT_FLOOR:
-            return self.timeout
-        return httpx.Timeout(
-            connect=self.timeout.connect,
-            read=_CREATE_VM_READ_TIMEOUT_FLOOR,
-            write=self.timeout.write,
-            pool=self.timeout.pool,
-        )
+        return await self._exec_dict(" ".join(command_parts), timeout=self.create_vm_timeout)
 
     async def list_vms(
         self,
@@ -251,15 +233,12 @@ class ExeAPI:
     async def _request(
         self, command: str, *, timeout: httpx.Timeout | None = None
     ) -> httpx.Response:
-        client = self._get_client()
         try:
-            if timeout is None:
-                response = await client.post("/exec", content=command)
-            else:
-                response = await client.post("/exec", content=command, timeout=timeout)
+            response = await self._get_client().post(
+                "/exec", content=command, timeout=timeout or self.timeout
+            )
         except httpx.RequestError as exc:
-            # str(exc) is empty for bare transport errors like httpx.ReadTimeout();
-            # {exc!r} always names the exception type so the failure is diagnosable.
+            # {exc!r}, not {exc}: bare transport errors like ReadTimeout() stringify empty.
             raise ExeResponseError(f"exe.dev API transport failed: {exc!r}") from exc
 
         if response.status_code == 401:

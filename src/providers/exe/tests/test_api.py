@@ -165,8 +165,6 @@ async def test_request_sends_authorization_and_text_body(respx_mock):
 @pytest.mark.asyncio
 @respx.mock(base_url="https://exe.dev")
 async def test_request_names_exception_type_for_blank_transport_error(respx_mock):
-    # str(httpx.ReadTimeout("")) is an empty string; the wrapped ExeResponseError
-    # must still name the exception type and keep the original chained.
     read_timeout = httpx.ReadTimeout("")
     respx_mock.post("/exec").mock(side_effect=read_timeout)
 
@@ -183,14 +181,13 @@ async def test_create_vm_raises_read_timeout_floor_when_general_timeout_below(re
         return_value=httpx.Response(200, content=b'{"vm_name": "sb-1", "ssh_port": 22}'),
     )
 
-    # Default general timeout is 30s, below the creation floor.
+    # The default 30s timeout sits below the creation floor.
     await ExeAPI(base_url="https://exe.dev", token="token").create_vm(
         name="sb-1", image="ubuntu:22.04"
     )
 
     timeout = route.calls.last.request.extensions["timeout"]
     assert timeout["read"] == 90.0
-    # Connect, write, and pool budgets stay on the configured general timeout.
     assert timeout["connect"] == 5.0
     assert timeout["write"] == 30.0
     assert timeout["pool"] == 30.0
@@ -203,7 +200,6 @@ async def test_create_vm_keeps_configured_timeout_when_above_floor(respx_mock):
         return_value=httpx.Response(200, content=b'{"vm_name": "sb-1", "ssh_port": 22}'),
     )
 
-    # A configured general read timeout above the floor must not be shortened.
     await ExeAPI(base_url="https://exe.dev", token="token", timeout=120.0).create_vm(
         name="sb-1", image="ubuntu:22.04"
     )
@@ -218,8 +214,7 @@ async def test_ordinary_command_after_create_vm_uses_general_timeout(respx_mock)
         return_value=httpx.Response(200, content=b'{"vm_name": "sb-1", "ssh_port": 22}'),
     )
 
-    # Creation must not mutate the cached client: a later ordinary command on the
-    # same instance still uses the configured general timeout.
+    # Creation must not leak its bigger budget into later commands on the client.
     api = ExeAPI(base_url="https://exe.dev", token="token")
     await api.create_vm(name="sb-1", image="ubuntu:22.04")
     await api.whoami()
