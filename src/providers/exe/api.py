@@ -16,6 +16,12 @@ from .exceptions import (
 )
 from .settings import ExeSettings
 
+# Creating the VM itself is fast, but `new` waits on the setup script, and the
+# tailscale join inside it is slow: ~21s healthy, uncomfortably close to the
+# default 30s budget. Creation alone gets this read floor; a configured timeout
+# above it wins.
+_CREATE_VM_READ_TIMEOUT_FLOOR = 90.0
+
 
 def _encode_setup_script(script: str) -> str:
     """Encode a multi-line script as a double-quoted exe.dev argument value.
@@ -43,6 +49,9 @@ class ExeAPI:
         self.token = token
         self.default_image = default_image
         self.timeout = httpx.Timeout(timeout, connect=connect_timeout)
+        self.create_vm_timeout = httpx.Timeout(
+            timeout, connect=connect_timeout, read=max(timeout, _CREATE_VM_READ_TIMEOUT_FLOOR)
+        )
         self._client: httpx.AsyncClient | None = None
 
     @classmethod
@@ -91,7 +100,7 @@ class ExeAPI:
         if env:
             for key, value in env.items():
                 command_parts.extend(["--env", shlex.quote(f"{key}={value}")])
-        return await self._exec_dict(" ".join(command_parts))
+        return await self._exec_dict(" ".join(command_parts), timeout=self.create_vm_timeout)
 
     async def list_vms(
         self,
@@ -211,19 +220,26 @@ class ExeAPI:
         await self._client.aclose()
         self._client = None
 
-    async def _exec_dict(self, command: str) -> dict[str, Any]:
-        response = await self._request(command)
+    async def _exec_dict(
+        self, command: str, *, timeout: httpx.Timeout | None = None
+    ) -> dict[str, Any]:
+        response = await self._request(command, timeout=timeout)
         payload = self._parse_json_response(response.text)
 
         if not isinstance(payload, dict):
             raise ExeResponseError("exe.dev API returned non-object JSON output")
         return payload
 
-    async def _request(self, command: str) -> httpx.Response:
+    async def _request(
+        self, command: str, *, timeout: httpx.Timeout | None = None
+    ) -> httpx.Response:
         try:
-            response = await self._get_client().post("/exec", content=command)
+            response = await self._get_client().post(
+                "/exec", content=command, timeout=timeout or self.timeout
+            )
         except httpx.RequestError as exc:
-            raise ExeResponseError(f"exe.dev API transport failed: {exc}") from exc
+            # {exc!r}, not {exc}: bare transport errors like ReadTimeout() stringify empty.
+            raise ExeResponseError(f"exe.dev API transport failed: {exc!r}") from exc
 
         if response.status_code == 401:
             raise ExeAuthError("exe.dev API authentication failed")

@@ -164,6 +164,66 @@ async def test_request_sends_authorization_and_text_body(respx_mock):
 
 @pytest.mark.asyncio
 @respx.mock(base_url="https://exe.dev")
+async def test_request_names_exception_type_for_blank_transport_error(respx_mock):
+    read_timeout = httpx.ReadTimeout("")
+    respx_mock.post("/exec").mock(side_effect=read_timeout)
+
+    with pytest.raises(ExeResponseError, match="ReadTimeout") as exc_info:
+        await _api()._request("new --json")
+
+    assert exc_info.value.__cause__ is read_timeout
+
+
+@pytest.mark.asyncio
+@respx.mock(base_url="https://exe.dev")
+async def test_create_vm_raises_read_timeout_floor_when_general_timeout_below(respx_mock):
+    route = respx_mock.post("/exec").mock(
+        return_value=httpx.Response(200, content=b'{"vm_name": "sb-1", "ssh_port": 22}'),
+    )
+
+    # The default 30s timeout sits below the creation floor.
+    await ExeAPI(base_url="https://exe.dev", token="token").create_vm(
+        name="sb-1", image="ubuntu:22.04"
+    )
+
+    timeout = route.calls.last.request.extensions["timeout"]
+    assert timeout["read"] == 90.0
+    assert timeout["connect"] == 5.0
+    assert timeout["write"] == 30.0
+    assert timeout["pool"] == 30.0
+
+
+@pytest.mark.asyncio
+@respx.mock(base_url="https://exe.dev")
+async def test_create_vm_keeps_configured_timeout_when_above_floor(respx_mock):
+    route = respx_mock.post("/exec").mock(
+        return_value=httpx.Response(200, content=b'{"vm_name": "sb-1", "ssh_port": 22}'),
+    )
+
+    await ExeAPI(base_url="https://exe.dev", token="token", timeout=120.0).create_vm(
+        name="sb-1", image="ubuntu:22.04"
+    )
+
+    assert route.calls.last.request.extensions["timeout"]["read"] == 120.0
+
+
+@pytest.mark.asyncio
+@respx.mock(base_url="https://exe.dev")
+async def test_ordinary_command_after_create_vm_uses_general_timeout(respx_mock):
+    route = respx_mock.post("/exec").mock(
+        return_value=httpx.Response(200, content=b'{"vm_name": "sb-1", "ssh_port": 22}'),
+    )
+
+    # Creation must not leak its bigger budget into later commands on the client.
+    api = ExeAPI(base_url="https://exe.dev", token="token")
+    await api.create_vm(name="sb-1", image="ubuntu:22.04")
+    await api.whoami()
+
+    assert route.calls.last.request.extensions["timeout"]["read"] == 30.0
+
+
+@pytest.mark.asyncio
+@respx.mock(base_url="https://exe.dev")
 async def test_delete_vm_uses_rm_json_command(respx_mock):
     route = respx_mock.post("/exec").mock(
         return_value=httpx.Response(200, content=b'{"vm_name": "vm-1"}'),
