@@ -41,14 +41,18 @@ to keep the credential-holding control plane off other interfaces.
 
 ## Choose a provider
 
-Four remote providers are supported and verified end to end: `exe`
-(exe.dev), `aws` (EC2), `hetzner` (Hetzner Cloud), and `exoscale`
-(Exoscale). A fifth, `docker`,
-runs sandboxes as local containers and needs no external account — see
-[Local sandboxes with Docker](#local-sandboxes-with-docker). `DEFAULT_HOST_PROVIDER`
-selects which one serves `POST /hosts` (default `exe`). Set the matching
-provider variables below. The image ships with all provider extras
-installed.
+| Provider | Sandboxes | Where |
+| --- | --- | --- |
+| `exe` | exe.dev VMs | Remote |
+| `aws` | EC2 instances | Remote |
+| `hetzner` | Hetzner Cloud VMs | Remote |
+| `exoscale` | Exoscale VMs | Remote |
+| `docker` | Containers ([Local sandboxes with Docker](#local-sandboxes-with-docker)) | Local, no external account |
+| `docker-sbx` | microVMs ([Local microVMs with Docker Sandboxes](#local-microvms-with-docker-sandboxes)) | Local |
+
+`DEFAULT_HOST_PROVIDER` selects the provider for `POST /hosts` (default
+`exe`). Set the matching provider variables below. The image contains
+all provider extras.
 
 ## Local sandboxes with Docker
 
@@ -99,6 +103,81 @@ Janitor and pool one-off containers using the Docker provider need the
 same socket mount and socket-GID supplemental group. `DOCKER_HOST` remains
 available when the daemon is remote or rootless instead of exposed through
 `/var/run/docker.sock`.
+
+## Local microVMs with Docker Sandboxes
+
+The `docker-sbx` provider runs each sandbox as a
+[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) microVM. Each
+microVM has its own kernel, its own filesystem, and its own Docker
+daemon. The sandboxd network policy controls the egress. This provider
+is local to the drukbox machine, the same as the `docker` provider. It
+does not support Tailscale.
+
+Prepare the host fully before drukbox starts. drukbox only connects to
+the host:
+
+1. Install Docker Engine and `docker-sbx`. Ubuntu 24.04+ with KVM is
+   necessary: `/dev/kvm` must exist, and the service user must be in the
+   `kvm` group.
+2. Sign in one time with `sbx login`. Headless hosts use a device-code
+   flow.
+3. Start the daemon: `sbx daemon start -d --policy balanced`.
+
+Docker documents `sbx` as a tool for the daemon owner's own user on the
+host. Thus the simplest deployment runs drukbox directly on the host, as
+the same user:
+
+```bash
+uv run uvicorn api.app:app --host 127.0.0.1 --port 8780
+```
+
+In this mode, no mounts and no extra variables are necessary. The CLI
+finds the daemon socket automatically, and the `127.0.0.1` default for
+`DOCKER_SBX_ADVERTISE_HOST` is correct.
+
+drukbox can also run as a container adjacent to the daemon. Docker does
+not document this mode; drukbox uses the CLI's own daemon-endpoint
+variable, `DOCKER_SANDBOXES_API`. Mount the daemon socket, the `sbx`
+binary of the host (then the CLI version and the daemon version always
+agree), the CLI auth store, and the workspace root:
+
+```bash
+docker run --rm --network host \
+  --mount type=bind,src=$HOME/.local/state/sandboxes/sandboxes/sandboxd/sandboxd.sock,dst=/run/sandboxd.sock \
+  --mount type=bind,src=$(command -v sbx),dst=/usr/local/bin/sbx,readonly \
+  --mount type=bind,src=$HOME/.config/com.docker.sandboxes,dst=/root/.config/com.docker.sandboxes,readonly \
+  --mount type=bind,src=$HOME/.drukbox/sbx-workspaces,dst=$HOME/.drukbox/sbx-workspaces \
+  --env DOCKER_SANDBOXES_API=unix:///run/sandboxd.sock \
+  --env DOCKER_SBX_WORKSPACE_ROOT=$HOME/.drukbox/sbx-workspaces \
+  --env DOCKER_SBX_ADVERTISE_HOST=172.17.0.1 \
+  --env-file drukbox.env \
+  ghcr.io/czpython/drukbox:latest
+```
+
+The daemon reads workspace paths on its own filesystem. Thus the
+workspace mount must have the same path on the host and in the
+container. The janitor and pool containers need the same mounts and
+variables. `DOCKER_SBX_ADVERTISE_HOST` is the Docker bridge address
+here, because the sandbox SSH ports must be open to the drukbox
+container, not only to the host loopback interface.
+
+Only this machine can connect to the sandboxes. The key for each host
+is the auth boundary. Sandboxes have no `SERVICE_LABEL` tag, because
+`sbx create` has no label option.
+
+The template image (`DOCKER_SBX_DEFAULT_IMAGE`, default
+`ghcr.io/czpython/drukbox/sbx-sandbox:latest`) must start sshd without
+environment variables. `sbx create` sends none. drukbox injects the key
+for each host through the exec channel after the start. Build
+[images/sbx/](../images/sbx/) to change the template. The
+`images/local/` entrypoint needs boot-time environment variables and
+cannot start as a sandbox template.
+
+A sandbox creation takes approximately 20 seconds with a warm template
+cache, and more than 30 seconds at the first pull. Thus a warm pool
+(`POOL_SIZES`) is useful. Each sandbox gets the explicit
+`DOCKER_SBX_CPUS` and `DOCKER_SBX_MEMORY` sizes. Without them,
+the daemon gives one sandbox all host CPUs and half of the host memory.
 
 ## Choose a networking mode
 
@@ -258,3 +337,20 @@ rootless daemon. Drukbox mints a per-VM ed25519 key and publishes sshd on a
 random `127.0.0.1` port. See
 [Local sandboxes with Docker](#local-sandboxes-with-docker) for the
 container command and the trust caveat.
+
+Docker Sandboxes provider:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DOCKER_SBX_DEFAULT_IMAGE` | `ghcr.io/czpython/drukbox/sbx-sandbox:latest` | Template image that contains sshd and starts without environment variables. Build `images/sbx/Dockerfile` to change it. |
+| `DOCKER_SBX_SSH_USERNAME` | `root` | User in the sandbox for caller SSH access. |
+| `DOCKER_SBX_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `30.0` | Time limit for the ssh-keyscan tries on a new sandbox. |
+| `DOCKER_SBX_ADVERTISE_HOST` | `127.0.0.1` | Host address for the published SSH ports. Use the Docker bridge address when drukbox runs in a container. |
+| `DOCKER_SBX_CPUS` | `2` | Number of CPUs for each sandbox. |
+| `DOCKER_SBX_MEMORY` | `2g` | Memory for each sandbox, in binary units. |
+| `DOCKER_SBX_WORKSPACE_ROOT` | `~/.drukbox/sbx-workspaces` | Directory with one temporary workspace for each sandbox. The path must be the same for drukbox and for the daemon. |
+
+The published image does not contain the `sbx` CLI. Mount the binary and
+the auth store of the host, as
+[Local microVMs with Docker Sandboxes](#local-microvms-with-docker-sandboxes)
+shows. Set `DOCKER_SANDBOXES_API` to the mounted daemon socket.

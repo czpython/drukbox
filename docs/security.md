@@ -54,11 +54,11 @@ no rate limiting (see [Resource exhaustion](#resource-exhaustion)).
 How a caller reaches a sandbox, and the tradeoffs of each path, are
 covered in [Networking](networking.md). The security-relevant summary:
 
-- **Per-VM keys.** On AWS (Tailscale off) and Hetzner, drukbox mints a
-  fresh ed25519 keypair per VM, returns the private half **once** in
-  the create response, and never persists it — a later
-  `GET /hosts/{id}` returns `private_key: null`. The key is the auth
-  boundary; password auth is never enabled.
+- **Per-VM keys.** On AWS (Tailscale off), Hetzner, docker, and
+  docker-sbx, drukbox mints a fresh ed25519 keypair per VM, returns
+  the private half **once** in the create response, and never persists
+  it — a later `GET /hosts/{id}` returns `private_key: null`. The key
+  is the auth boundary; password auth is never enabled.
 - **AWS ingress fail-open.** The managed `drukbox-managed` security
   group opens SSH to the detected egress `/32`, or to whatever
   `AWS_SSH_CIDRS` specifies. If egress detection fails and no CIDRs are

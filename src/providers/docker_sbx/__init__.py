@@ -1,0 +1,4 @@
+from providers.docker_sbx.provider import DockerSbxProvider
+from providers.registry import register_vm_provider
+
+register_vm_provider(DockerSbxProvider)

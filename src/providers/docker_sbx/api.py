@@ -1,0 +1,133 @@
+import asyncio
+import json
+import re
+
+from .exceptions import DockerSbxNotFoundError, DockerSbxTransportError
+
+# The first `sbx create` can pull a large template. The time limit is large
+# because it must stop only a blocked daemon, not a slow pull.
+_SBX_TIMEOUT_SECONDS = 600.0
+
+# Only the CLI message for a missing sandbox is a not-found error. Messages
+# such as "credentials not found" must stay transport errors. If not,
+# delete_vm can identify a live sandbox as removed.
+_SANDBOX_NOT_FOUND_RE = re.compile(r"sandbox '[^']*' not found")
+
+
+class SbxCLI:
+    """Thin async wrapper for the local ``sbx`` command-line interface.
+
+    Each method starts ``sbx`` with ``create_subprocess_exec``. Thus the
+    subprocess boundary stays in one place. The CLI selects the daemon: the
+    user socket by default, or the socket that ``DOCKER_SANDBOXES_API`` gives
+    when drukbox runs in a container.
+    """
+
+    async def create_sandbox(
+        self,
+        *,
+        name: str,
+        template: str,
+        workspace: str,
+        cpus: int,
+        memory: str,
+    ) -> None:
+        # The `shell` agent makes the sandbox start the template entrypoint,
+        # not an AI agent. The sizes are always explicit. Without them, the
+        # daemon gives one sandbox all host CPUs and half of the host memory.
+        await self._run(
+            "create",
+            "--name",
+            name,
+            "--template",
+            template,
+            "--cpus",
+            str(cpus),
+            "--memory",
+            memory,
+            "--quiet",
+            "shell",
+            workspace,
+        )
+
+    async def run_bootstrap(self, name: str, script: str) -> None:
+        # The script contains caller environment values. All processes can
+        # read argv through /proc. Thus the script goes through stdin, not
+        # argv. `bash -s` reads the program from stdin.
+        await self._run(
+            "exec",
+            "--interactive",
+            "--user",
+            "root",
+            name,
+            "bash",
+            "-s",
+            stdin=script,
+        )
+
+    async def publish_ssh_port(self, name: str, *, host_ip: str) -> int:
+        # An empty host port tells the daemon to select a free port. Thus
+        # sandboxes do not compete for port numbers. An IPv6 address must have
+        # brackets in the port specification.
+        spec_host = f"[{host_ip}]" if ":" in host_ip else host_ip
+        output = await self._run("ports", name, "--publish", f"{spec_host}::22")
+        # Each binding shows as "<host_ip>:<port> -> 22/tcp". The output can
+        # have one line for each address family. The lines share the host port.
+        for line in output.splitlines():
+            binding, arrow, target = line.partition("->")
+            if arrow and target.strip().startswith("22/"):
+                try:
+                    return int(binding.strip().rsplit(":", 1)[1])
+                except (IndexError, ValueError) as error:
+                    raise DockerSbxTransportError(
+                        f"sandbox {name!r} published an unparsable SSH port: {line.strip()!r}"
+                    ) from error
+        raise DockerSbxTransportError(f"sandbox {name!r} published no SSH port")
+
+    async def remove_sandbox(self, name: str) -> None:
+        # The --force flag stops the confirmation prompt. It also removes a
+        # sandbox that has an open SSH session.
+        await self._run("rm", "--force", name)
+
+    async def sandbox_count(self) -> int:
+        output = await self._run("ls", "--json")
+        try:
+            payload = json.loads(output)
+            # Go writes an empty list as null. An unused daemon shows null.
+            return len(payload["sandboxes"] or [])
+        except (json.JSONDecodeError, KeyError, TypeError) as error:
+            raise DockerSbxTransportError(
+                f"sbx ls returned an unreadable sandbox list: {output.strip()!r}"
+            ) from error
+
+    async def _run(self, *args: str, stdin: str | None = None) -> str:
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "sbx",
+                *args,
+                stdin=asyncio.subprocess.PIPE if stdin else asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except OSError as error:
+            # The binary can be missing (FileNotFoundError) or not executable
+            # (PermissionError). Translate each OSError type. A raw OSError
+            # must not go out of the provider boundary.
+            raise DockerSbxTransportError(f"sbx CLI could not be started: {error}") from error
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(stdin.encode() if stdin else None),
+                timeout=_SBX_TIMEOUT_SECONDS,
+            )
+        except TimeoutError as error:
+            process.kill()
+            await process.wait()
+            raise DockerSbxTransportError(
+                f"sbx {args[0]} did not finish within {_SBX_TIMEOUT_SECONDS:.0f}s"
+            ) from error
+        if process.returncode != 0:
+            detail = stderr.decode().strip() or f"sbx {args[0]} exited {process.returncode}"
+            if _SANDBOX_NOT_FOUND_RE.search(detail):
+                raise DockerSbxNotFoundError(detail)
+            raise DockerSbxTransportError(detail)
+        return stdout.decode()
