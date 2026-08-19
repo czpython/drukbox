@@ -26,6 +26,8 @@ documented in this repo.
 ## Before Editing
 
 - Read this file and the relevant source before changing behavior.
+- The checklist and craft gate every change is held to:
+  `.druks/review/checklist.md`.
 - `docs/` holds the conceptual and operational docs. Update them when behavior
   they describe changes.
 - For Python code, tests, or tooling changes, follow the style and verification
