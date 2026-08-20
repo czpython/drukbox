@@ -14,7 +14,7 @@ from http_proxies.schemas import (
 )
 from http_proxies.service import HTTPProxyService
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/http-proxies", tags=["http-proxies"])
 

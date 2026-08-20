@@ -12,7 +12,7 @@ from hosts.models import Host, HostStatus
 from hosts.service import HostService, utc_now
 from networking.tailscale import Tailscale
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # Bail out after this many consecutive create failures (broker outage scenario)
 # rather than logging the same failure once per deficit slot per tick.
@@ -128,9 +128,9 @@ async def _maintain(
                 consecutive_failures = 0
         except Exception:
             consecutive_failures += 1
-            log.exception("pool: failed to create pool host provider=%s", provider)
+            logger.exception("pool: failed to create pool host provider=%s", provider)
             if consecutive_failures >= _MAX_CONSECUTIVE_CREATE_FAILURES:
-                log.error(
+                logger.error(
                     "pool: aborting top-up after %d consecutive failures",
                     consecutive_failures,
                 )
@@ -144,10 +144,10 @@ async def _maintain(
                 if await service.delete_host(host_id, pool_shed=True):
                     removed_excess += 1
         except Exception:
-            log.exception("pool: failed to shed excess pool host_id=%s", host_id)
+            logger.exception("pool: failed to shed excess pool host_id=%s", host_id)
 
     if created or removed_excess:
-        log.info(
+        logger.info(
             "pool: maintained (created=%d, removed_excess=%d, targets=%s)",
             created,
             removed_excess,

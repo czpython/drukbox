@@ -10,7 +10,7 @@ from hosts.models import Host
 from hosts.service import HostService, utc_now
 from networking.tailscale import Tailscale
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 async def reap_expired_hosts() -> list[uuid.UUID]:
@@ -48,13 +48,13 @@ async def reap_expired_hosts() -> list[uuid.UUID]:
                 # Another janitor cycle, or an explicit DELETE, already removed it.
                 continue
             except Exception:
-                log.exception("janitor: failed to reap expired host: host_id=%s", host_id)
+                logger.exception("janitor: failed to reap expired host: host_id=%s", host_id)
                 continue
             else:
                 if not deleted:
                     # Renewed between selection and the locked delete — spared.
                     continue
-                log.info("janitor: reaped expired host: host_id=%s", host_id)
+                logger.info("janitor: reaped expired host: host_id=%s", host_id)
                 reaped.append(host_id)
     finally:
         if tailscale is not None:

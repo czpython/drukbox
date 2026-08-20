@@ -14,6 +14,7 @@ from providers.ssh_keys import generate_ed25519_keypair
 
 from .api import SbxCLI
 from .exceptions import DockerSbxNotFoundError, DockerSbxProviderError
+from .process import SbxExecProcess
 from .settings import DockerSbxSettings
 
 # The /etc/environment format has one entry on each line. A NUL or a newline
@@ -44,9 +45,9 @@ def _bootstrap_script(*, public_key: str, env: dict[str, str], ssh_username: str
 class DockerSbxProvider(VMProvider):
     name: ClassVar[str] = "docker-sbx"
     diagnose_hint: ClassVar[str] = "check_sandboxd_is_running_and_logged_in"
-    # A local microVM cannot connect to the tailnet: the host proxies all
-    # sandbox egress, and the template has no init system. These hosts keep
-    # the published sshd port, also on a tailnet-mode service.
+    # Sandboxes have no dialable sshd; the gateway serves them, and there is
+    # no path onto the tailnet.
+    gateway_process_class = SbxExecProcess
     supports_tailnet: ClassVar[bool] = False
     # Each sbx invocation spends approximately 3 seconds on CLI startup work
     # before the command runs. The default 5-second probe budget fails on a
@@ -129,32 +130,27 @@ class DockerSbxProvider(VMProvider):
 
         try:
             # The template starts sshd with an empty authorized_keys file. The
-            # sandbox accepts SSH only after this key is in the file. sshd
-            # reads the file for each authentication; a restart is not
-            # necessary.
+            # sandbox accepts SSH only after this key is in the file.
             script = _bootstrap_script(
                 public_key=public_key,
                 env=caller_env,
                 ssh_username=self.settings.ssh_username,
             )
             await self.api.run_bootstrap(name, script)
-            ssh_port = await self.api.publish_ssh_port(name)
         except DockerSbxProviderError as exc:
             with contextlib.suppress(DockerSbxProviderError):
                 await self.api.remove_sandbox(name)
             self._remove_workspace(name)
             raise ProviderTransportError(str(exc)) from exc
 
-        # The daemon publishes sandbox ports on the host loopback interface
-        # only, the same as the docker provider. A drukbox container reaches
-        # them through host networking.
+        # A sandbox has no reachable address of its own: callers arrive
+        # through the gateway, and the service fills the coordinates in.
         return VMCreateResult(
             provider_id=name,
             name=name,
-            ssh_port=ssh_port,
-            ssh_host="127.0.0.1",
             ssh_username=self.settings.ssh_username,
             private_key=private_key,
+            public_key=public_key,
         )
 
     async def delete_vm(self, name: str) -> None:

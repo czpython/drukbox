@@ -70,50 +70,6 @@ async def test_run_bootstrap_feeds_the_script_over_stdin_never_argv(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_publish_ssh_port_asks_for_an_ephemeral_port_and_parses_the_binding(monkeypatch):
-    captured: dict = {}
-
-    async def fake_exec(*args, **kwargs):
-        captured["args"] = args
-        return _process(stdout=b"Published 172.17.0.1:49160 -> 22/tcp\n")
-
-    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", fake_exec)
-
-    port = await SbxCLI().publish_ssh_port("sb-test")
-
-    assert port == 49160
-    # A bare sandbox port tells the daemon to select a free loopback port.
-    assert captured["args"][-2:] == ("--publish", "22")
-
-
-@pytest.mark.asyncio
-async def test_publish_ssh_port_picks_the_ssh_binding_out_of_a_multi_line_listing(monkeypatch):
-    listing = b"Published 127.0.0.1:8080 -> 80/tcp\nPublished 127.0.0.1:49161 -> 22/tcp\n"
-    create = AsyncMock(return_value=_process(stdout=listing))
-    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", create)
-
-    assert await SbxCLI().publish_ssh_port("sb-test") == 49161
-
-
-@pytest.mark.asyncio
-async def test_publish_ssh_port_raises_when_nothing_was_published(monkeypatch):
-    create = AsyncMock(return_value=_process(stdout=b"\n"))
-    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", create)
-
-    with pytest.raises(DockerSbxTransportError, match="no SSH port"):
-        await SbxCLI().publish_ssh_port("sb-test")
-
-
-@pytest.mark.asyncio
-async def test_publish_ssh_port_raises_on_unparsable_output(monkeypatch):
-    create = AsyncMock(return_value=_process(stdout=b"Published 172.17.0.1:notaport -> 22/tcp\n"))
-    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", create)
-
-    with pytest.raises(DockerSbxTransportError, match="unparsable"):
-        await SbxCLI().publish_ssh_port("sb-test")
-
-
-@pytest.mark.asyncio
 async def test_sandbox_count_reads_the_listing(monkeypatch):
     listing = b'{"sandboxes": [{"name": "sb-a"}, {"name": "sb-b"}]}'
     create = AsyncMock(return_value=_process(stdout=listing))

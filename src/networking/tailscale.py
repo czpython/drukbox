@@ -11,7 +11,7 @@ import httpx
 
 from .tailscale_settings import TailscaleSettings
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class NetworkError(RuntimeError):
@@ -314,7 +314,7 @@ class _DeviceWaiter:
             except Exception as exc:
                 # Transient transport/listing errors: log and retry within the
                 # caller's timeout budget.
-                log.warning("tailscale list_devices failed: %s", exc)
+                logger.warning("tailscale list_devices failed: %s", exc)
             else:
                 # The set_result loop is sync — no awaits between checking
                 # `not fut.done()` and resolving, so a concurrent timeout
