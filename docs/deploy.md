@@ -155,13 +155,12 @@ docker run --rm --network host \
 The daemon reads workspace paths on its own filesystem. Thus the
 workspace mount must have the same path on the host and in the
 container. The janitor and pool containers need the same mounts and
-variables. Host networking is necessary: the daemon publishes sandbox
-SSH ports on the host loopback interface only, and drukbox returns
-`127.0.0.1` addresses, the same as the `docker` provider.
+variables.
 
-Only this machine can connect to the sandboxes. The key for each host
-is the auth boundary. Sandboxes have no `SERVICE_LABEL` tag, because
-`sbx create` has no label option.
+Callers reach the sandboxes through
+[the SSH gateway](#the-ssh-gateway); the provider requires it. The key
+for each host is the auth boundary. Sandboxes have no `SERVICE_LABEL`
+tag, because `sbx create` has no label option.
 
 The template image (`DOCKER_SBX_DEFAULT_IMAGE`, default
 `ghcr.io/czpython/drukbox/sbx-sandbox:latest`) must start sshd without
@@ -186,6 +185,50 @@ cache, and more than 30 seconds at the first pull. Thus a warm pool
 (`POOL_SIZES`) is useful. Each sandbox gets the explicit
 `DOCKER_SBX_CPUS` and `DOCKER_SBX_MEMORY` sizes. Without them,
 the daemon gives one sandbox all host CPUs and half of the host memory.
+
+## The SSH gateway
+
+The gateway gives remote callers SSH access to the hosts of gateway
+providers such as `docker-sbx`, whose sandboxes have no dialable sshd
+of their own. Callers connect with normal SSH:
+
+```bash
+ssh -p 2222 -i <private-key> <host-name>@<gateway-address>
+```
+
+The gateway authenticates the key against the host's stored public key,
+and the username must name the same host. It then opens a session
+through the provider — `sbx exec` for `docker-sbx`. The daemon stops an
+idle sandbox; a connection through the gateway wakes it (approximately
+6 seconds) and keeps it awake while connected. The first data can
+therefore come after a short delay.
+
+The gateway serves an interactive shell and command execution. It
+refuses SFTP, scp, and port forwarding.
+
+The gateway is a requirement for gateway providers: `POST /hosts` for
+`docker-sbx` fails without `GATEWAY_SSH_HOST`. Set it to the address
+callers use. The response then carries the gateway coordinates:
+`external_ssh_host` is the gateway, `external_ssh_port` is the gateway
+port, and `ssh_username` is the host name. `known_hosts` carries the
+gateway's host key. Hosts of the other providers are not affected.
+
+Run the gateway on the machine that runs sandboxd, as the same user, and
+run the migrations first:
+
+```bash
+uv run python -m gateway.server
+```
+
+A systemd unit follows the same pattern as the API service. The gateway
+reads the same `drukbox.env` and connects to the same database.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `GATEWAY_SSH_HOST` | — (required) | Address of the gateway. Gateway-provider hosts advertise it; creation fails without it. |
+| `GATEWAY_SSH_PORT` | `2222` | Port the gateway listens on and advertises. |
+| `GATEWAY_BIND_HOST` | `0.0.0.0` | Interface the gateway server binds. |
+| `GATEWAY_HOST_KEY_PATH` | `~/.drukbox/gateway_host_key` | Private host key. The server makes one at start when the file does not exist. |
 
 ## Choose a networking mode
 

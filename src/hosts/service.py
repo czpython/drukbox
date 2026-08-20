@@ -14,6 +14,7 @@ from uuid6 import uuid7
 from core.database import async_session_factory
 from core.exceptions import ResourceNotFoundError
 from core.settings import Settings, get_settings
+from gateway.settings import GatewaySettings
 from hosts.exceptions import HostStateError, ProvisioningFailedError
 from hosts.models import Host, HostStatus, IdempotencyKey
 from networking.tailscale import (
@@ -30,7 +31,7 @@ from providers.exceptions import (
 )
 from providers.registry import get_provider_names, get_vm_provider
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 _SANDBOX_BOOTSTRAP_SCRIPT = (
     pathlib.Path(__file__).resolve().parent / "scripts" / "sandbox_bootstrap.sh"
@@ -135,7 +136,7 @@ class HostService:
             )
 
         if idempotency_key and not await self._record_idempotency_key(idempotency_key, host):
-            log.info(
+            logger.info(
                 "idempotency: lost race on key=%s host_id=%s claimed_at=%s",
                 idempotency_key,
                 host.id,
@@ -190,7 +191,7 @@ class HostService:
         if not host:
             # Lost the race to another claimant; let the caller fall through.
             return
-        log.info("pool: claimed host_id=%s name=%s", host.id, host.name)
+        logger.info("pool: claimed host_id=%s name=%s", host.id, host.name)
         return host
 
     async def create_host(
@@ -329,14 +330,14 @@ class HostService:
                 fresh.claimed_at = None
                 fresh.expires_at = now + timedelta(hours=self.settings.pool_host_max_age_hours)
                 fresh.updated_at = now
-                log.info(
+                logger.info(
                     "idempotency: returned pool host_id=%s to pool after lost race",
                     fresh.id,
                 )
             else:
                 fresh.expires_at = now
                 fresh.updated_at = now
-                log.info(
+                logger.info(
                     "idempotency: marked host_id=%s for janitor reaping after lost race",
                     fresh.id,
                 )
@@ -421,7 +422,7 @@ class HostService:
                 # it, or a previous delete partially succeeded. Treat as done
                 # so we can clean up the DB row, but log so unexpected
                 # evictions are visible.
-                log.warning(
+                logger.warning(
                     "host VM already absent at provider during teardown: "
                     "host_id=%s name=%s provider=%s",
                     host.id,
@@ -465,8 +466,21 @@ class HostService:
         host.updated_at = utc_now()
         await self.session.commit()
 
+        vm = get_vm_provider(host.provider)
+        gateway = GatewaySettings()
+        if vm.gateway_process_class and not gateway.ssh_host:
+            # A gateway-provider host is reachable only through the gateway;
+            # provisioning one without an address would hand out dead
+            # coordinates.
+            await self.mark_failed(
+                host,
+                ProvisioningFailedError(
+                    f"provider {vm.name!r} requires the SSH gateway; set GATEWAY_SSH_HOST"
+                ),
+            )
+            return
         try:
-            vm_result = await get_vm_provider(host.provider).create_vm(
+            vm_result = await vm.create_vm(
                 name=host.name,
                 image=host.image,
                 env=environment,
@@ -482,6 +496,13 @@ class HostService:
         host.external_ssh_host = vm_result.ssh_host
         host.external_ssh_port = vm_result.ssh_port
         host.ssh_username = vm_result.ssh_username
+        host.public_key = vm_result.public_key or ""
+        if vm.gateway_process_class:
+            # The gateway is the SSH path for hosts of a gateway provider.
+            # The username names the host; the per-host key is the credential.
+            host.external_ssh_host = gateway.ssh_host
+            host.external_ssh_port = gateway.ssh_port
+            host.ssh_username = host.name
         # Stamp the per-VM key onto this instance so the POST response
         # carries it. There's no column behind `private_key`, so a later
         # GET that loads a fresh row sees the class default (None) and
@@ -520,7 +541,7 @@ class HostService:
         await self.session.commit()
 
     async def mark_failed(self, host: Host, exc: Exception) -> None:
-        log.exception(
+        logger.exception(
             "sandbox host failed: host_id=%s host_name=%s status=%s",
             host.id,
             host.name,

@@ -25,14 +25,13 @@ def _api_mock() -> MagicMock:
     api = MagicMock()
     api.create_sandbox = AsyncMock()
     api.run_bootstrap = AsyncMock()
-    api.publish_ssh_port = AsyncMock(return_value=49160)
     api.remove_sandbox = AsyncMock()
     api.sandbox_count = AsyncMock(return_value=2)
     return api
 
 
 @pytest.mark.asyncio
-async def test_create_vm_creates_a_sized_sandbox_and_returns_published_coords(tmp_path):
+async def test_create_vm_creates_a_sized_sandbox_and_returns_key_material(tmp_path):
     api = _api_mock()
     provider = DockerSbxProvider(api, _settings(tmp_path, cpus=4, memory="8g"))
 
@@ -48,12 +47,15 @@ async def test_create_vm_creates_a_sized_sandbox_and_returns_published_coords(tm
     assert create_kwargs["workspace"] == str(tmp_path / "sb-test")
     assert (tmp_path / "sb-test").is_dir()
 
-    api.publish_ssh_port.assert_awaited_once_with("sb-test")
-    assert result.ssh_host == "127.0.0.1"
-    assert result.ssh_port == 49160
+    # The sandbox has no reachable address of its own; the service fills
+    # the gateway coordinates in.
+    assert result.ssh_host == ""
+    assert result.ssh_port == 0
     assert result.ssh_username == "root"
     assert result.private_key is not None
     assert "-----BEGIN OPENSSH PRIVATE KEY-----" in result.private_key
+    assert result.public_key is not None
+    assert result.public_key.startswith("ssh-ed25519 ")
 
 
 @pytest.mark.asyncio
@@ -138,29 +140,18 @@ async def test_create_vm_translates_an_unwritable_workspace_root(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_create_vm_tears_down_sandbox_and_workspace_when_publishing_fails(tmp_path):
+async def test_create_vm_tears_down_after_a_failed_bootstrap_and_keeps_the_first_error(tmp_path):
+    # The cleanup of the sandbox can itself fail. The caller must get the
+    # first error, and the workspace must still go.
     api = _api_mock()
-    api.publish_ssh_port.side_effect = DockerSbxTransportError("no port")
-    provider = DockerSbxProvider(api, _settings(tmp_path))
-
-    with pytest.raises(ProviderTransportError):
-        await provider.create_vm(name="sb-test", image="img", env={})
-    api.remove_sandbox.assert_awaited_once_with("sb-test")
-    assert not (tmp_path / "sb-test").exists()
-
-
-@pytest.mark.asyncio
-async def test_create_vm_publish_error_survives_failed_cleanup(tmp_path):
-    # The cleanup of the sandbox can also fail. The caller must get the
-    # first error, not the cleanup error.
-    api = _api_mock()
-    api.publish_ssh_port.side_effect = DockerSbxTransportError("no port")
+    api.run_bootstrap.side_effect = DockerSbxTransportError("exec failed")
     api.remove_sandbox.side_effect = DockerSbxTransportError("cleanup failed")
     provider = DockerSbxProvider(api, _settings(tmp_path))
 
-    with pytest.raises(ProviderTransportError, match="no port"):
+    with pytest.raises(ProviderTransportError, match="exec failed"):
         await provider.create_vm(name="sb-test", image="img", env={})
     api.remove_sandbox.assert_awaited_once_with("sb-test")
+    assert not (tmp_path / "sb-test").exists()
 
 
 @pytest.mark.asyncio

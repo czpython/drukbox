@@ -14,7 +14,7 @@ from hosts.service import HostService
 from networking.tailscale import NetworkError
 from providers.exceptions import ProviderError, UnknownProviderError, UnsupportedSizingError
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/hosts", tags=["hosts"])
 
@@ -63,7 +63,7 @@ async def create_host(
     except (UnknownProviderError, UnsupportedSizingError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except SQLAlchemyError as exc:
-        log.exception("unexpected database error during host provisioning")
+        logger.exception("unexpected database error during host provisioning")
         raise HTTPException(
             status_code=503,
             detail="host provisioning could not be completed",
@@ -113,9 +113,9 @@ async def delete_host(host_id: uuid.UUID, service: HostServiceDep) -> Response:
     try:
         await service.delete_host(host_id)
     except (ProviderError, NetworkError) as exc:
-        log.exception("unexpected error deleting sandbox host")
+        logger.exception("unexpected error deleting sandbox host")
         raise HostTeardownError("host teardown could not be completed") from exc
     except SQLAlchemyError as exc:
-        log.exception("unexpected database error during host teardown")
+        logger.exception("unexpected database error during host teardown")
         raise HostTeardownError("host teardown could not be completed") from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)

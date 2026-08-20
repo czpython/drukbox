@@ -1,20 +1,75 @@
 import abc
 from dataclasses import dataclass
-from typing import ClassVar, Self
+from typing import ClassVar, NamedTuple, Self
 
 
 @dataclass(frozen=True)
 class VMCreateResult:
     provider_id: str
     name: str
-    ssh_port: int
     ssh_username: str
+    # Unset ssh_host/ssh_port mean the VM has no directly dialable address.
     ssh_host: str = ""
+    ssh_port: int = 0
     private_key: str | None = None
+    # The public half of a per-VM keypair. The service stores it so the SSH
+    # gateway can authenticate callers of gateway providers.
+    public_key: str | None = None
+
+
+class TerminalSize(NamedTuple):
+    columns: int
+    rows: int
+
+    def __str__(self):
+        return f"{self.columns}x{self.rows}"
+
+
+class SandboxProcess(abc.ABC):
+    """One live process inside a sandbox. The gateway pumps bytes between an
+    SSH channel and this object; the receive methods return b"" at the end."""
+
+    @classmethod
+    @abc.abstractmethod
+    async def open(
+        cls,
+        name: str,
+        *,
+        command: str | None,
+        terminal: TerminalSize | None,
+    ) -> "SandboxProcess":
+        """Open a process in the sandbox: a shell when command is None, with
+        a PTY when terminal is not None. Raises neutral provider errors."""
+        ...  # pragma: no cover
+
+    @abc.abstractmethod
+    async def receive(self, max_bytes: int) -> bytes: ...  # pragma: no cover
+
+    @abc.abstractmethod
+    async def receive_stderr(self, max_bytes: int) -> bytes: ...  # pragma: no cover
+
+    @abc.abstractmethod
+    def send(self, data: bytes) -> None: ...  # pragma: no cover
+
+    @abc.abstractmethod
+    def send_eof(self) -> None: ...  # pragma: no cover
+
+    @abc.abstractmethod
+    def resize(self, size: TerminalSize) -> None: ...  # pragma: no cover
+
+    @abc.abstractmethod
+    async def wait(self) -> int: ...  # pragma: no cover
+
+    @abc.abstractmethod
+    async def aclose(self) -> None: ...  # pragma: no cover
 
 
 class VMProvider(abc.ABC):
     name: ClassVar[str]
+    # The process class that serves this provider's hosts through the SSH
+    # gateway. None means the hosts have their own dialable sshd and the
+    # gateway plays no part.
+    gateway_process_class: ClassVar[type[SandboxProcess] | None] = None
     # Remediation slug attached to a failed /doctor probe. Owned here because
     # the provider is what knows how its own dependency gets fixed.
     diagnose_hint: ClassVar[str]

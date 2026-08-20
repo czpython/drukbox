@@ -65,25 +65,6 @@ class SbxCLI:
             stdin=script,
         )
 
-    async def publish_ssh_port(self, name: str) -> int:
-        # A bare sandbox port tells the daemon to select a free host port on
-        # the loopback interface. Thus sandboxes do not compete for port
-        # numbers. The daemon cannot select a free port on an explicit
-        # address: it rejects "IP::22" and port 0.
-        output = await self._run("ports", name, "--publish", "22")
-        # Each binding shows as "<host_ip>:<port> -> 22/tcp". The output can
-        # have one line for each address family. The lines share the host port.
-        for line in output.splitlines():
-            binding, arrow, target = line.partition("->")
-            if arrow and target.strip().startswith("22/"):
-                try:
-                    return int(binding.strip().rsplit(":", 1)[1])
-                except (IndexError, ValueError) as error:
-                    raise DockerSbxTransportError(
-                        f"sandbox {name!r} published an unparsable SSH port: {line.strip()!r}"
-                    ) from error
-        raise DockerSbxTransportError(f"sandbox {name!r} published no SSH port")
-
     async def remove_sandbox(self, name: str) -> None:
         # The --force flag stops the confirmation prompt. It also removes a
         # sandbox that has an open SSH session.

@@ -87,6 +87,9 @@ class Host(Base):
     external_ssh_host: Mapped[str] = mapped_column(Text, default="")
     external_ssh_port: Mapped[int] = mapped_column(default=22)
     ssh_username: Mapped[str] = mapped_column(Text, default="")
+    # The public half of the per-host keypair. The gateway authenticates
+    # callers against it. The private half is returned once and never stored.
+    public_key: Mapped[str] = mapped_column(Text, default="")
     internal_ssh_host: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     known_hosts: Mapped[str] = mapped_column(Text, default="")
     tailscale_device_id: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)

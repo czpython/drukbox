@@ -7,6 +7,7 @@ packages = [
     "src/api",
     "src/core",
     "src/diagnostics",
+    "src/gateway",
     "src/hosts",
     "src/http_proxies",
     "src/networking",
@@ -50,6 +51,7 @@ classifiers = [
 dependencies = [
     "aiosqlite>=0.20",
     "alembic>=1.14",
+    "asyncssh>=2.14",
     "cryptography>=43",
     "fastapi>=0.115",
     "greenlet>=3.0",

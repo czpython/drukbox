@@ -15,6 +15,7 @@ It owns:
   local Docker, Docker Sandboxes)
 - Tailscale auth key creation, device discovery, and cleanup
 - SSH host key scanning and `known_hosts` material
+- An SSH gateway for hosts of gateway providers (`python -m gateway.server`)
 - Account-bound exe.dev HTTP proxy resources
 
 Periodic maintenance runs as cron jobs: `python -m hosts.janitor` reaps
@@ -44,6 +45,7 @@ src/
   api/               # FastAPI app and global handlers
   core/              # Settings, database, exception base
   hosts/             # Host API, models, schemas, service, janitor, pool, auth
+  gateway/           # SSH gateway for gateway-provider hosts
   http_proxies/      # HTTP proxy API, schemas, service, deps
   providers/         # VM provider ABC, capabilities, registry, adapters
   networking/        # Network provider framework and Tailscale adapter
