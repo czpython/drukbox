@@ -132,8 +132,7 @@ uv run uvicorn api.app:app --host 127.0.0.1 --port 8780
 ```
 
 In this mode, no mounts and no extra variables are necessary. The CLI
-finds the daemon socket automatically, and the `127.0.0.1` default for
-`DOCKER_SBX_ADVERTISE_HOST` is correct.
+finds the daemon socket automatically.
 
 drukbox can also run as a container adjacent to the daemon. Docker does
 not document this mode; drukbox uses the CLI's own daemon-endpoint
@@ -149,7 +148,6 @@ docker run --rm --network host \
   --mount type=bind,src=$HOME/.drukbox/sbx-workspaces,dst=$HOME/.drukbox/sbx-workspaces \
   --env DOCKER_SANDBOXES_API=unix:///run/sandboxd.sock \
   --env DOCKER_SBX_WORKSPACE_ROOT=$HOME/.drukbox/sbx-workspaces \
-  --env DOCKER_SBX_ADVERTISE_HOST=172.17.0.1 \
   --env-file drukbox.env \
   ghcr.io/czpython/drukbox:latest
 ```
@@ -157,9 +155,9 @@ docker run --rm --network host \
 The daemon reads workspace paths on its own filesystem. Thus the
 workspace mount must have the same path on the host and in the
 container. The janitor and pool containers need the same mounts and
-variables. `DOCKER_SBX_ADVERTISE_HOST` is the Docker bridge address
-here, because the sandbox SSH ports must be open to the drukbox
-container, not only to the host loopback interface.
+variables. Host networking is necessary: the daemon publishes sandbox
+SSH ports on the host loopback interface only, and drukbox returns
+`127.0.0.1` addresses, the same as the `docker` provider.
 
 Only this machine can connect to the sandboxes. The key for each host
 is the auth boundary. Sandboxes have no `SERVICE_LABEL` tag, because
@@ -172,6 +170,16 @@ for each host through the exec channel after the start. Build
 [images/sbx/](../images/sbx/) to change the template. The
 `images/local/` entrypoint needs boot-time environment variables and
 cannot start as a sandbox template.
+
+The daemon has its own image store and does not read local Docker
+images. It pulls unknown template names from a registry. For a local
+template, load the image into the daemon:
+
+```bash
+docker build -t drukbox/sbx-sandbox:latest images/sbx/
+docker save drukbox/sbx-sandbox:latest -o /tmp/sbx-sandbox.tar
+sbx template load /tmp/sbx-sandbox.tar
+```
 
 A sandbox creation takes approximately 20 seconds with a warm template
 cache, and more than 30 seconds at the first pull. Thus a warm pool
@@ -345,7 +353,6 @@ Docker Sandboxes provider:
 | `DOCKER_SBX_DEFAULT_IMAGE` | `ghcr.io/czpython/drukbox/sbx-sandbox:latest` | Template image that contains sshd and starts without environment variables. Build `images/sbx/Dockerfile` to change it. |
 | `DOCKER_SBX_SSH_USERNAME` | `root` | User in the sandbox for caller SSH access. |
 | `DOCKER_SBX_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `30.0` | Time limit for the ssh-keyscan tries on a new sandbox. |
-| `DOCKER_SBX_ADVERTISE_HOST` | `127.0.0.1` | Host address for the published SSH ports. Use the Docker bridge address when drukbox runs in a container. |
 | `DOCKER_SBX_CPUS` | `2` | Number of CPUs for each sandbox. |
 | `DOCKER_SBX_MEMORY` | `2g` | Memory for each sandbox, in binary units. |
 | `DOCKER_SBX_WORKSPACE_ROOT` | `~/.drukbox/sbx-workspaces` | Directory with one temporary workspace for each sandbox. The path must be the same for drukbox and for the daemon. |

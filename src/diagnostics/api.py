@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_session
 from core.settings import get_settings
-from diagnostics.checks import Check, CheckStatus, run_check
+from diagnostics.checks import DEFAULT_CHECK_TIMEOUT_SECONDS, Check, CheckStatus, run_check
 from hosts.auth import require_service_auth
 from networking.tailscale import Tailscale
 from providers.registry import get_default_vm_provider
@@ -42,13 +42,16 @@ async def doctor(
 ) -> DoctorOut:
     settings = get_settings()
     try:
-        provider_hint = get_default_vm_provider().diagnose_hint
+        provider = get_default_vm_provider()
+        provider_hint = provider.diagnose_hint
+        provider_timeout = provider.diagnose_timeout_seconds
     except Exception:
         # The provider can't even be constructed (bad config / missing dep). Use a
         # generic hint; the probe below re-resolves it so the construction error
         # surfaces as a failed check instead of a 500 — diagnosing exactly this is
         # the point of /doctor.
         provider_hint = "check_provider_configuration"
+        provider_timeout = DEFAULT_CHECK_TIMEOUT_SECONDS
 
     async def _provider_probe() -> str:
         return await get_default_vm_provider().diagnose()
@@ -68,7 +71,7 @@ async def doctor(
             run_check("db", lambda: _ping_db(session), hint="check_database_url_and_engine"),
         ),
         asyncio.ensure_future(
-            run_check("provider", _provider_probe, hint=provider_hint),
+            run_check("provider", _provider_probe, hint=provider_hint, timeout=provider_timeout),
         ),
     ]
     if settings.tailscale_enabled:

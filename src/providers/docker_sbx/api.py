@@ -65,12 +65,12 @@ class SbxCLI:
             stdin=script,
         )
 
-    async def publish_ssh_port(self, name: str, *, host_ip: str) -> int:
-        # An empty host port tells the daemon to select a free port. Thus
-        # sandboxes do not compete for port numbers. An IPv6 address must have
-        # brackets in the port specification.
-        spec_host = f"[{host_ip}]" if ":" in host_ip else host_ip
-        output = await self._run("ports", name, "--publish", f"{spec_host}::22")
+    async def publish_ssh_port(self, name: str) -> int:
+        # A bare sandbox port tells the daemon to select a free host port on
+        # the loopback interface. Thus sandboxes do not compete for port
+        # numbers. The daemon cannot select a free port on an explicit
+        # address: it rejects "IP::22" and port 0.
+        output = await self._run("ports", name, "--publish", "22")
         # Each binding shows as "<host_ip>:<port> -> 22/tcp". The output can
         # have one line for each address family. The lines share the host port.
         for line in output.splitlines():
