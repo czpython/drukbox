@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -153,6 +154,8 @@ async def test_doctor_runs_db_probe_against_real_session(client) -> None:
     """The db row round-trips through the test DB, not a mock."""
     fake_provider = MagicMock()
     fake_provider.name = "exe"
+    fake_provider.diagnose_hint = "check_exe_api_token"
+    fake_provider.diagnose_timeout_seconds = 5.0
     fake_provider.diagnose = AsyncMock(return_value="exe ok")
 
     with (
@@ -168,3 +171,27 @@ async def test_doctor_runs_db_probe_against_real_session(client) -> None:
     db = next(check for check in body["checks"] if check["name"] == "db")
     assert db["status"] == "ok"
     assert db["detail"] == "select 1 -> 1"
+
+
+async def test_doctor_provider_probe_uses_the_provider_probe_timeout(client) -> None:
+    """A probe slower than the default budget passes when the provider declares a larger one."""
+
+    async def slow_diagnose(self) -> str:
+        await asyncio.sleep(0.05)
+        return "slow but healthy"
+
+    with (
+        patch.object(ExeProvider, "diagnose_timeout_seconds", 30.0),
+        patch.object(ExeProvider, "diagnose", new=slow_diagnose),
+        patch.object(Tailscale, "diagnose", new=AsyncMock(return_value="tailnet ok")),
+        patch("diagnostics.api.DEFAULT_CHECK_TIMEOUT_SECONDS", 0.01),
+        patch("diagnostics.checks.DEFAULT_CHECK_TIMEOUT_SECONDS", 0.01),
+    ):
+        response = await client.get(
+            "/doctor",
+            headers={"Authorization": "Bearer service-token"},
+        )
+
+    provider = next(check for check in response.json()["checks"] if check["name"] == "provider")
+    assert provider["status"] == "ok"
+    assert provider["detail"] == "slow but healthy"

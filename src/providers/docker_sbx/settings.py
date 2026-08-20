@@ -26,14 +26,6 @@ class DockerSbxSettings(BaseSettings):
         default=30.0,
         description="Time limit for the ssh-keyscan tries on a new sandbox.",
     )
-    advertise_host: str = Field(
-        default="127.0.0.1",
-        description=(
-            "Host address for the published SSH ports. The drukbox process must "
-            "have access to this address. Use the Docker bridge address when "
-            "drukbox runs in a container."
-        ),
-    )
     cpus: int = Field(
         default=2,
         ge=1,

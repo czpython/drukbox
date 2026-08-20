@@ -34,9 +34,7 @@ def _api_mock() -> MagicMock:
 @pytest.mark.asyncio
 async def test_create_vm_creates_a_sized_sandbox_and_returns_published_coords(tmp_path):
     api = _api_mock()
-    provider = DockerSbxProvider(
-        api, _settings(tmp_path, advertise_host="172.17.0.1", cpus=4, memory="8g")
-    )
+    provider = DockerSbxProvider(api, _settings(tmp_path, cpus=4, memory="8g"))
 
     result = await provider.create_vm(name="sb-test", image="drukbox/sbx-sandbox:latest", env={})
 
@@ -50,8 +48,8 @@ async def test_create_vm_creates_a_sized_sandbox_and_returns_published_coords(tm
     assert create_kwargs["workspace"] == str(tmp_path / "sb-test")
     assert (tmp_path / "sb-test").is_dir()
 
-    api.publish_ssh_port.assert_awaited_once_with("sb-test", host_ip="172.17.0.1")
-    assert result.ssh_host == "172.17.0.1"
+    api.publish_ssh_port.assert_awaited_once_with("sb-test")
+    assert result.ssh_host == "127.0.0.1"
     assert result.ssh_port == 49160
     assert result.ssh_username == "root"
     assert result.private_key is not None

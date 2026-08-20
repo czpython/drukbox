@@ -48,6 +48,10 @@ class DockerSbxProvider(VMProvider):
     # sandbox egress, and the template has no init system. These hosts keep
     # the published sshd port, also on a tailnet-mode service.
     supports_tailnet: ClassVar[bool] = False
+    # Each sbx invocation spends approximately 3 seconds on CLI startup work
+    # before the command runs. The default 5-second probe budget fails on a
+    # healthy daemon.
+    diagnose_timeout_seconds: ClassVar[float] = 15.0
 
     def __init__(self, api: SbxCLI, settings: DockerSbxSettings) -> None:
         self.api = api
@@ -134,18 +138,21 @@ class DockerSbxProvider(VMProvider):
                 ssh_username=self.settings.ssh_username,
             )
             await self.api.run_bootstrap(name, script)
-            ssh_port = await self.api.publish_ssh_port(name, host_ip=self.settings.advertise_host)
+            ssh_port = await self.api.publish_ssh_port(name)
         except DockerSbxProviderError as exc:
             with contextlib.suppress(DockerSbxProviderError):
                 await self.api.remove_sandbox(name)
             self._remove_workspace(name)
             raise ProviderTransportError(str(exc)) from exc
 
+        # The daemon publishes sandbox ports on the host loopback interface
+        # only, the same as the docker provider. A drukbox container reaches
+        # them through host networking.
         return VMCreateResult(
             provider_id=name,
             name=name,
             ssh_port=ssh_port,
-            ssh_host=self.settings.advertise_host,
+            ssh_host="127.0.0.1",
             ssh_username=self.settings.ssh_username,
             private_key=private_key,
         )

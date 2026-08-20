@@ -79,28 +79,20 @@ async def test_publish_ssh_port_asks_for_an_ephemeral_port_and_parses_the_bindin
 
     monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", fake_exec)
 
-    port = await SbxCLI().publish_ssh_port("sb-test", host_ip="172.17.0.1")
+    port = await SbxCLI().publish_ssh_port("sb-test")
 
     assert port == 49160
-    # An empty host port tells the daemon to select a free port.
-    assert "172.17.0.1::22" in captured["args"]
+    # A bare sandbox port tells the daemon to select a free loopback port.
+    assert captured["args"][-2:] == ("--publish", "22")
 
 
 @pytest.mark.asyncio
 async def test_publish_ssh_port_picks_the_ssh_binding_out_of_a_multi_line_listing(monkeypatch):
-    captured: dict = {}
+    listing = b"Published 127.0.0.1:8080 -> 80/tcp\nPublished 127.0.0.1:49161 -> 22/tcp\n"
+    create = AsyncMock(return_value=_process(stdout=listing))
+    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", create)
 
-    async def fake_exec(*args, **kwargs):
-        captured["args"] = args
-        return _process(
-            stdout=(b"Published 172.17.0.1:8080 -> 80/tcp\nPublished [::1]:49161 -> 22/tcp\n")
-        )
-
-    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", fake_exec)
-
-    assert await SbxCLI().publish_ssh_port("sb-test", host_ip="::1") == 49161
-    # An IPv6 address must have brackets in the port specification.
-    assert "[::1]::22" in captured["args"]
+    assert await SbxCLI().publish_ssh_port("sb-test") == 49161
 
 
 @pytest.mark.asyncio
@@ -109,7 +101,7 @@ async def test_publish_ssh_port_raises_when_nothing_was_published(monkeypatch):
     monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", create)
 
     with pytest.raises(DockerSbxTransportError, match="no SSH port"):
-        await SbxCLI().publish_ssh_port("sb-test", host_ip="172.17.0.1")
+        await SbxCLI().publish_ssh_port("sb-test")
 
 
 @pytest.mark.asyncio
@@ -118,7 +110,7 @@ async def test_publish_ssh_port_raises_on_unparsable_output(monkeypatch):
     monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", create)
 
     with pytest.raises(DockerSbxTransportError, match="unparsable"):
-        await SbxCLI().publish_ssh_port("sb-test", host_ip="172.17.0.1")
+        await SbxCLI().publish_ssh_port("sb-test")
 
 
 @pytest.mark.asyncio

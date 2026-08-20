@@ -11,6 +11,10 @@ set -euo pipefail
 install -d -m 700 /root/.ssh
 [ -f /root/.ssh/authorized_keys ] || install -m 600 /dev/null /root/.ssh/authorized_keys
 
+# /run is a fresh tmpfs at start. sshd stops immediately without its
+# privilege-separation directory.
+mkdir -p /run/sshd
+
 ssh-keygen -A
 
 exec /usr/sbin/sshd -D -e

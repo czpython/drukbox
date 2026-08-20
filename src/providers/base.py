@@ -18,6 +18,10 @@ class VMProvider(abc.ABC):
     # Remediation slug attached to a failed /doctor probe. Owned here because
     # the provider is what knows how its own dependency gets fixed.
     diagnose_hint: ClassVar[str]
+    # Time limit for the /doctor probe. Owned here for the same reason: the
+    # provider knows the cost of its own probe. CLI-backed probes can be
+    # slower than the default.
+    diagnose_timeout_seconds: ClassVar[float] = 5.0
     # Which per-request sizing fields create_vm honors. HostService rejects a
     # sized request up front — before any host row or VM exists — when the
     # target provider leaves these False.
