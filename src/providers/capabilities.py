@@ -41,3 +41,23 @@ class HttpProxyCapability(abc.ABC):
 
     @abc.abstractmethod
     async def detach_http_proxy(self, name: str, *, attach_vm: str) -> None: ...
+
+
+class TemplateCapability(abc.ABC):
+    """Mix-in declaring a VMProvider can materialize reusable templates.
+
+    Modeled as an ABC so resolve_capability checks explicit provider support,
+    rather than accepting any object that happens to expose these method names.
+    """
+
+    @abc.abstractmethod
+    async def materialize_template(
+        self,
+        *,
+        base_image: str,
+        setup_script: str,
+        label: str,
+    ) -> str: ...
+
+    @abc.abstractmethod
+    async def delete_template(self, handle: str) -> None: ...

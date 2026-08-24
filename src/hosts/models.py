@@ -41,7 +41,7 @@ class _UTCDateTime(TypeDecorator[datetime]):
         return value
 
 
-_DateTimeUTC = _UTCDateTime()
+UTCDateTime = _UTCDateTime()
 
 _HOST_NAME_PREFIX = "sb-"
 # 48 bits of UUIDv7 entropy for a short readable name. UUIDv7's leading 48
@@ -93,20 +93,20 @@ class Host(Base):
     internal_ssh_host: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     known_hosts: Mapped[str] = mapped_column(Text, default="")
     tailscale_device_id: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
-    created_at: Mapped[datetime] = mapped_column(_DateTimeUTC)
-    updated_at: Mapped[datetime] = mapped_column(_DateTimeUTC)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
     activated_at: Mapped[datetime | None] = mapped_column(
-        _DateTimeUTC,
+        UTCDateTime,
         nullable=True,
         default=None,
     )
     expires_at: Mapped[datetime | None] = mapped_column(
-        _DateTimeUTC,
+        UTCDateTime,
         nullable=True,
         default=None,
     )
     claimed_at: Mapped[datetime | None] = mapped_column(
-        _DateTimeUTC,
+        UTCDateTime,
         nullable=True,
         default=None,
     )
@@ -147,5 +147,5 @@ class IdempotencyKey(Base):
         ForeignKey("hosts.id", ondelete="CASCADE"),
         nullable=False,
     )
-    created_at: Mapped[datetime] = mapped_column(_DateTimeUTC)
-    expires_at: Mapped[datetime] = mapped_column(_DateTimeUTC, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)

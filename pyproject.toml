@@ -12,6 +12,7 @@ packages = [
     "src/http_proxies",
     "src/networking",
     "src/providers",
+    "src/templates",
 ]
 exclude = ["**/tests", "**/tests/**"]
 
