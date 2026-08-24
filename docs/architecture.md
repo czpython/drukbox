@@ -96,6 +96,12 @@ successful key returns the original host instead of a duplicate.
 Caller `env` is stored for provisioning and never returned by the API;
 keys in `hosts.schemas.RESERVED_HOST_ENV_KEYS` are rejected.
 
+An available template can be requested by its ID or requirements hash. The
+template's provider handle becomes the host image; an explicit `image` takes
+precedence, followed by the template, then the provider default. Host creation
+never builds a missing or unavailable template: it returns a clear client error
+so the caller retains control of the asynchronous build lifecycle.
+
 Every host is a renewable lease. A create without `expires_at` gets
 `now + LEASE_DEFAULT_TTL`, so a host whose owner disappears lapses and
 self-reaps instead of leaking VM cost; an explicit `expires_at: null`
@@ -110,9 +116,9 @@ Two maintenance commands run as cron jobs from the same image:
 warm pool of pre-provisioned hosts per provider (`POOL_SIZES`, with
 `POOL_SIZE` as the default provider's target) to hide provider cold
 starts. Pool members are warmed with the provider's default image and
-size, so a request that customizes its host — `image`, `env`,
-`instance_type`, or `disk_gb` — always provisions fresh instead of
-claiming a warm host.
+size, so a request that customizes its host — `image`, `env`, `template`,
+`instance_type`, or `disk_gb` — always provisions fresh instead of claiming a
+warm host.
 
 ## Diagnostics
 
