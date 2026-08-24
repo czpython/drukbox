@@ -1,8 +1,11 @@
 import asyncio
 import os
 import tempfile
+from pathlib import Path
 
-from .exceptions import DockerTransportError, DockerVMNotFoundError
+from .exceptions import DockerImageNotFoundError, DockerTransportError, DockerVMNotFoundError
+
+_MAX_ERROR_DETAIL_CHARS = 8_000
 
 
 class DockerCLI:
@@ -29,7 +32,7 @@ class DockerCLI:
         for key, value in labels.items():
             args.extend(["--label", f"{key}={value}"])
         env_file = _write_env_file(env) if env else None
-        if env_file is not None:
+        if env_file:
             # --env-file keeps caller secrets off argv (world-readable via ps/proc
             # for the lifetime of `docker run`); only the path is passed, and the
             # file is removed in the finally once docker has read it.
@@ -38,7 +41,7 @@ class DockerCLI:
         try:
             return (await self._run(*args)).strip()
         finally:
-            if env_file is not None:
+            if env_file:
                 os.unlink(env_file)
 
     async def published_ssh_port(self, name: str) -> int:
@@ -60,14 +63,34 @@ class DockerCLI:
     async def remove_container(self, name: str) -> None:
         await self._run("rm", "--force", "--volumes", name)
 
+    async def build_image(self, tag: str, context_dir: Path) -> None:
+        await self._run("build", "--tag", tag, str(context_dir))
+
+    async def remove_image(self, tag: str) -> None:
+        await self._run("image", "rm", tag)
+
+    async def push_image(self, tag: str) -> None:
+        await self._run("push", tag)
+
+    async def login(self, registry: str, username: str, password: str) -> None:
+        await self._run(
+            "login",
+            registry,
+            "--username",
+            username,
+            "--password-stdin",
+            stdin=f"{password}\n".encode(),
+        )
+
     async def server_version(self) -> str:
         return (await self._run("version", "--format", "{{.Server.Version}}")).strip()
 
-    async def _run(self, *args: str) -> str:
+    async def _run(self, *args: str, stdin: bytes | None = None) -> str:
         try:
             process = await asyncio.create_subprocess_exec(
                 "docker",
                 *args,
+                stdin=asyncio.subprocess.PIPE if stdin else asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -76,13 +99,21 @@ class DockerCLI:
             # (PermissionError) — translate both so a launch failure can't
             # escape the provider boundary as a raw OSError.
             raise DockerTransportError(f"docker CLI could not be started: {error}") from error
-        stdout, stderr = await process.communicate()
+        stdout, stderr = await process.communicate(stdin)
         if process.returncode != 0:
-            detail = stderr.decode().strip() or f"docker {args[0]} exited {process.returncode}"
+            detail = "\n".join(
+                output.decode(errors="replace") for output in (stdout, stderr) if output
+            ).strip()
+            if detail:
+                detail = detail[-_MAX_ERROR_DETAIL_CHARS:]
+            else:
+                detail = f"docker {args[0]} exited {process.returncode}"
             if "no such container" in detail.lower():
                 raise DockerVMNotFoundError(detail)
+            if "no such image" in detail.lower():
+                raise DockerImageNotFoundError(detail)
             raise DockerTransportError(detail)
-        return stdout.decode()
+        return stdout.decode(errors="replace")
 
 
 def _write_env_file(env: dict[str, str]) -> str:

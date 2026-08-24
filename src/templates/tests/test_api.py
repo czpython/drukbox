@@ -10,6 +10,9 @@ from sqlalchemy.exc import IntegrityError
 from uuid6 import uuid7
 
 from core.database import async_session_factory
+from providers import registry as registry_module
+from providers.base import VMProvider
+from providers.derived_image import derived_image_tag
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
 from templates.exceptions import TemplateStateError
 from templates.models import Template, TemplateStatus
@@ -48,7 +51,10 @@ async def test_create_template_returns_building_then_materializes(client, templa
 
     assert polled.status_code == 200
     assert polled.json()["status"] == TemplateStatus.AVAILABLE.value
-    assert polled.json()["handle"] == "stub-template:1"
+    assert polled.json()["handle"] == derived_image_tag(
+        base_image=template_provider.default_image,
+        setup_script=SETUP_SCRIPT,
+    )
     assert "setup_script" not in polled.json()
     assert template_provider.materialized == [
         (template_provider.default_image, SETUP_SCRIPT, "Node tools")
@@ -89,12 +95,18 @@ async def test_unexpected_build_crash_is_pollable(client, template_provider):
     assert polled.json()["last_error"] == "OSError: builder crashed"
 
 
-async def test_unsupported_capability_becomes_failed_build(client):
+async def test_unsupported_capability_becomes_failed_build(client, monkeypatch):
     """A provider without template support reports failure through polling."""
+    provider = MagicMock(spec=VMProvider)
+    provider.name = "without-templates"
+    provider.default_image = "stub:base"
+    monkeypatch.setitem(registry_module._factories, provider.name, lambda: provider)
+    monkeypatch.setitem(registry_module._instances, provider.name, provider)
+
     response = await client.post(
         "/templates",
         headers=AUTH_HEADERS,
-        json={"provider": "docker", "setup_script": SETUP_SCRIPT},
+        json={"provider": provider.name, "setup_script": SETUP_SCRIPT},
     )
     polled = await client.get(f"/templates/{response.json()['id']}", headers=AUTH_HEADERS)
 

@@ -5,6 +5,9 @@ from pathlib import Path
 from typing import ClassVar, Self
 
 from providers.base import VMCreateResult, VMProvider
+from providers.capabilities import TemplateCapability
+from providers.derived_image import build_derived_image, remove_derived_image
+from providers.docker.api import DockerCLI
 from providers.exceptions import (
     ProviderCommandError,
     ProviderNotFoundError,
@@ -42,7 +45,7 @@ def _bootstrap_script(*, public_key: str, env: dict[str, str], ssh_username: str
     return "\n".join(lines) + "\n"
 
 
-class DockerSbxProvider(VMProvider):
+class DockerSbxProvider(VMProvider, TemplateCapability):
     name: ClassVar[str] = "docker-sbx"
     diagnose_hint: ClassVar[str] = "check_sandboxd_is_running_and_logged_in"
     # Sandboxes have no dialable sshd; the gateway serves them, and there is
@@ -54,15 +57,23 @@ class DockerSbxProvider(VMProvider):
     # healthy daemon.
     diagnose_timeout_seconds: ClassVar[float] = 15.0
 
-    def __init__(self, api: SbxCLI, settings: DockerSbxSettings) -> None:
+    def __init__(
+        self,
+        api: SbxCLI,
+        settings: DockerSbxSettings,
+        *,
+        docker: DockerCLI,
+    ) -> None:
         self.api = api
         self.settings = settings
+        self.docker = docker
 
     @classmethod
     def from_settings(cls) -> Self:
         return cls(
             SbxCLI(),
             DockerSbxSettings(),  # pyright: ignore[reportCallIssue]
+            docker=DockerCLI(),
         )
 
     @property
@@ -167,6 +178,22 @@ class DockerSbxProvider(VMProvider):
             raise ProviderTransportError(str(exc)) from exc
 
         self._remove_workspace(name)
+
+    async def materialize_template(
+        self,
+        *,
+        base_image: str,
+        setup_script: str,
+        label: str,
+    ) -> str:
+        return await build_derived_image(
+            self.docker,
+            base_image=base_image,
+            setup_script=setup_script,
+        )
+
+    async def delete_template(self, handle: str) -> None:
+        await remove_derived_image(self.docker, handle)
 
     async def diagnose(self) -> str:
         # The sandbox list is one fast check of the CLI, the daemon

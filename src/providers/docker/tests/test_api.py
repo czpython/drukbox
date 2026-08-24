@@ -1,3 +1,4 @@
+import asyncio
 import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -5,7 +6,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from providers.docker.api import DockerCLI
-from providers.docker.exceptions import DockerTransportError, DockerVMNotFoundError
+from providers.docker.exceptions import (
+    DockerImageNotFoundError,
+    DockerTransportError,
+    DockerVMNotFoundError,
+)
 
 
 def _process(*, returncode: int = 0, stdout: bytes = b"", stderr: bytes = b"") -> SimpleNamespace:
@@ -108,6 +113,78 @@ async def test_missing_container_maps_to_not_found(monkeypatch):
 
     with pytest.raises(DockerVMNotFoundError):
         await DockerCLI().remove_container("sb-test")
+
+
+@pytest.mark.asyncio
+async def test_build_image_uses_the_given_tag_and_context(monkeypatch, tmp_path):
+    create = AsyncMock(return_value=_process())
+    monkeypatch.setattr("providers.docker.api.asyncio.create_subprocess_exec", create)
+
+    await DockerCLI().build_image("drukbox-template:123456789abc", tmp_path)
+
+    assert create.await_args
+    assert create.await_args.args == (
+        "docker",
+        "build",
+        "--tag",
+        "drukbox-template:123456789abc",
+        str(tmp_path),
+    )
+
+
+@pytest.mark.asyncio
+async def test_missing_image_maps_to_not_found(monkeypatch):
+    create = AsyncMock(
+        return_value=_process(
+            returncode=1,
+            stderr=b"Error response from daemon: No such image: drukbox-template:missing",
+        )
+    )
+    monkeypatch.setattr("providers.docker.api.asyncio.create_subprocess_exec", create)
+
+    with pytest.raises(DockerImageNotFoundError):
+        await DockerCLI().remove_image("drukbox-template:missing")
+
+
+@pytest.mark.asyncio
+async def test_login_passes_the_password_only_over_stdin(monkeypatch):
+    process = _process()
+    captured: dict = {}
+
+    async def fake_exec(*args, **kwargs):
+        captured["args"] = args
+        captured["stdin"] = kwargs["stdin"]
+        return process
+
+    monkeypatch.setattr("providers.docker.api.asyncio.create_subprocess_exec", fake_exec)
+
+    await DockerCLI().login("ghcr.io", "builder", "registry-secret")
+
+    assert captured["args"] == (
+        "docker",
+        "login",
+        "ghcr.io",
+        "--username",
+        "builder",
+        "--password-stdin",
+    )
+    assert all("registry-secret" not in arg for arg in captured["args"])
+    assert captured["stdin"] == asyncio.subprocess.PIPE
+    process.communicate.assert_awaited_once_with(b"registry-secret\n")
+
+
+@pytest.mark.asyncio
+async def test_failure_detail_keeps_the_log_tail_and_caps_its_size(monkeypatch):
+    stderr = f"leading-secret\n{'x' * 8_100}\nbuild-tail".encode()
+    create = AsyncMock(return_value=_process(returncode=1, stderr=stderr))
+    monkeypatch.setattr("providers.docker.api.asyncio.create_subprocess_exec", create)
+
+    with pytest.raises(DockerTransportError) as error:
+        await DockerCLI().push_image("registry/template:tag")
+
+    assert len(str(error.value)) == 8_000
+    assert str(error.value).endswith("build-tail")
+    assert "leading-secret" not in str(error.value)
 
 
 @pytest.mark.asyncio

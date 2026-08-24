@@ -319,6 +319,9 @@ exe.dev provider:
 | --- | --- | --- |
 | `EXE_API_TOKEN` | — (required) | Bearer token for the exe.dev exec API. |
 | `EXE_DEFAULT_IMAGE` | — (required) | Image used when the caller omits `image`. |
+| `EXE_TEMPLATE_REGISTRY` | — | Repository prefix for derived template images that exe.dev can pull. |
+| `EXE_REGISTRY_USERNAME` | — | Username for the derived-template image registry. |
+| `EXE_REGISTRY_PASSWORD` | — | Password or token for the derived-template image registry. |
 | `EXE_API_URL` | `https://exe.dev` | API base URL. |
 | `EXE_API_TIMEOUT` | `30.0` | Timeout for exe.dev API calls. |
 | `EXE_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `30.0` | ssh-keyscan retry budget for a fresh exe.dev sandbox. |

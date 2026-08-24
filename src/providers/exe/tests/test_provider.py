@@ -4,7 +4,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from providers.docker.api import DockerCLI
+from providers.docker.exceptions import DockerImageNotFoundError, DockerTransportError
+from providers.exceptions import ProviderCommandError, ProviderNotFoundError, ProviderTransportError
 from providers.exe.api import ExeAPI
+from providers.exe.exceptions import ExeVMNotFoundError
 from providers.exe.provider import ExeProvider
 from providers.exe.settings import ExeSettings
 
@@ -14,8 +18,17 @@ def _settings(**overrides: Any) -> ExeSettings:
     return ExeSettings(**{**defaults, **overrides})
 
 
+def _docker_mock() -> SimpleNamespace:
+    return SimpleNamespace(
+        build_image=AsyncMock(),
+        remove_image=AsyncMock(),
+        push_image=AsyncMock(),
+        login=AsyncMock(),
+    )
+
+
 def _make_provider(api: object) -> ExeProvider:
-    return ExeProvider(api, _settings())  # type: ignore[arg-type]
+    return ExeProvider(api, _settings(), docker=_docker_mock())  # type: ignore[arg-type]
 
 
 async def test_create_vm_forwards_kwargs_and_maps_result() -> None:
@@ -60,9 +73,6 @@ async def test_delete_vm_delegates_to_api() -> None:
 
 
 async def test_delete_vm_translates_not_found_to_provider_not_found() -> None:
-    from providers.exceptions import ProviderNotFoundError
-    from providers.exe.exceptions import ExeVMNotFoundError
-
     api = SimpleNamespace(
         delete_vm=AsyncMock(side_effect=ExeVMNotFoundError("vm 'sb-1' not found")),
     )
@@ -108,3 +118,97 @@ async def test_http_proxy_methods_delegate_to_api(method_name: str, kwargs: dict
 def test_from_settings_constructs_with_exeapi() -> None:
     provider = ExeProvider.from_settings()
     assert isinstance(provider.api, ExeAPI)
+    assert isinstance(provider.docker, DockerCLI)
+
+
+async def test_materialize_template_builds_logs_in_and_pushes() -> None:
+    docker = _docker_mock()
+    provider = ExeProvider(
+        SimpleNamespace(),  # type: ignore[arg-type]
+        _settings(
+            template_registry="ghcr.io/acme/drukbox-templates",
+            registry_username="builder",
+            registry_password="registry-secret",
+        ),
+        docker=docker,  # type: ignore[arg-type]
+    )
+
+    handle = await provider.materialize_template(
+        base_image="exe/base:latest",
+        setup_script="apt-get update",
+        label="Node tools",
+    )
+
+    assert handle.startswith("ghcr.io/acme/drukbox-templates:")
+    assert len(handle.rpartition(":")[2]) == 12
+    assert docker.build_image.await_args.args[0] == handle
+    docker.login.assert_awaited_once_with("ghcr.io", "builder", "registry-secret")
+    docker.push_image.assert_awaited_once_with(handle)
+
+
+async def test_materialize_template_names_each_missing_registry_setting() -> None:
+    docker = _docker_mock()
+    provider = ExeProvider(
+        SimpleNamespace(),  # type: ignore[arg-type]
+        _settings(),
+        docker=docker,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ProviderCommandError) as error:
+        await provider.materialize_template(
+            base_image="exe/base:latest",
+            setup_script="apt-get update",
+            label="Node tools",
+        )
+
+    assert "EXE_TEMPLATE_REGISTRY" in str(error.value)
+    assert "EXE_REGISTRY_USERNAME" in str(error.value)
+    assert "EXE_REGISTRY_PASSWORD" in str(error.value)
+    docker.build_image.assert_not_awaited()
+
+
+async def test_materialize_template_translates_push_failure() -> None:
+    docker = _docker_mock()
+    docker.push_image.side_effect = DockerTransportError("push log tail")
+    provider = ExeProvider(
+        SimpleNamespace(),  # type: ignore[arg-type]
+        _settings(
+            template_registry="ghcr.io/acme/drukbox-templates",
+            registry_username="builder",
+            registry_password="registry-secret",
+        ),
+        docker=docker,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ProviderTransportError, match="push log tail"):
+        await provider.materialize_template(
+            base_image="exe/base:latest",
+            setup_script="apt-get update",
+            label="Node tools",
+        )
+
+
+async def test_delete_template_removes_the_local_image() -> None:
+    docker = _docker_mock()
+    provider = ExeProvider(
+        SimpleNamespace(),  # type: ignore[arg-type]
+        _settings(),
+        docker=docker,  # type: ignore[arg-type]
+    )
+
+    await provider.delete_template("ghcr.io/acme/drukbox-templates:123456789abc")
+
+    docker.remove_image.assert_awaited_once_with("ghcr.io/acme/drukbox-templates:123456789abc")
+
+
+async def test_delete_template_translates_a_missing_local_image() -> None:
+    docker = _docker_mock()
+    docker.remove_image.side_effect = DockerImageNotFoundError("No such image")
+    provider = ExeProvider(
+        SimpleNamespace(),  # type: ignore[arg-type]
+        _settings(),
+        docker=docker,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ProviderNotFoundError, match="was not found"):
+        await provider.delete_template("ghcr.io/acme/drukbox-templates:missing")

@@ -3,6 +3,8 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
+from providers.capabilities import TemplateCapability
+from providers.derived_image import build_derived_image, remove_derived_image
 from providers.exceptions import (
     ProviderCommandError,
     ProviderNotFoundError,
@@ -19,7 +21,7 @@ _ENV_KEYS_ENV = "DRUKBOX_ENV_KEYS"
 _RESERVED_ENV_KEYS = frozenset({_AUTHORIZED_KEY_ENV, _ENV_KEYS_ENV})
 
 
-class DockerProvider(VMProvider):
+class DockerProvider(VMProvider, TemplateCapability):
     name: ClassVar[str] = "docker"
     diagnose_hint: ClassVar[str] = "check_docker_daemon_is_running"
     # A local container has no path onto the tailnet; its hosts keep the
@@ -126,6 +128,22 @@ class DockerProvider(VMProvider):
             raise ProviderNotFoundError(f"docker container '{name}' was not found") from exc
         except DockerProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
+
+    async def materialize_template(
+        self,
+        *,
+        base_image: str,
+        setup_script: str,
+        label: str,
+    ) -> str:
+        return await build_derived_image(
+            self.api,
+            base_image=base_image,
+            setup_script=setup_script,
+        )
+
+    async def delete_template(self, handle: str) -> None:
+        await remove_derived_image(self.api, handle)
 
     async def diagnose(self) -> str:
         return f"docker server {await self.api.server_version()}"

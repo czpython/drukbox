@@ -22,6 +22,18 @@ class ExeSettings(BaseSettings):
     default_image: str = Field(
         description="Default VM image passed to exe.dev when provisioning.",
     )
+    template_registry: str | None = Field(
+        default=None,
+        description="Repository prefix for derived template images that exe.dev can pull.",
+    )
+    registry_username: str | None = Field(
+        default=None,
+        description="Username for the derived-template image registry.",
+    )
+    registry_password: str | None = Field(
+        default=None,
+        description="Password or token for the derived-template image registry.",
+    )
     api_timeout: float = Field(
         default=30.0,
         description="Timeout in seconds for exe.dev API calls.",

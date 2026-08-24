@@ -5,6 +5,7 @@ import pytest
 from providers import registry as registry_module
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import TemplateCapability
+from providers.derived_image import derived_image_tag
 from providers.exceptions import ProviderError
 
 
@@ -61,7 +62,7 @@ class StubTemplateProvider(TemplateCapability, VMProvider):
         self.materialized.append((base_image, setup_script, label))
         if self.build_error:
             raise self.build_error
-        return f"stub-template:{len(self.materialized)}"
+        return derived_image_tag(base_image=base_image, setup_script=setup_script)
 
     async def delete_template(self, handle: str) -> None:
         self.deleted.append(handle)

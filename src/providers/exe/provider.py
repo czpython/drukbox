@@ -2,12 +2,17 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import HttpProxyCapability
+from providers.capabilities import HttpProxyCapability, TemplateCapability
+from providers.derived_image import build_derived_image, remove_derived_image
+from providers.docker.api import DockerCLI
+from providers.docker.exceptions import DockerProviderError
 from providers.exceptions import (
+    ProviderCommandError,
     ProviderHttpProxyExistsError,
     ProviderHttpProxyNotFoundError,
     ProviderNotFoundError,
     ProviderTargetVMNotFoundError,
+    ProviderTransportError,
 )
 from providers.exe.api import ExeAPI
 from providers.exe.exceptions import (
@@ -18,7 +23,7 @@ from providers.exe.exceptions import (
 from providers.exe.settings import ExeSettings
 
 
-class ExeProvider(VMProvider, HttpProxyCapability):
+class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
     name: ClassVar[str] = "exe"
     diagnose_hint: ClassVar[str] = "check_exe_dev_api_token_and_url"
 
@@ -27,10 +32,12 @@ class ExeProvider(VMProvider, HttpProxyCapability):
         api: ExeAPI,
         settings: ExeSettings,
         *,
+        docker: DockerCLI,
         service_label: str = "drukbox",
     ) -> None:
         self.api = api
         self.settings = settings
+        self.docker = docker
         self._service_label = service_label
 
     @classmethod
@@ -39,6 +46,7 @@ class ExeProvider(VMProvider, HttpProxyCapability):
         return cls(
             ExeAPI.from_settings(),
             ExeSettings(),  # pyright: ignore[reportCallIssue]
+            docker=DockerCLI(),
             service_label=core.service_label,
         )
 
@@ -60,12 +68,13 @@ class ExeProvider(VMProvider, HttpProxyCapability):
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
+        # Tags are operator-facing: `exe ls --tag=managed-by-<env>` shows what this deployment owns.
         payload = await self.api.create_vm(
             name=name,
             image=image,
             env=env,
             setup_script=setup_script,
-            tags=self._tags_for(name),
+            tags=[f"managed-by-{self._service_label}"],
         )
         return VMCreateResult(
             provider_id=str(payload["vm_name"]),
@@ -78,16 +87,55 @@ class ExeProvider(VMProvider, HttpProxyCapability):
             ssh_username=self.settings.ssh_username,
         )
 
-    def _tags_for(self, name: str) -> list[str]:
-        # Tags are an operator-facing convenience: `exe ls --tag=managed-by-<env>`
-        # answers "what VMs does this deployment own?"
-        return [f"managed-by-{self._service_label}"]
-
     async def delete_vm(self, name: str) -> None:
         try:
             await self.api.delete_vm(name)
         except ExeVMNotFoundError as exc:
             raise ProviderNotFoundError(str(exc)) from exc
+
+    async def materialize_template(
+        self,
+        *,
+        base_image: str,
+        setup_script: str,
+        label: str,
+    ) -> str:
+        registry = self.settings.template_registry
+        username = self.settings.registry_username
+        password = self.settings.registry_password
+
+        if not (registry and username and password):
+            missing_settings = [
+                name
+                for name, value in (
+                    ("EXE_TEMPLATE_REGISTRY", registry),
+                    ("EXE_REGISTRY_USERNAME", username),
+                    ("EXE_REGISTRY_PASSWORD", password),
+                )
+                if not value
+            ]
+            raise ProviderCommandError(
+                f"exe template registry is not configured; missing settings: "
+                f"{', '.join(missing_settings)}"
+            )
+
+        tag = await build_derived_image(
+            self.docker,
+            base_image=base_image,
+            setup_script=setup_script,
+            repository=registry,
+        )
+        registry_host, *_ = registry.partition("/")
+        try:
+            await self.docker.login(registry_host, username, password)
+            await self.docker.push_image(tag)
+        except DockerProviderError as exc:
+            raise ProviderTransportError(str(exc)) from exc
+        return tag
+
+    async def delete_template(self, handle: str) -> None:
+        # Registry deletion is registry-specific; this provider only owns the local build tag.
+        await remove_derived_image(self.docker, handle)
 
     async def aclose(self) -> None:
         await self.api.aclose()
