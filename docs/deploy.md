@@ -22,13 +22,16 @@ docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/alembic upgrade head
 # Maintenance (cron, e.g. every 10-15 min)
 docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/python -m hosts.janitor
 docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/python -m hosts.pool
+docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/python -m templates.janitor
 ```
 
-The janitor reaps expired and orphaned hosts. The pool maintainer
+The host janitor reaps expired and orphaned hosts. The template janitor
+fails abandoned builds, retains their diagnostics for a bounded window,
+and reaps failed or unused provider artifacts. The pool maintainer
 pre-provisions warm hosts per provider and only does anything when at
 least one provider has a warm target (`POOL_SIZES` / `POOL_SIZE`).
-Schedule both under your cron infrastructure (k8s `CronJob`, systemd
-timer) from the same image and env file.
+Schedule all three under your cron infrastructure (k8s `CronJob`,
+systemd timer) from the same image and env file.
 
 Use Postgres in production (`postgresql+psycopg://...`). SQLite
 (`sqlite+aiosqlite:///./drukbox.db`) is for single-process demos and
@@ -99,10 +102,10 @@ talks to the host's Docker daemon, and granting drukbox access to that
 socket is host-root-equivalent. Do not expose a docker-backed drukbox to
 untrusted callers.
 
-Janitor and pool one-off containers using the Docker provider need the
-same socket mount and socket-GID supplemental group. `DOCKER_HOST` remains
-available when the daemon is remote or rootless instead of exposed through
-`/var/run/docker.sock`.
+Host-janitor, template-janitor, and pool one-off containers using the
+Docker provider need the same socket mount and socket-GID supplemental
+group. `DOCKER_HOST` remains available when the daemon is remote or
+rootless instead of exposed through `/var/run/docker.sock`.
 
 ## Local microVMs with Docker Sandboxes
 
@@ -154,8 +157,8 @@ docker run --rm --network host \
 
 The daemon reads workspace paths on its own filesystem. Thus the
 workspace mount must have the same path on the host and in the
-container. The janitor and pool containers need the same mounts and
-variables.
+container. The host-janitor, template-janitor, and pool containers need
+the same mounts and variables.
 
 Callers reach the sandboxes through
 [the SSH gateway](#the-ssh-gateway); the provider requires it. The key
@@ -294,6 +297,9 @@ Core, optional:
 | `SERVICE_LABEL` | `drukbox` | Label stamped onto provider resources (VM tags, SG tags). |
 | `UVICORN_HOST` | `0.0.0.0` | API bind address. Set `127.0.0.1` to restrict to loopback. |
 | `PROVISIONING_GRACE_SECONDS` | `600` | Safety TTL on in-flight hosts so the janitor reaps row + VM if the client disconnects mid-provision. Must exceed the worst-case provision duration. |
+| `TEMPLATE_BUILD_TIMEOUT_MINUTES` | `60` | Max age of an unfinished template build before the template janitor marks it failed. |
+| `TEMPLATE_FAILED_RETENTION_HOURS` | `24` | How long failed template records and diagnostics remain before the template janitor deletes them. |
+| `TEMPLATE_UNUSED_TTL_DAYS` | `14` | How long an available template remains after its last use, or creation when never used. |
 | `LEASE_DEFAULT_TTL` | `86400` | Lease TTL in seconds for hosts created without an explicit `expires_at`, and the extension applied by an empty `POST /hosts/{id}/renew`. An explicit `expires_at: null` at create time opts out of expiry entirely. |
 | `IDEMPOTENCY_KEY_TTL_HOURS` | `24` | Retention period for successful `Idempotency-Key` mappings. |
 | `POOL_SIZES` | `{}` | Warm hosts to keep ready per provider, as JSON (e.g. `{"exe": 2, "hetzner": 1}`). Overrides `POOL_SIZE` for the providers it names. |

@@ -92,12 +92,31 @@ def test_tailscale_disabled_ignores_missing_credentials(monkeypatch: pytest.Monk
         "POOL_SIZE",
         "POOL_HOST_MAX_AGE_HOURS",
         "POOL_MAX_CREATES_PER_TICK",
+        "TEMPLATE_BUILD_TIMEOUT_MINUTES",
+        "TEMPLATE_FAILED_RETENTION_HOURS",
+        "TEMPLATE_UNUSED_TTL_DAYS",
     ],
 )
 def test_numeric_settings_reject_negative_values(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
     env: dict[str, str | None] = {**_base_env(), key: "-1"}
     with pytest.raises(ValueError, match=key):
         _settings_with(monkeypatch, env)
+
+
+def test_template_maintenance_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings_with(
+        monkeypatch,
+        {
+            **_base_env(),
+            "TEMPLATE_BUILD_TIMEOUT_MINUTES": None,
+            "TEMPLATE_FAILED_RETENTION_HOURS": None,
+            "TEMPLATE_UNUSED_TTL_DAYS": None,
+        },
+    )
+
+    assert settings.template_build_timeout_minutes == 60
+    assert settings.template_failed_retention_hours == 24
+    assert settings.template_unused_ttl_days == 14
 
 
 def test_pool_size_seeds_the_default_providers_target(monkeypatch: pytest.MonkeyPatch) -> None:

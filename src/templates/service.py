@@ -1,6 +1,7 @@
 import hashlib
 import logging
 import uuid
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -116,7 +117,14 @@ class TemplateService:
         result = await self.session.execute(select(Template).order_by(Template.created_at.desc()))
         return list(result.scalars())
 
-    async def delete(self, template_id: uuid.UUID) -> None:
+    async def delete(
+        self,
+        template_id: uuid.UUID,
+        *,
+        reap_status: TemplateStatus | None = None,
+        reap_before: datetime | None = None,
+    ) -> bool:
+        """Delete the template; return False when the maintenance guard spares it."""
         result = await self.session.execute(
             select(Template).where(Template.id == template_id).with_for_update()
         )
@@ -124,6 +132,18 @@ class TemplateService:
 
         if not template:
             raise ResourceNotFoundError("template not found")
+
+        if reap_status and reap_before:
+            if template.status != reap_status:
+                return False
+
+            last_active_at = (
+                template.updated_at
+                if reap_status == TemplateStatus.FAILED
+                else template.last_used_at or template.created_at
+            )
+            if last_active_at >= reap_before:
+                return False
 
         if template.status == TemplateStatus.BUILDING.value:
             raise TemplateStateError("template is still building")
@@ -146,3 +166,4 @@ class TemplateService:
 
         await self.session.delete(template)
         await self.session.commit()
+        return True

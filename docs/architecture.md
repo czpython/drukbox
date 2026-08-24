@@ -29,6 +29,8 @@ that true:
 ```text
 hosts.api          HTTP request/response concerns only
 hosts.service      host lifecycle behavior (HostService)
+templates.api      template request/response concerns only
+templates.service  template build and artifact lifecycle (TemplateService)
 providers/<name>   one package per VM provider
 networking/        network provider framework + Tailscale adapter
 core/              settings, database, exception base
@@ -71,14 +73,15 @@ the core settings knowing any provider exists.
 
 Not every provider supports every feature, and the host contract must
 not grow provider-shaped warts. Optional features are capability
-mix-ins: `HttpProxyCapability` declares the http-proxy surface and the
-exe provider implements it. `resolve_capability` narrows a specific
-provider instance to a capability — the default provider for
-account-bound operations, the host's own provider for host-bound ones
-— and raises the shared `CapabilityUnsupportedError` when that
-provider doesn't implement it, which the routes surface as a clear
-error. New provider-specific features should follow this pattern
-rather than widening `VMProvider` or the host schema.
+mix-ins: `HttpProxyCapability` declares the http-proxy surface, while
+`TemplateCapability` owns provider-specific template materialization
+and teardown. `resolve_capability` narrows a specific provider instance
+to a capability — the default provider for account-bound operations,
+the host's own provider for host-bound ones — and raises the shared
+`CapabilityUnsupportedError` when that provider doesn't implement it,
+which the routes surface as a clear error. New provider-specific
+features should follow this pattern rather than widening `VMProvider`
+or the host schema.
 
 The review question that guards the whole design: *does this change
 leak a provider into the contract?*
@@ -96,6 +99,12 @@ successful key returns the original host instead of a duplicate.
 Caller `env` is stored for provisioning and never returned by the API;
 keys in `hosts.schemas.RESERVED_HOST_ENV_KEYS` are rejected.
 
+Templates are durable provider artifacts keyed by provider, base image,
+and setup-script hash. `POST /templates` creates a `building` record and
+returns `202 Accepted`; callers poll until it becomes `available` or
+`failed`. Templates outlive individual hosts, and provider-specific
+materialization stays behind `TemplateCapability`.
+
 An available template can be requested by its ID or requirements hash. The
 template's provider handle becomes the host image; an explicit `image` takes
 precedence, followed by the template, then the provider default. Host creation
@@ -111,14 +120,16 @@ is the keepalive: it bumps `expires_at` to the requested instant, or by
 hosts renew — unclaimed warm-pool members belong to pool maintenance
 and refuse with `409`.
 
-Two maintenance commands run as cron jobs from the same image:
-`hosts.janitor` reaps expired and orphaned hosts, `hosts.pool` keeps a
-warm pool of pre-provisioned hosts per provider (`POOL_SIZES`, with
-`POOL_SIZE` as the default provider's target) to hide provider cold
-starts. Pool members are warmed with the provider's default image and
-size, so a request that customizes its host — `image`, `env`, `template`,
-`instance_type`, or `disk_gb` — always provisions fresh instead of claiming a
-warm host.
+Three maintenance commands run as cron jobs from the same image:
+`hosts.janitor` reaps expired and orphaned hosts, `templates.janitor`
+fails abandoned builds and reaps failed or unused artifacts, and
+`hosts.pool` keeps a warm pool of pre-provisioned hosts per provider
+(`POOL_SIZES`, with `POOL_SIZE` as the default provider's target) to hide
+provider cold starts. Editing a template setup script changes its hash;
+the superseded artifact then ages out after its last lease. Pool members
+are warmed with the provider's default image and size, so a request that
+customizes its host — `image`, `env`, `template`, `instance_type`, or
+`disk_gb` — always provisions fresh instead of claiming a warm host.
 
 ## Diagnostics
 

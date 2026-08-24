@@ -10,6 +10,7 @@ a service, not a library.
 It owns:
 
 - Host records and lifecycle state in Postgres
+- Template records, asynchronous builds, and provider artifact lifecycle
 - Inline provisioning in `POST /hosts`
 - Provider VM creation and deletion (exe.dev, AWS, Hetzner, Exoscale,
   local Docker, Docker Sandboxes)
@@ -19,7 +20,8 @@ It owns:
 - Account-bound exe.dev HTTP proxy resources
 
 Periodic maintenance runs as cron jobs: `python -m hosts.janitor` reaps
-expired hosts, `python -m hosts.pool` tops up the warm pool.
+expired hosts, `python -m templates.janitor` reaps abandoned and unused
+templates, and `python -m hosts.pool` tops up the warm pool.
 
 No backwards compatibility is required unless a caller contract is explicitly
 documented in this repo.
@@ -49,6 +51,7 @@ src/
   http_proxies/      # HTTP proxy API, schemas, service, deps
   providers/         # VM provider ABC, capabilities, registry, adapters
   networking/        # Network provider framework and Tailscale adapter
+  templates/         # Template API, models, service, and janitor
   conftest.py        # Test env defaults and database reset fixture
 alembic/             # Database migrations
 api-tests/           # Playwright black-box API tests
