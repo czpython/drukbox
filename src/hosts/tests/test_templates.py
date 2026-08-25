@@ -73,57 +73,6 @@ async def test_create_host_resolves_template_id(client, monkeypatch):
     assert before <= used_template.last_used_at <= after
 
 
-async def test_create_host_resolves_template_requirements_hash(client, monkeypatch):
-    """An available requirements hash becomes the stored image and records its use."""
-    template = await create_template_record(handle="derived:image-by-hash")
-    monkeypatch.setattr("hosts.service.HostService.provision", AsyncMock())
-
-    response = await client.post(
-        "/hosts",
-        headers=AUTH_HEADERS,
-        json={"template": template.requirements_hash},
-    )
-
-    assert response.status_code == 201
-    assert response.json()["image"] == "derived:image-by-hash"
-    async with async_session_factory() as session:
-        used_template = await session.get(Template, template.id)
-    assert used_template is not None
-    assert used_template.last_used_at is not None
-
-
-async def test_create_host_prefers_available_template_for_requirements_hash(client, monkeypatch):
-    """An available hash match wins over a newer unavailable base-image variant."""
-    now = utc_now()
-    available = await create_template_record(
-        base_image="base:available",
-        handle="derived:available",
-        created_at=now,
-    )
-    building = await create_template_record(
-        base_image="base:building",
-        status=TemplateStatus.BUILDING.value,
-        created_at=now + timedelta(seconds=1),
-    )
-    monkeypatch.setattr("hosts.service.HostService.provision", AsyncMock())
-
-    response = await client.post(
-        "/hosts",
-        headers=AUTH_HEADERS,
-        json={"template": REQUIREMENTS_HASH},
-    )
-
-    assert response.status_code == 201
-    assert response.json()["image"] == "derived:available"
-    async with async_session_factory() as session:
-        used_available = await session.get(Template, available.id)
-        untouched_building = await session.get(Template, building.id)
-    assert used_available is not None
-    assert used_available.last_used_at is not None
-    assert untouched_building is not None
-    assert untouched_building.last_used_at is None
-
-
 async def test_create_host_rejects_building_template(client):
     """A building template returns a conflict naming its current status."""
     template = await create_template_record(status=TemplateStatus.BUILDING.value)
@@ -162,43 +111,18 @@ async def test_create_host_rejects_failed_template_with_last_error(client):
     assert "ProviderTransportError: builder unavailable" in response.json()["detail"]
 
 
-async def test_create_host_reports_newest_unavailable_hash_match(client):
-    """An unavailable hash reports the newest matching base-image variant."""
-    now = utc_now()
-    await create_template_record(
-        base_image="base:older-building",
-        status=TemplateStatus.BUILDING.value,
-        created_at=now,
-    )
-    newest = await create_template_record(
-        base_image="base:newer-failed",
-        status=TemplateStatus.FAILED.value,
-        last_error="ProviderTransportError: newest failure",
-        created_at=now + timedelta(seconds=1),
-    )
+async def test_create_host_rejects_unknown_template_id(client):
+    """An unknown template ID is bad host-create input, not a route 404."""
+    missing_id = str(uuid7())
 
     response = await client.post(
         "/hosts",
         headers=AUTH_HEADERS,
-        json={"template": REQUIREMENTS_HASH},
-    )
-
-    assert response.status_code == 409
-    assert str(newest.id) in response.json()["detail"]
-    assert TemplateStatus.FAILED.value in response.json()["detail"]
-    assert "ProviderTransportError: newest failure" in response.json()["detail"]
-
-
-async def test_create_host_rejects_unknown_template_reference(client):
-    """An unknown template reference is bad host-create input, not a route 404."""
-    response = await client.post(
-        "/hosts",
-        headers=AUTH_HEADERS,
-        json={"template": "missing-template"},
+        json={"template": missing_id},
     )
 
     assert response.status_code == 400
-    assert "missing-template" in response.json()["detail"]
+    assert missing_id in response.json()["detail"]
     assert "not found" in response.json()["detail"]
     assert response.json()["error_code"] == "TEMPLATE_REFERENCE"
 
@@ -285,12 +209,12 @@ async def test_create_host_cannot_resolve_another_providers_template(client):
     assert "provider 'exe'" in response.json()["detail"]
 
 
-async def test_create_host_rejects_blank_template(client):
-    """A whitespace-only template reference stops at the wire boundary."""
+async def test_create_host_rejects_a_non_uuid_template(client):
+    """A template value that is not a UUID stops at the wire boundary."""
     response = await client.post(
         "/hosts",
         headers=AUTH_HEADERS,
-        json={"template": "  \n"},
+        json={"template": "not-a-uuid"},
     )
 
     assert response.status_code == 422

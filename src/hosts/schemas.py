@@ -20,9 +20,9 @@ def _expires_at_must_be_future_and_tz_aware(expires_at: datetime | None) -> date
 
 class HostCreate(BaseModel):
     image: str | None = None
-    template: str | None = Field(
+    template: uuid.UUID | None = Field(
         default=None,
-        description="Template ID or requirements hash. Used only when the request has no image.",
+        description="Template ID to fork from. Used only when the request has no image.",
     )
     env: dict[str, str] = Field(default_factory=dict)
     expires_at: datetime | None = None
@@ -43,7 +43,7 @@ class HostCreate(BaseModel):
         description="Root disk size in GB. Omit to use the provider's configured default.",
     )
 
-    @field_validator("image", "template", "instance_type")
+    @field_validator("image", "instance_type")
     @classmethod
     def reject_blank(cls, value: str | None, info: ValidationInfo) -> str | None:
         if value is not None and not value.strip():

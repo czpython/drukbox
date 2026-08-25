@@ -94,7 +94,7 @@ class HostService:
         *,
         env: dict[str, str],
         image: str | None,
-        template: str | None = None,
+        template: uuid.UUID | None = None,
         expires_at: datetime | None | EllipsisType = ...,
         idempotency_key: str | None = None,
         provider: str | None = None,
@@ -203,7 +203,7 @@ class HostService:
         *,
         env: dict[str, str],
         image: str | None,
-        template: str | None = None,
+        template: uuid.UUID | None = None,
         expires_at: datetime | None | EllipsisType = ...,
         provider: str | None = None,
         instance_type: str | None = None,
@@ -223,7 +223,7 @@ class HostService:
                 f"provider {vm.name!r} does not support a per-request disk_gb"
             )
         if template and not image:
-            image = await self._resolve_template_image(reference=template, provider=vm.name)
+            image = await self._resolve_template_image(template_id=template, provider=vm.name)
         uid = uuid7()
         name = Host.build_name(uid)
         now = utc_now()
@@ -282,31 +282,15 @@ class HostService:
         await self.session.refresh(host)
         return host
 
-    async def _resolve_template_image(self, *, reference: str, provider: str) -> str:
-        try:
-            template_id = uuid.UUID(reference)
-        except ValueError:
-            result = await self.session.execute(
-                select(Template)
-                .where(Template.provider == provider)
-                .where(Template.requirements_hash == reference)
-                .order_by(
-                    (Template.status == TemplateStatus.AVAILABLE.value).desc(),
-                    Template.created_at.desc(),
-                )
-                .limit(1)
-            )
-        else:
-            result = await self.session.execute(
-                select(Template)
-                .where(Template.id == template_id)
-                .where(Template.provider == provider)
-            )
+    async def _resolve_template_image(self, *, template_id: uuid.UUID, provider: str) -> str:
+        result = await self.session.execute(
+            select(Template).where(Template.id == template_id).where(Template.provider == provider)
+        )
         template = result.scalar_one_or_none()
 
         if not template:
             raise TemplateReferenceError(
-                f"template {reference!r} not found for provider {provider!r}"
+                f"template {template_id} not found for provider {provider!r}"
             )
 
         if template.status != TemplateStatus.AVAILABLE.value:

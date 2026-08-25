@@ -105,8 +105,10 @@ returns `202 Accepted`. Callers poll until the template becomes
 `available` or `failed`. Templates outlive hosts. Each provider builds
 and deletes its own templates behind `TemplateCapability`.
 
-A host request can name an available template by its ID or requirements
-hash. The template's handle becomes the host image. An explicit `image`
+A host request can name an available template by its ID. The `POST
+/templates` create is idempotent by content, so the caller can always
+repost the same declaration to get the current ID back.
+The template's handle becomes the host image. An explicit `image`
 wins over the template, and the template wins over the provider default.
 Host creation never builds a missing or unavailable template. It returns
 a client error, and the caller decides when to build.
