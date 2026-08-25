@@ -20,17 +20,16 @@ docker run --rm -p 8780:8780 --env-file drukbox.env "$IMAGE"
 docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/alembic upgrade head
 
 # Maintenance (cron, e.g. every 10-15 min)
-docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/python -m hosts.janitor
+docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/python -m janitor
 docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/python -m hosts.pool
-docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/python -m templates.janitor
 ```
 
-The host janitor reaps expired and orphaned hosts. The template janitor
-marks abandoned builds failed, keeps failed builds for diagnosis, and
-deletes failed or unused templates. The pool maintainer
+The janitor reaps expired and orphaned hosts, marks abandoned template
+builds failed, keeps failed builds for diagnosis, and deletes failed or
+unused templates. The pool maintainer
 pre-provisions warm hosts per provider and only does anything when at
 least one provider has a warm target (`POOL_SIZES` / `POOL_SIZE`).
-Schedule all three under your cron infrastructure (k8s `CronJob`,
+Schedule both under your cron infrastructure (k8s `CronJob`,
 systemd timer) from the same image and env file.
 
 Use Postgres in production (`postgresql+psycopg://...`). SQLite
@@ -102,9 +101,8 @@ talks to the host's Docker daemon, and granting drukbox access to that
 socket is host-root-equivalent. Do not expose a docker-backed drukbox to
 untrusted callers.
 
-Host-janitor, template-janitor, and pool one-off containers using the
-Docker provider need the same socket mount and socket-GID supplemental
-group. `DOCKER_HOST` remains available when the daemon is remote or
+Janitor and pool one-off containers using the Docker provider need the
+same socket mount and socket-GID supplemental group. `DOCKER_HOST` remains available when the daemon is remote or
 rootless instead of exposed through `/var/run/docker.sock`.
 
 ## Local microVMs with Docker Sandboxes
@@ -157,8 +155,8 @@ docker run --rm --network host \
 
 The daemon reads workspace paths on its own filesystem. Thus the
 workspace mount must have the same path on the host and in the
-container. The host-janitor, template-janitor, and pool containers need
-the same mounts and variables.
+container. The janitor and pool containers need the same mounts and
+variables.
 
 Callers reach the sandboxes through
 [the SSH gateway](#the-ssh-gateway); the provider requires it. The key

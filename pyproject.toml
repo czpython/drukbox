@@ -10,6 +10,7 @@ packages = [
     "src/gateway",
     "src/hosts",
     "src/http_proxies",
+    "src/janitor",
     "src/networking",
     "src/providers",
     "src/templates",

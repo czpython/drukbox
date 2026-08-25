@@ -61,14 +61,3 @@ async def reap_expired_hosts() -> list[uuid.UUID]:
             await tailscale.aclose()
 
     return reaped
-
-
-if __name__ == "__main__":
-    # Cron entry point: `python -m hosts.janitor`.
-    import asyncio
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
-    asyncio.run(reap_expired_hosts())

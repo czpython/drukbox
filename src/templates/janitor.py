@@ -112,14 +112,3 @@ async def reap_templates() -> None:
                         reap_reason,
                         template_id,
                     )
-
-
-if __name__ == "__main__":
-    # Cron entry point: `python -m templates.janitor`.
-    import asyncio
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
-    asyncio.run(reap_templates())

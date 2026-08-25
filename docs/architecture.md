@@ -121,11 +121,10 @@ is the keepalive: it bumps `expires_at` to the requested instant, or by
 hosts renew — unclaimed warm-pool members belong to pool maintenance
 and refuse with `409`.
 
-Three maintenance commands run as cron jobs from the same image:
+Two maintenance commands run as cron jobs from the same image:
 
-- `hosts.janitor` reaps expired and orphaned hosts.
-- `templates.janitor` marks abandoned builds `failed` and deletes failed
-  or unused templates.
+- `janitor` reaps expired and orphaned hosts, marks abandoned template
+  builds `failed`, and deletes failed or unused templates.
 - `hosts.pool` keeps a warm pool of pre-provisioned hosts per provider
   (`POOL_SIZES`, with `POOL_SIZE` as the default provider's target) to
   hide provider cold starts.
