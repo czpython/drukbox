@@ -136,11 +136,11 @@ async def test_delete_vm_raises_not_found_when_container_missing():
 
 
 @pytest.mark.asyncio
-async def test_materialize_template_builds_and_returns_the_derived_tag():
+async def test_create_template_builds_and_returns_the_derived_tag():
     api = _api_mock()
     provider = DockerProvider(api, _settings())
 
-    handle = await provider.materialize_template(
+    handle = await provider.create_template(
         base_image="sandbox:base",
         setup_script="apt-get update",
         label="Node tools",
@@ -152,13 +152,13 @@ async def test_materialize_template_builds_and_returns_the_derived_tag():
 
 
 @pytest.mark.asyncio
-async def test_materialize_template_translates_build_failure():
+async def test_create_template_translates_build_failure():
     api = _api_mock()
     api.build_image.side_effect = DockerTransportError("build log tail")
     provider = DockerProvider(api, _settings())
 
     with pytest.raises(ProviderTransportError, match="build log tail"):
-        await provider.materialize_template(
+        await provider.create_template(
             base_image="sandbox:base",
             setup_script="apt-get update",
             label="Node tools",

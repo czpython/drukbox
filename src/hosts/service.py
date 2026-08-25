@@ -120,7 +120,7 @@ class HostService:
         host: Host | None = None
         # Warm hosts are provider-specific, so the claim is scoped to the
         # requested provider's pool. A request is pool-eligible only when it
-        # doesn't customize the host: no image, template, env, or per-request
+        # does not customize the host: no image, template, env, or per-request
         # sizing — pool members are warmed at the provider's defaults.
         requested_provider = provider or self.settings.default_host_provider
         customized = env or image or template or instance_type or disk_gb

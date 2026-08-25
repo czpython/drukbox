@@ -26,8 +26,8 @@ docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/python -m templates.ja
 ```
 
 The host janitor reaps expired and orphaned hosts. The template janitor
-fails abandoned builds, retains their diagnostics for a bounded window,
-and reaps failed or unused provider artifacts. The pool maintainer
+marks abandoned builds failed, keeps failed builds for diagnosis, and
+deletes failed or unused templates. The pool maintainer
 pre-provisions warm hosts per provider and only does anything when at
 least one provider has a warm target (`POOL_SIZES` / `POOL_SIZE`).
 Schedule all three under your cron infrastructure (k8s `CronJob`,
@@ -325,7 +325,7 @@ exe.dev provider:
 | --- | --- | --- |
 | `EXE_API_TOKEN` | — (required) | Bearer token for the exe.dev exec API. |
 | `EXE_DEFAULT_IMAGE` | — (required) | Image used when the caller omits `image`. |
-| `EXE_TEMPLATE_REGISTRY` | — | Repository prefix for derived template images that exe.dev can pull. |
+| `EXE_TEMPLATE_REGISTRY` | — | Repository prefix for derived template images. A VM created from this registry gets `--registry-auth` so exe.dev can pull a private image. |
 | `EXE_REGISTRY_USERNAME` | — | Username for the derived-template image registry. |
 | `EXE_REGISTRY_PASSWORD` | — | Password or token for the derived-template image registry. |
 | `EXE_API_URL` | `https://exe.dev` | API base URL. |

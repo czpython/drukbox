@@ -89,7 +89,7 @@ class TemplateService:
                     get_vm_provider(template.provider),
                     TemplateCapability,
                 )
-                handle = await capability.materialize_template(
+                handle = await capability.create_template(
                     base_image=template.base_image,
                     setup_script=template.setup_script,
                     label=template.label,
@@ -124,7 +124,7 @@ class TemplateService:
         reap_status: TemplateStatus | None = None,
         reap_before: datetime | None = None,
     ) -> bool:
-        """Delete the template; return False when the maintenance guard spares it."""
+        """Delete the template. Return False when the maintenance guard spares it."""
         result = await self.session.execute(
             select(Template).where(Template.id == template_id).with_for_update()
         )

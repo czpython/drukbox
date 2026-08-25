@@ -15,7 +15,7 @@ async def test_diagnose_returns_email_from_whoami() -> None:
     """The probe surfaces the authenticated identity directly from whoami."""
     api = MagicMock()
     api.whoami = AsyncMock(return_value={"email": "ops@example.com"})
-    provider = ExeProvider(api, _settings(), docker=MagicMock())
+    provider = ExeProvider(api, _settings(), docker_cli=MagicMock())
 
     assert await provider.diagnose() == "ops@example.com"
 
@@ -25,7 +25,7 @@ async def test_diagnose_raises_on_whoami_failure() -> None:
     """A whoami error surfaces so the orchestrator can classify it."""
     api = MagicMock()
     api.whoami = AsyncMock(side_effect=RuntimeError("403"))
-    provider = ExeProvider(api, _settings(), docker=MagicMock())
+    provider = ExeProvider(api, _settings(), docker_cli=MagicMock())
 
     with pytest.raises(RuntimeError, match="403"):
         await provider.diagnose()

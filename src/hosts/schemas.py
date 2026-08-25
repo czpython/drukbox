@@ -22,7 +22,7 @@ class HostCreate(BaseModel):
     image: str | None = None
     template: str | None = Field(
         default=None,
-        description="Template ID or requirements hash. Used only when image is omitted.",
+        description="Template ID or requirements hash. Used only when the request has no image.",
     )
     env: dict[str, str] = Field(default_factory=dict)
     expires_at: datetime | None = None

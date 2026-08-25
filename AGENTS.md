@@ -10,7 +10,7 @@ a service, not a library.
 It owns:
 
 - Host records and lifecycle state in Postgres
-- Template records, asynchronous builds, and provider artifact lifecycle
+- Template records, async template builds, and their provider images
 - Inline provisioning in `POST /hosts`
 - Provider VM creation and deletion (exe.dev, AWS, Hetzner, Exoscale,
   local Docker, Docker Sandboxes)
@@ -20,7 +20,7 @@ It owns:
 - Account-bound exe.dev HTTP proxy resources
 
 Periodic maintenance runs as cron jobs: `python -m hosts.janitor` reaps
-expired hosts, `python -m templates.janitor` reaps abandoned and unused
+expired hosts, `python -m templates.janitor` reaps abandoned, failed, and unused
 templates, and `python -m hosts.pool` tops up the warm pool.
 
 No backwards compatibility is required unless a caller contract is explicitly

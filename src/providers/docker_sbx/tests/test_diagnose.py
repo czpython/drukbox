@@ -8,7 +8,7 @@ from providers.docker_sbx.settings import DockerSbxSettings
 
 
 def _provider(api: MagicMock) -> DockerSbxProvider:
-    return DockerSbxProvider(api, DockerSbxSettings(), docker=MagicMock())
+    return DockerSbxProvider(api, DockerSbxSettings(), docker_cli=MagicMock())
 
 
 @pytest.mark.asyncio

@@ -129,7 +129,7 @@ class DockerProvider(VMProvider, TemplateCapability):
         except DockerProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
 
-    async def materialize_template(
+    async def create_template(
         self,
         *,
         base_image: str,

@@ -28,7 +28,7 @@ def _docker_mock() -> SimpleNamespace:
 
 
 def _make_provider(api: object) -> ExeProvider:
-    return ExeProvider(api, _settings(), docker=_docker_mock())  # type: ignore[arg-type]
+    return ExeProvider(api, _settings(), docker_cli=_docker_mock())  # type: ignore[arg-type]
 
 
 async def test_create_vm_forwards_kwargs_and_maps_result() -> None:
@@ -57,11 +57,53 @@ async def test_create_vm_forwards_kwargs_and_maps_result() -> None:
         env={"K": "V"},
         setup_script="#!/bin/bash\necho hello",
         tags=["managed-by-drukbox"],
+        registry_auth=None,
     )
     assert result.provider_id == "sb-1234"
     assert result.name == "sb-1234"
     assert result.ssh_port == 2222
     assert result.ssh_host == "sb-1234.public.exe.dev"
+
+
+def _vm_payload() -> dict[str, str]:
+    return {"vm_name": "sb-1", "ssh_port": "22", "ssh_dest": "sb-1.public.exe.dev"}
+
+
+async def test_create_vm_sends_registry_auth_for_template_registry_images() -> None:
+    api = SimpleNamespace(create_vm=AsyncMock(return_value=_vm_payload()))
+    settings = _settings(
+        template_registry="ghcr.io/acme/templates",
+        registry_username="bot",
+        registry_password="secret",
+    )
+    provider = ExeProvider(api, settings, docker_cli=_docker_mock())  # type: ignore[arg-type]
+
+    await provider.create_vm(name="sb-1", image="ghcr.io/acme/templates:abc123")
+
+    assert api.create_vm.await_args.kwargs["registry_auth"] == "bot:secret"
+
+
+async def test_create_vm_keeps_credentials_off_other_registries() -> None:
+    api = SimpleNamespace(create_vm=AsyncMock(return_value=_vm_payload()))
+    settings = _settings(
+        template_registry="ghcr.io/acme/templates",
+        registry_username="bot",
+        registry_password="secret",
+    )
+    provider = ExeProvider(api, settings, docker_cli=_docker_mock())  # type: ignore[arg-type]
+
+    await provider.create_vm(name="sb-1", image="docker.io/library/ubuntu:24.04")
+
+    assert api.create_vm.await_args.kwargs["registry_auth"] is None
+
+
+async def test_create_vm_omits_registry_auth_when_registry_is_not_configured() -> None:
+    api = SimpleNamespace(create_vm=AsyncMock(return_value=_vm_payload()))
+    provider = _make_provider(api)
+
+    await provider.create_vm(name="sb-1", image="img:latest")
+
+    assert api.create_vm.await_args.kwargs["registry_auth"] is None
 
 
 async def test_delete_vm_delegates_to_api() -> None:
@@ -118,10 +160,10 @@ async def test_http_proxy_methods_delegate_to_api(method_name: str, kwargs: dict
 def test_from_settings_constructs_with_exeapi() -> None:
     provider = ExeProvider.from_settings()
     assert isinstance(provider.api, ExeAPI)
-    assert isinstance(provider.docker, DockerCLI)
+    assert isinstance(provider.docker_cli, DockerCLI)
 
 
-async def test_materialize_template_builds_logs_in_and_pushes() -> None:
+async def test_create_template_builds_logs_in_and_pushes() -> None:
     docker = _docker_mock()
     provider = ExeProvider(
         SimpleNamespace(),  # type: ignore[arg-type]
@@ -130,10 +172,10 @@ async def test_materialize_template_builds_logs_in_and_pushes() -> None:
             registry_username="builder",
             registry_password="registry-secret",
         ),
-        docker=docker,  # type: ignore[arg-type]
+        docker_cli=docker,  # type: ignore[arg-type]
     )
 
-    handle = await provider.materialize_template(
+    handle = await provider.create_template(
         base_image="exe/base:latest",
         setup_script="apt-get update",
         label="Node tools",
@@ -146,16 +188,16 @@ async def test_materialize_template_builds_logs_in_and_pushes() -> None:
     docker.push_image.assert_awaited_once_with(handle)
 
 
-async def test_materialize_template_names_each_missing_registry_setting() -> None:
+async def test_create_template_names_each_missing_registry_setting() -> None:
     docker = _docker_mock()
     provider = ExeProvider(
         SimpleNamespace(),  # type: ignore[arg-type]
         _settings(),
-        docker=docker,  # type: ignore[arg-type]
+        docker_cli=docker,  # type: ignore[arg-type]
     )
 
     with pytest.raises(ProviderCommandError) as error:
-        await provider.materialize_template(
+        await provider.create_template(
             base_image="exe/base:latest",
             setup_script="apt-get update",
             label="Node tools",
@@ -167,7 +209,7 @@ async def test_materialize_template_names_each_missing_registry_setting() -> Non
     docker.build_image.assert_not_awaited()
 
 
-async def test_materialize_template_translates_push_failure() -> None:
+async def test_create_template_translates_push_failure() -> None:
     docker = _docker_mock()
     docker.push_image.side_effect = DockerTransportError("push log tail")
     provider = ExeProvider(
@@ -177,11 +219,11 @@ async def test_materialize_template_translates_push_failure() -> None:
             registry_username="builder",
             registry_password="registry-secret",
         ),
-        docker=docker,  # type: ignore[arg-type]
+        docker_cli=docker,  # type: ignore[arg-type]
     )
 
     with pytest.raises(ProviderTransportError, match="push log tail"):
-        await provider.materialize_template(
+        await provider.create_template(
             base_image="exe/base:latest",
             setup_script="apt-get update",
             label="Node tools",
@@ -193,7 +235,7 @@ async def test_delete_template_removes_the_local_image() -> None:
     provider = ExeProvider(
         SimpleNamespace(),  # type: ignore[arg-type]
         _settings(),
-        docker=docker,  # type: ignore[arg-type]
+        docker_cli=docker,  # type: ignore[arg-type]
     )
 
     await provider.delete_template("ghcr.io/acme/drukbox-templates:123456789abc")
@@ -207,7 +249,7 @@ async def test_delete_template_translates_a_missing_local_image() -> None:
     provider = ExeProvider(
         SimpleNamespace(),  # type: ignore[arg-type]
         _settings(),
-        docker=docker,  # type: ignore[arg-type]
+        docker_cli=docker,  # type: ignore[arg-type]
     )
 
     with pytest.raises(ProviderNotFoundError, match="was not found"):

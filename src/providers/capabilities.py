@@ -44,14 +44,14 @@ class HttpProxyCapability(abc.ABC):
 
 
 class TemplateCapability(abc.ABC):
-    """Mix-in declaring a VMProvider can materialize reusable templates.
+    """Mix-in declaring a VMProvider can create and delete templates.
 
-    Modeled as an ABC so resolve_capability checks explicit provider support,
-    rather than accepting any object that happens to expose these method names.
+    Modeled as an ABC so resolve_capability checks the inheritance chain
+    instead of accepting any object that has these method names.
     """
 
     @abc.abstractmethod
-    async def materialize_template(
+    async def create_template(
         self,
         *,
         base_image: str,

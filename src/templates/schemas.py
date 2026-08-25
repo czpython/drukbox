@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class TemplateCreate(BaseModel):
     provider: str | None = Field(
         default=None,
-        description="VM provider to materialize on. Omit to use the service default.",
+        description="VM provider that builds the template. Omit to use the service default.",
     )
     base_image: str | None = Field(
         default=None,

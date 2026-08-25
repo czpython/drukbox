@@ -14,7 +14,7 @@ class StubTemplateProvider(TemplateCapability, VMProvider):
     diagnose_hint = "check_template_stub"
 
     def __init__(self) -> None:
-        self.materialized: list[tuple[str, str, str]] = []
+        self.created: list[tuple[str, str, str]] = []
         self.deleted: list[str] = []
         self.build_error: Exception | None = None
         self.delete_error: ProviderError | None = None
@@ -52,14 +52,14 @@ class StubTemplateProvider(TemplateCapability, VMProvider):
     async def aclose(self) -> None:
         return
 
-    async def materialize_template(
+    async def create_template(
         self,
         *,
         base_image: str,
         setup_script: str,
         label: str,
     ) -> str:
-        self.materialized.append((base_image, setup_script, label))
+        self.created.append((base_image, setup_script, label))
         if self.build_error:
             raise self.build_error
         return derived_image_tag(base_image=base_image, setup_script=setup_script)

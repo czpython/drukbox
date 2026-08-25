@@ -32,12 +32,12 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
         api: ExeAPI,
         settings: ExeSettings,
         *,
-        docker: DockerCLI,
+        docker_cli: DockerCLI,
         service_label: str = "drukbox",
     ) -> None:
         self.api = api
         self.settings = settings
-        self.docker = docker
+        self.docker_cli = docker_cli
         self._service_label = service_label
 
     @classmethod
@@ -46,7 +46,7 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
         return cls(
             ExeAPI.from_settings(),
             ExeSettings(),  # pyright: ignore[reportCallIssue]
-            docker=DockerCLI(),
+            docker_cli=DockerCLI(),
             service_label=core.service_label,
         )
 
@@ -68,6 +68,20 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
+        # exe.dev assumes a public image. A template pushed to the configured
+        # registry is private, so its pull gets --registry-auth (see
+        # https://exe.dev/docs/private-image). The credentials go only to
+        # the registry that they belong to.
+        registry_auth = None
+        registry = self.settings.template_registry
+        if (
+            registry
+            and self.settings.registry_username
+            and self.settings.registry_password
+            and image.partition("/")[0] == registry.partition("/")[0]
+        ):
+            registry_auth = f"{self.settings.registry_username}:{self.settings.registry_password}"
+
         # Tags are operator-facing: `exe ls --tag=managed-by-<env>` shows what this deployment owns.
         payload = await self.api.create_vm(
             name=name,
@@ -75,6 +89,7 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
             env=env,
             setup_script=setup_script,
             tags=[f"managed-by-{self._service_label}"],
+            registry_auth=registry_auth,
         )
         return VMCreateResult(
             provider_id=str(payload["vm_name"]),
@@ -93,7 +108,7 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
         except ExeVMNotFoundError as exc:
             raise ProviderNotFoundError(str(exc)) from exc
 
-    async def materialize_template(
+    async def create_template(
         self,
         *,
         base_image: str,
@@ -115,27 +130,27 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
                 if not value
             ]
             raise ProviderCommandError(
-                f"exe template registry is not configured; missing settings: "
-                f"{', '.join(missing_settings)}"
+                f"exe template registry is not configured. Set: {', '.join(missing_settings)}"
             )
 
         tag = await build_derived_image(
-            self.docker,
+            self.docker_cli,
             base_image=base_image,
             setup_script=setup_script,
             repository=registry,
         )
         registry_host, *_ = registry.partition("/")
         try:
-            await self.docker.login(registry_host, username, password)
-            await self.docker.push_image(tag)
+            await self.docker_cli.login(registry_host, username, password)
+            await self.docker_cli.push_image(tag)
         except DockerProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
         return tag
 
     async def delete_template(self, handle: str) -> None:
-        # Registry deletion is registry-specific; this provider only owns the local build tag.
-        await remove_derived_image(self.docker, handle)
+        # Registry deletion is registry-specific. This provider only removes
+        # the local build tag.
+        await remove_derived_image(self.docker_cli, handle)
 
     async def aclose(self) -> None:
         await self.api.aclose()

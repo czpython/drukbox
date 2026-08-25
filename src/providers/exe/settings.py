@@ -24,7 +24,10 @@ class ExeSettings(BaseSettings):
     )
     template_registry: str | None = Field(
         default=None,
-        description="Repository prefix for derived template images that exe.dev can pull.",
+        description=(
+            "Repository prefix for derived template images. A VM created from "
+            "this registry gets --registry-auth so exe.dev can pull a private image."
+        ),
     )
     registry_username: str | None = Field(
         default=None,

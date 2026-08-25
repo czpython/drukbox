@@ -62,18 +62,18 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
         api: SbxCLI,
         settings: DockerSbxSettings,
         *,
-        docker: DockerCLI,
+        docker_cli: DockerCLI,
     ) -> None:
         self.api = api
         self.settings = settings
-        self.docker = docker
+        self.docker_cli = docker_cli
 
     @classmethod
     def from_settings(cls) -> Self:
         return cls(
             SbxCLI(),
             DockerSbxSettings(),  # pyright: ignore[reportCallIssue]
-            docker=DockerCLI(),
+            docker_cli=DockerCLI(),
         )
 
     @property
@@ -179,7 +179,7 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
 
         self._remove_workspace(name)
 
-    async def materialize_template(
+    async def create_template(
         self,
         *,
         base_image: str,
@@ -187,13 +187,13 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
         label: str,
     ) -> str:
         return await build_derived_image(
-            self.docker,
+            self.docker_cli,
             base_image=base_image,
             setup_script=setup_script,
         )
 
     async def delete_template(self, handle: str) -> None:
-        await remove_derived_image(self.docker, handle)
+        await remove_derived_image(self.docker_cli, handle)
 
     async def diagnose(self) -> str:
         # The sandbox list is one fast check of the CLI, the daemon

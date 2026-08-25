@@ -22,7 +22,7 @@ AUTH_HEADERS = {"Authorization": "Bearer service-token"}
 SETUP_SCRIPT = "apt-get update && apt-get install -y nodejs"
 
 
-async def test_create_template_returns_building_then_materializes(client, template_provider):
+async def test_create_template_returns_building_then_becomes_available(client, template_provider):
     """Create returns the pollable building record before the background build result."""
     response = await client.post(
         "/templates",
@@ -56,7 +56,7 @@ async def test_create_template_returns_building_then_materializes(client, templa
         setup_script=SETUP_SCRIPT,
     )
     assert "setup_script" not in polled.json()
-    assert template_provider.materialized == [
+    assert template_provider.created == [
         (template_provider.default_image, SETUP_SCRIPT, "Node tools")
     ]
 
@@ -144,7 +144,7 @@ async def test_duplicate_create_returns_existing_without_rebuilding(client, temp
     assert second.json()["id"] == first.json()["id"]
     assert second.json()["status"] == TemplateStatus.AVAILABLE.value
     assert second.json()["label"] == "first label"
-    assert template_provider.materialized == [("stub:custom", SETUP_SCRIPT, "first label")]
+    assert template_provider.created == [("stub:custom", SETUP_SCRIPT, "first label")]
 
 
 async def test_concurrent_creates_resolve_unique_index_race(template_provider):
@@ -332,7 +332,7 @@ async def test_create_template_rejects_blank_script(client, template_provider):
 
     assert response.status_code == 422
     assert response.json()["detail"][0]["loc"] == ["body", "setup_script"]
-    assert template_provider.materialized == []
+    assert template_provider.created == []
 
 
 async def create_template_record(
