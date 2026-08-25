@@ -203,8 +203,12 @@ idle sandbox; a connection through the gateway wakes it (approximately
 6 seconds) and keeps it awake while connected. The first data can
 therefore come after a short delay.
 
-The gateway serves an interactive shell and command execution. It
-refuses SFTP, scp, and port forwarding.
+The gateway serves an interactive shell, command execution, and SFTP.
+It refuses scp (the legacy protocol) and port forwarding. SFTP runs the
+sandbox's own SFTP server over one persistent session for each SSH
+connection, thus repeated file operations on one connection start no new
+session. The session closes after a short idle period, so an inactive
+sandbox still sleeps.
 
 The gateway is a requirement for gateway providers: `POST /hosts` for
 `docker-sbx` fails without `GATEWAY_SSH_HOST`. Set it to the address

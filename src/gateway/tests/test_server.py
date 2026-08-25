@@ -97,6 +97,15 @@ def fake_provider(monkeypatch):
     return FakeProcess
 
 
+@pytest.fixture
+def local_provider(monkeypatch):
+    from gateway.tests.localprocess import LocalProcess
+
+    provider = SimpleNamespace(gateway_process_class=LocalProcess)
+    monkeypatch.setattr(gateway_server, "get_vm_provider", lambda name: provider)
+    return LocalProcess
+
+
 async def test_gateway_runs_a_command_and_returns_the_exit_status(gateway_settings, fake_provider):
     caller_key = asyncssh.generate_private_key("ssh-ed25519")
     await _insert_active_host("sb-gwtest", caller_key.export_public_key().decode())
@@ -279,20 +288,28 @@ async def test_gateway_reports_a_failed_dial_and_exits(gateway_settings, monkeyp
     assert "cannot open a session" in str(result.stderr)
 
 
-async def test_gateway_refuses_sftp(gateway_settings, fake_provider):
+async def test_gateway_streams_binary_stdin_to_an_exec_and_delivers_the_status(
+    gateway_settings, local_provider, tmp_path
+):
+    # The workspace-upload path streams a tar into an exec session's stdin and
+    # closes it. Binary must survive intact and the exit status come back.
     caller_key = asyncssh.generate_private_key("ssh-ed25519")
-    await _insert_active_host("sb-nosftp", caller_key.export_public_key().decode())
+    await _insert_active_host("sb-exec", caller_key.export_public_key().decode())
+    payload = bytes(range(256)) * 400
+    target = tmp_path / "received.bin"
 
     server = await gateway_server.start(gateway_settings)
     try:
         async with asyncssh.connect(
             "127.0.0.1",
             server.get_port(),
-            username="sb-nosftp",
+            username="sb-exec",
             client_keys=[caller_key],
             known_hosts=None,
         ) as connection:
-            with pytest.raises((asyncssh.SFTPError, asyncssh.ChannelOpenError)):
-                await connection.start_sftp_client()
+            result = await connection.run(f"cat > {target}; exit 4", input=payload, encoding=None)
     finally:
         server.close()
+
+    assert result.exit_status == 4
+    assert target.read_bytes() == payload
