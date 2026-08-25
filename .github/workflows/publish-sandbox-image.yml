@@ -1,13 +1,17 @@
-name: Publish Sandbox Image On Main Push
+name: Publish Sandbox Images On Main Push
 
-# The sandbox image is independent of the drukbox application code, so it only
-# rebuilds when its own build context (or this workflow) changes.
+# The sandbox images are independent of the drukbox application code, so they
+# only rebuild when their own build context (or this workflow) changes.
+# `local` is the docker provider's sandbox; `sbx` is the Docker Sandboxes
+# (docker-sbx provider) microVM template — the default DOCKER_SBX_DEFAULT_IMAGE
+# name, so the daemon can pull it instead of requiring `sbx template load`.
 on:
   push:
     branches:
       - main
     paths:
       - images/local/**
+      - images/sbx/**
       - .github/workflows/publish-sandbox-image.yml
   workflow_dispatch:
 
@@ -21,8 +25,15 @@ permissions:
 
 jobs:
   publish-sandbox-image:
-    name: Build And Publish Sandbox Image
+    name: Build And Publish ${{ matrix.image }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - context: images/local
+            image: sandbox
+          - context: images/sbx
+            image: sbx-sandbox
 
     steps:
       - name: Check out repository
@@ -45,7 +56,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository }}/sandbox
+          images: ghcr.io/${{ github.repository }}/${{ matrix.image }}
           tags: |
             type=ref,event=branch
             type=sha
@@ -54,11 +65,11 @@ jobs:
       - name: Build and push sandbox image
         uses: docker/build-push-action@v7
         with:
-          context: ./images/local
-          file: ./images/local/Dockerfile
+          context: ./${{ matrix.context }}
+          file: ./${{ matrix.context }}/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
