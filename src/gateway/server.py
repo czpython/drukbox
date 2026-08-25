@@ -37,6 +37,7 @@ class GatewayConnection(asyncssh.SSHServer):
     def __init__(self) -> None:
         self.host: Host | None = None
         self._sftp_backend: SandboxSftpBackend | None = None
+        self._cleanup: asyncio.Task[None] | None = None
 
     def sftp_backend(self) -> SandboxSftpBackend:
         """The connection's one SFTP backend, shared by every SFTP session.
@@ -50,9 +51,12 @@ class GatewayConnection(asyncssh.SSHServer):
         return self._sftp_backend
 
     def connection_lost(self, exc: Exception | None) -> None:
+        # Close the backend so its exec ends and the sandbox can sleep. The
+        # task reference is held until it finishes, or the loop may collect
+        # it mid-cleanup.
         if self._sftp_backend:
             with contextlib.suppress(RuntimeError):
-                asyncio.get_running_loop().create_task(self._sftp_backend.aclose())
+                self._cleanup = asyncio.get_running_loop().create_task(self._sftp_backend.aclose())
 
     def begin_auth(self, username: str) -> bool:
         return True

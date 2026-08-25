@@ -131,7 +131,10 @@ class SandboxSftpBackend:
             await self._teardown()
 
     async def _open(self) -> None:
-        process = await self._process_class.open(
+        # Record the process before the handshake, so a handshake failure
+        # still tears the process down instead of leaking a live exec that
+        # would keep the sandbox awake.
+        self._process = await self._process_class.open(
             self._host_name, command=SFTP_SERVER_COMMAND, terminal=None
         )
         # The client handler reads exact byte counts and writes framed
@@ -139,12 +142,15 @@ class SandboxSftpBackend:
         handler = SFTPClientHandler(
             asyncio.get_running_loop(),
             "strict",
-            cast(SSHReader, _ExecReader(process)),
-            cast(SSHWriter, _ExecWriter(process)),
+            cast(SSHReader, _ExecReader(self._process)),
+            cast(SSHWriter, _ExecWriter(self._process)),
             _SFTP_VERSION,
         )
-        await handler.start()
-        self._process = process
+        try:
+            await handler.start()
+        except Exception:
+            await self._teardown()
+            raise
         self._handler = handler
         self._recv_task = asyncio.create_task(handler.recv_packets())
         logger.info("gateway: sftp backend open host=%s", self._host_name)
@@ -159,7 +165,9 @@ class SandboxSftpBackend:
     async def _teardown(self) -> None:
         if self._recv_task:
             self._recv_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            # The task may already have finished with a pipe error; teardown
+            # only cares that it is done, not how it ended.
+            with contextlib.suppress(BaseException):
                 await self._recv_task
             self._recv_task = None
         if self._process:
