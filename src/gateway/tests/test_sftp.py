@@ -152,3 +152,27 @@ async def test_port_forwarding_stays_refused(connected):
     # The gateway serves no forwarding, thus the request is refused.
     with pytest.raises(asyncssh.ChannelOpenError):
         await connected.open_connection("127.0.0.1", 9)
+
+
+async def test_a_command_runs_with_home_at_the_per_host_home(connected, tmp_path):
+    result = await connected.run('printf %s "$HOME"')
+    assert result.stdout == str(tmp_path / "sb-sftp")
+
+
+async def test_sftp_relative_paths_resolve_under_the_home(connected, tmp_path):
+    async with connected.start_sftp_client() as sftp:
+        assert await sftp.realpath(".") == str(tmp_path / "sb-sftp")
+
+
+async def test_a_caller_writes_dotfiles_by_home_and_a_command_reads_them(connected, tmp_path):
+    # The caller pattern end to end: write a .gitconfig under the home over
+    # SFTP, then read it back through an exec session by $HOME.
+    gitconfig = tmp_path / "sb-sftp" / ".gitconfig"
+    async with (
+        connected.start_sftp_client() as sftp,
+        sftp.open(str(gitconfig), "wb") as handle,
+    ):
+        await handle.write(b"[user]\n\tname = Sandbox\n")
+
+    result = await connected.run("sh -c 'cat $HOME/.gitconfig'")
+    assert "name = Sandbox" in result.stdout

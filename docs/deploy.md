@@ -211,6 +211,12 @@ connection, thus repeated file operations on one connection start no new
 session. The session closes after a short idle period, so an inactive
 sandbox still sleeps.
 
+Every session runs with HOME set to the per-host home directory
+`/home/<host-name>`. The gateway makes this directory and moves into it
+first. Thus a caller writes files there — for example a `.gitconfig` or
+credential files — and a later command finds them by `$HOME`. SFTP
+relative paths also resolve against this home.
+
 The gateway is a requirement for gateway providers: `POST /hosts` for
 `docker-sbx` fails without `GATEWAY_SSH_HOST`. Set it to the address
 callers use. The response then carries the gateway coordinates:
