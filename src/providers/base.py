@@ -70,6 +70,14 @@ class VMProvider(abc.ABC):
     # gateway. None means the hosts have their own dialable sshd and the
     # gateway plays no part.
     gateway_process_class: ClassVar[type[SandboxProcess] | None] = None
+
+    @property
+    def sftp_server_command(self) -> str:
+        """The command that starts the OpenSSH SFTP server in this provider's
+        image. The gateway runs it to serve SFTP. Empty when the gateway does
+        not serve the provider."""
+        return ""
+
     # Remediation slug attached to a failed /doctor probe. Owned here because
     # the provider is what knows how its own dependency gets fixed.
     diagnose_hint: ClassVar[str]

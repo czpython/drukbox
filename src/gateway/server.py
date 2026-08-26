@@ -40,9 +40,8 @@ class GatewayConnection(asyncssh.SSHServer):
     """One caller connection. The key is the identity; the username must name
     the same host, so one leaked key cannot probe other host names."""
 
-    def __init__(self, sftp_server_command: str) -> None:
+    def __init__(self) -> None:
         self.host: Host | None = None
-        self._sftp_server_command = sftp_server_command
         self._sftp_backend: SandboxSftpBackend | None = None
         self._cleanup: asyncio.Task[None] | None = None
 
@@ -51,11 +50,11 @@ class GatewayConnection(asyncssh.SSHServer):
         session. It is made on first use; its process opens lazily."""
         assert self.host is not None
         if self._sftp_backend is None:
-            process_class = get_vm_provider(self.host.provider).gateway_process_class
-            if not process_class:
+            provider = get_vm_provider(self.host.provider)
+            if not provider.gateway_process_class:
                 raise asyncssh.SFTPOpUnsupported("cannot open a session for this host")
             self._sftp_backend = SandboxSftpBackend(
-                process_class, self.host.name, self._sftp_server_command
+                provider.gateway_process_class, self.host.name, provider.sftp_server_command
             )
         return self._sftp_backend
 
@@ -197,7 +196,7 @@ async def start(settings: GatewaySettings) -> asyncssh.SSHAcceptor:
         host=settings.bind_host,
         port=settings.ssh_port,
         server_host_keys=[_load_host_key(settings)],
-        server_factory=lambda: GatewayConnection(settings.sftp_server_command),
+        server_factory=GatewayConnection,
         process_factory=_bridge,
         encoding=None,
         allow_scp=False,

@@ -41,14 +41,15 @@ def gateway_settings(tmp_path):
         ssh_port=0,
         bind_host="127.0.0.1",
         host_key_path=tmp_path / "gateway_host_key",
-        sftp_server_command=SFTP_SERVER_COMMAND,
     )
 
 
 @pytest.fixture
 def local_provider(monkeypatch):
     LocalProcess.open_count = 0
-    provider = SimpleNamespace(gateway_process_class=LocalProcess)
+    provider = SimpleNamespace(
+        gateway_process_class=LocalProcess, sftp_server_command=SFTP_SERVER_COMMAND
+    )
     monkeypatch.setattr(gateway_server, "get_vm_provider", lambda name: provider)
     return LocalProcess
 

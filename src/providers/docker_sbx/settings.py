@@ -18,6 +18,14 @@ class DockerSbxSettings(BaseSettings):
         default="ghcr.io/czpython/drukbox/sbx-sandbox:latest",
         description="Template image that contains sshd. Build images/sbx/ to change it.",
     )
+    sftp_server_command: str = Field(
+        default="exec /usr/lib/openssh/sftp-server",
+        description=(
+            "Command that starts the OpenSSH SFTP server in the image. The "
+            "gateway runs it to serve SFTP. The default fits the standard "
+            "image; set it for an image with a different path."
+        ),
+    )
     ssh_username: str = Field(
         default="root",
         description="User in the sandbox for caller SSH access.",

@@ -70,6 +70,10 @@ class DockerSbxProvider(VMProvider):
         return self.settings.default_image
 
     @property
+    def sftp_server_command(self) -> str:
+        return self.settings.sftp_server_command
+
+    @property
     def bootstrap_ssh_timeout_seconds(self) -> float:
         return self.settings.bootstrap_ssh_timeout_seconds
 
