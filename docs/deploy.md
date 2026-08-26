@@ -295,9 +295,9 @@ Core, optional:
 | `SERVICE_LABEL` | `drukbox` | Label stamped onto provider resources (VM tags, SG tags). |
 | `UVICORN_HOST` | `0.0.0.0` | API bind address. Set `127.0.0.1` to restrict to loopback. |
 | `PROVISIONING_GRACE_SECONDS` | `600` | Safety TTL on in-flight hosts so the janitor reaps row + VM if the client disconnects mid-provision. Must exceed the worst-case provision duration. |
-| `TEMPLATE_BUILD_TIMEOUT_MINUTES` | `60` | Max age of an unfinished template build before the template janitor marks it failed. |
-| `TEMPLATE_FAILED_RETENTION_HOURS` | `24` | How long failed template records and diagnostics remain before the template janitor deletes them. |
-| `TEMPLATE_UNUSED_TTL_DAYS` | `14` | How long an available template remains after its last use, or creation when never used. |
+| `TEMPLATE_BUILD_TIMEOUT` | `3600` | Max age in seconds of an unfinished template build before the janitor marks it failed. |
+| `TEMPLATE_FAILED_RETENTION` | `86400` | Seconds that failed template records and diagnostics remain before the janitor deletes them. |
+| `TEMPLATE_UNUSED_TTL` | `1209600` | Seconds that an available template remains after its last use, or creation when never used. |
 | `LEASE_DEFAULT_TTL` | `86400` | Lease TTL in seconds for hosts created without an explicit `expires_at`, and the extension applied by an empty `POST /hosts/{id}/renew`. An explicit `expires_at: null` at create time opts out of expiry entirely. |
 | `IDEMPOTENCY_KEY_TTL_HOURS` | `24` | Retention period for successful `Idempotency-Key` mappings. |
 | `POOL_SIZES` | `{}` | Warm hosts to keep ready per provider, as JSON (e.g. `{"exe": 2, "hetzner": 1}`). Overrides `POOL_SIZE` for the providers it names. |
@@ -323,7 +323,7 @@ exe.dev provider:
 | --- | --- | --- |
 | `EXE_API_TOKEN` | — (required) | Bearer token for the exe.dev exec API. |
 | `EXE_DEFAULT_IMAGE` | — (required) | Image used when the caller omits `image`. |
-| `EXE_TEMPLATE_REGISTRY` | — | Repository prefix for derived template images. A VM created from this registry gets `--registry-auth` so exe.dev can pull a private image. |
+| `EXE_IMAGE_REGISTRY` | — | Repository prefix for derived template images. A VM created from this registry gets `--registry-auth` so exe.dev can pull a private image. |
 | `EXE_REGISTRY_USERNAME` | — | Username for the derived-template image registry. |
 | `EXE_REGISTRY_PASSWORD` | — | Password or token for the derived-template image registry. |
 | `EXE_API_URL` | `https://exe.dev` | API base URL. |

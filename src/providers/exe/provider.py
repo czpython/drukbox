@@ -73,7 +73,7 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
         # https://exe.dev/docs/private-image). The credentials go only to
         # the registry that they belong to.
         registry_auth = None
-        registry = self.settings.template_registry
+        registry = self.settings.image_registry
         if (
             registry
             and self.settings.registry_username
@@ -115,7 +115,7 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
         setup_script: str,
         label: str,
     ) -> str:
-        registry = self.settings.template_registry
+        registry = self.settings.image_registry
         username = self.settings.registry_username
         password = self.settings.registry_password
 
@@ -123,7 +123,7 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
             missing_settings = [
                 name
                 for name, value in (
-                    ("EXE_TEMPLATE_REGISTRY", registry),
+                    ("EXE_IMAGE_REGISTRY", registry),
                     ("EXE_REGISTRY_USERNAME", username),
                     ("EXE_REGISTRY_PASSWORD", password),
                 )

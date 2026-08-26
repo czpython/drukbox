@@ -92,9 +92,9 @@ def test_tailscale_disabled_ignores_missing_credentials(monkeypatch: pytest.Monk
         "POOL_SIZE",
         "POOL_HOST_MAX_AGE_HOURS",
         "POOL_MAX_CREATES_PER_TICK",
-        "TEMPLATE_BUILD_TIMEOUT_MINUTES",
-        "TEMPLATE_FAILED_RETENTION_HOURS",
-        "TEMPLATE_UNUSED_TTL_DAYS",
+        "TEMPLATE_BUILD_TIMEOUT",
+        "TEMPLATE_FAILED_RETENTION",
+        "TEMPLATE_UNUSED_TTL",
     ],
 )
 def test_numeric_settings_reject_negative_values(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
@@ -108,15 +108,15 @@ def test_template_maintenance_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch,
         {
             **_base_env(),
-            "TEMPLATE_BUILD_TIMEOUT_MINUTES": None,
-            "TEMPLATE_FAILED_RETENTION_HOURS": None,
-            "TEMPLATE_UNUSED_TTL_DAYS": None,
+            "TEMPLATE_BUILD_TIMEOUT": None,
+            "TEMPLATE_FAILED_RETENTION": None,
+            "TEMPLATE_UNUSED_TTL": None,
         },
     )
 
-    assert settings.template_build_timeout_minutes == 60
-    assert settings.template_failed_retention_hours == 24
-    assert settings.template_unused_ttl_days == 14
+    assert settings.template_build_timeout == 3600
+    assert settings.template_failed_retention == 86400
+    assert settings.template_unused_ttl == 1209600
 
 
 def test_pool_size_seeds_the_default_providers_target(monkeypatch: pytest.MonkeyPatch) -> None:

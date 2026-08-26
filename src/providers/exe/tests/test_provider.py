@@ -69,10 +69,10 @@ def _vm_payload() -> dict[str, str]:
     return {"vm_name": "sb-1", "ssh_port": "22", "ssh_dest": "sb-1.public.exe.dev"}
 
 
-async def test_create_vm_sends_registry_auth_for_template_registry_images() -> None:
+async def test_create_vm_sends_registry_auth_for_configured_registry_images() -> None:
     api = SimpleNamespace(create_vm=AsyncMock(return_value=_vm_payload()))
     settings = _settings(
-        template_registry="ghcr.io/acme/templates",
+        image_registry="ghcr.io/acme/templates",
         registry_username="bot",
         registry_password="secret",
     )
@@ -86,7 +86,7 @@ async def test_create_vm_sends_registry_auth_for_template_registry_images() -> N
 async def test_create_vm_keeps_credentials_off_other_registries() -> None:
     api = SimpleNamespace(create_vm=AsyncMock(return_value=_vm_payload()))
     settings = _settings(
-        template_registry="ghcr.io/acme/templates",
+        image_registry="ghcr.io/acme/templates",
         registry_username="bot",
         registry_password="secret",
     )
@@ -168,7 +168,7 @@ async def test_create_template_builds_logs_in_and_pushes() -> None:
     provider = ExeProvider(
         SimpleNamespace(),  # type: ignore[arg-type]
         _settings(
-            template_registry="ghcr.io/acme/drukbox-templates",
+            image_registry="ghcr.io/acme/drukbox-templates",
             registry_username="builder",
             registry_password="registry-secret",
         ),
@@ -203,7 +203,7 @@ async def test_create_template_names_each_missing_registry_setting() -> None:
             label="Node tools",
         )
 
-    assert "EXE_TEMPLATE_REGISTRY" in str(error.value)
+    assert "EXE_IMAGE_REGISTRY" in str(error.value)
     assert "EXE_REGISTRY_USERNAME" in str(error.value)
     assert "EXE_REGISTRY_PASSWORD" in str(error.value)
     docker.build_image.assert_not_awaited()
@@ -215,7 +215,7 @@ async def test_create_template_translates_push_failure() -> None:
     provider = ExeProvider(
         SimpleNamespace(),  # type: ignore[arg-type]
         _settings(
-            template_registry="ghcr.io/acme/drukbox-templates",
+            image_registry="ghcr.io/acme/drukbox-templates",
             registry_username="builder",
             registry_password="registry-secret",
         ),

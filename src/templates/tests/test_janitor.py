@@ -50,13 +50,13 @@ async def test_janitor_marks_only_abandoned_builds_failed(template_provider):
     abandoned = await _create_template(
         provider=template_provider.name,
         status=TemplateStatus.BUILDING,
-        age=timedelta(minutes=settings.template_build_timeout_minutes + 1),
+        age=timedelta(seconds=settings.template_build_timeout + 1),
         name="abandoned",
     )
     fresh = await _create_template(
         provider=template_provider.name,
         status=TemplateStatus.BUILDING,
-        age=timedelta(minutes=settings.template_build_timeout_minutes - 1),
+        age=timedelta(seconds=settings.template_build_timeout - 1),
         name="fresh",
     )
 
@@ -69,7 +69,7 @@ async def test_janitor_marks_only_abandoned_builds_failed(template_provider):
     assert abandoned
     assert abandoned.status == TemplateStatus.FAILED.value
     assert abandoned.last_error == (
-        f"build abandoned: exceeded {settings.template_build_timeout_minutes}-minute timeout"
+        f"build abandoned: exceeded the {settings.template_build_timeout}-second build timeout"
     )
     assert fresh
     assert fresh.status == TemplateStatus.BUILDING.value
@@ -81,13 +81,13 @@ async def test_janitor_reaps_only_failed_templates_past_retention(template_provi
     expired = await _create_template(
         provider=template_provider.name,
         status=TemplateStatus.FAILED,
-        age=timedelta(hours=settings.template_failed_retention_hours + 1),
+        age=timedelta(seconds=settings.template_failed_retention + 1),
         name="expired-failure",
     )
     recent = await _create_template(
         provider=template_provider.name,
         status=TemplateStatus.FAILED,
-        age=timedelta(hours=settings.template_failed_retention_hours - 1),
+        age=timedelta(seconds=settings.template_failed_retention - 1),
         name="recent-failure",
     )
 
@@ -100,8 +100,8 @@ async def test_janitor_reaps_only_failed_templates_past_retention(template_provi
 
 async def test_janitor_reaps_unused_templates_by_last_use(template_provider):
     settings = get_settings()
-    expired_age = timedelta(days=settings.template_unused_ttl_days + 1)
-    fresh_age = timedelta(days=settings.template_unused_ttl_days - 1)
+    expired_age = timedelta(seconds=settings.template_unused_ttl + 1)
+    fresh_age = timedelta(seconds=settings.template_unused_ttl - 1)
     never_used = await _create_template(
         provider=template_provider.name,
         status=TemplateStatus.AVAILABLE,
@@ -140,11 +140,11 @@ async def test_janitor_reaps_unused_templates_by_last_use(template_provider):
 
 async def test_delete_spares_template_used_after_candidate_selection(template_provider):
     settings = get_settings()
-    reap_before = utc_now() - timedelta(days=settings.template_unused_ttl_days)
+    reap_before = utc_now() - timedelta(seconds=settings.template_unused_ttl)
     template = await _create_template(
         provider=template_provider.name,
         status=TemplateStatus.AVAILABLE,
-        age=timedelta(days=settings.template_unused_ttl_days + 1),
+        age=timedelta(seconds=settings.template_unused_ttl + 1),
         name="leased-in-race",
         handle="stub-template:leased-in-race",
     )
@@ -174,7 +174,7 @@ async def test_janitor_removes_row_when_provider_artifact_is_already_gone(templa
     template = await _create_template(
         provider=template_provider.name,
         status=TemplateStatus.AVAILABLE,
-        age=timedelta(days=settings.template_unused_ttl_days + 1),
+        age=timedelta(seconds=settings.template_unused_ttl + 1),
         name="missing-artifact",
         handle="stub-template:missing-artifact",
     )
@@ -192,14 +192,14 @@ async def test_janitor_keeps_transport_failure_and_continues(template_provider, 
     failed_delete = await _create_template(
         provider=template_provider.name,
         status=TemplateStatus.AVAILABLE,
-        age=timedelta(days=settings.template_unused_ttl_days + 2),
+        age=timedelta(seconds=settings.template_unused_ttl + 2),
         name="failed-delete",
         handle="stub-template:failed-delete",
     )
     next_candidate = await _create_template(
         provider=template_provider.name,
         status=TemplateStatus.AVAILABLE,
-        age=timedelta(days=settings.template_unused_ttl_days + 1),
+        age=timedelta(seconds=settings.template_unused_ttl + 1),
         name="next-candidate",
         handle="stub-template:next-candidate",
     )

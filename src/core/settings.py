@@ -70,23 +70,27 @@ class Settings(BaseSettings):
         validation_alias="PROVISIONING_GRACE_SECONDS",
         description="Safety TTL on the host row while provisioning is in flight.",
     )
-    template_build_timeout_minutes: int = Field(
-        default=60,
+    template_build_timeout: int = Field(
+        default=3600,
         gt=0,
-        validation_alias="TEMPLATE_BUILD_TIMEOUT_MINUTES",
-        description="Minutes before an unfinished template build is considered abandoned.",
+        validation_alias="TEMPLATE_BUILD_TIMEOUT",
+        description=(
+            "Max age in seconds of an unfinished template build before the janitor marks it failed."
+        ),
     )
-    template_failed_retention_hours: int = Field(
-        default=24,
+    template_failed_retention: int = Field(
+        default=86400,
         gt=0,
-        validation_alias="TEMPLATE_FAILED_RETENTION_HOURS",
-        description="Hours to retain failed templates for diagnosis before deletion.",
+        validation_alias="TEMPLATE_FAILED_RETENTION",
+        description=(
+            "Seconds to keep failed templates for diagnosis before the janitor deletes them."
+        ),
     )
-    template_unused_ttl_days: int = Field(
-        default=14,
+    template_unused_ttl: int = Field(
+        default=1209600,
         gt=0,
-        validation_alias="TEMPLATE_UNUSED_TTL_DAYS",
-        description="Days to retain an available template after its last use.",
+        validation_alias="TEMPLATE_UNUSED_TTL",
+        description="Seconds to keep an available template after its last use.",
     )
     lease_default_ttl: int = Field(
         default=86400,

@@ -22,7 +22,7 @@ class ExeSettings(BaseSettings):
     default_image: str = Field(
         description="Default VM image passed to exe.dev when provisioning.",
     )
-    template_registry: str | None = Field(
+    image_registry: str | None = Field(
         default=None,
         description=(
             "Repository prefix for derived template images. A VM created from "

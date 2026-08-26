@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 async def reap_templates() -> None:
     settings = get_settings()
     now = utc_now()
-    build_cutoff = now - timedelta(minutes=settings.template_build_timeout_minutes)
-    failed_cutoff = now - timedelta(hours=settings.template_failed_retention_hours)
-    unused_cutoff = now - timedelta(days=settings.template_unused_ttl_days)
+    build_cutoff = now - timedelta(seconds=settings.template_build_timeout)
+    failed_cutoff = now - timedelta(seconds=settings.template_failed_retention)
+    unused_cutoff = now - timedelta(seconds=settings.template_unused_ttl)
 
     async with async_session_factory() as session:
         result = await session.execute(
@@ -46,8 +46,8 @@ async def reap_templates() -> None:
 
                 template.status = TemplateStatus.FAILED.value
                 template.last_error = (
-                    "build abandoned: exceeded "
-                    f"{settings.template_build_timeout_minutes}-minute timeout"
+                    "build abandoned: exceeded the "
+                    f"{settings.template_build_timeout}-second build timeout"
                 )
                 template.updated_at = utc_now()
                 await session.commit()
