@@ -36,3 +36,11 @@ class GatewaySettings(BaseSettings):
             "at start when the file does not exist."
         ),
     )
+    sftp_server_command: str = Field(
+        default="exec /usr/lib/openssh/sftp-server",
+        description=(
+            "Command that starts the OpenSSH SFTP server in a sandbox. The "
+            "gateway runs it to serve SFTP. The default fits the standard "
+            "Debian image; set it for an image with a different path."
+        ),
+    )

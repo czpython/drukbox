@@ -1,14 +1,13 @@
 import asyncio
-from typing import ClassVar
 
 from providers.base import SandboxProcess, TerminalSize
 
 SFTP_SERVER = "/usr/libexec/sftp-server"
+SFTP_SERVER_COMMAND = f"exec {SFTP_SERVER}"
 
 
 class LocalProcess(SandboxProcess):
     open_count = 0
-    sftp_server_command: ClassVar[str] = f"exec {SFTP_SERVER}"
 
     def __init__(self, process: asyncio.subprocess.Process) -> None:
         self._process = process

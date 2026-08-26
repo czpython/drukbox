@@ -9,7 +9,7 @@ import pytest
 from core.database import async_session_factory
 from gateway import server as gateway_server
 from gateway.settings import GatewaySettings
-from gateway.tests.localprocess import SFTP_SERVER, LocalProcess
+from gateway.tests.localprocess import SFTP_SERVER, SFTP_SERVER_COMMAND, LocalProcess
 from hosts.models import Host
 
 pytestmark = pytest.mark.skipif(
@@ -41,6 +41,7 @@ def gateway_settings(tmp_path):
         ssh_port=0,
         bind_host="127.0.0.1",
         host_key_path=tmp_path / "gateway_host_key",
+        sftp_server_command=SFTP_SERVER_COMMAND,
     )
 
 

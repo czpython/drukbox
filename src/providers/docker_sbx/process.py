@@ -5,7 +5,6 @@ import os
 import pty
 import struct
 import termios
-from typing import ClassVar
 
 from providers.base import SandboxProcess, TerminalSize
 from providers.exceptions import ProviderTransportError
@@ -20,9 +19,6 @@ class SbxExecProcess(SandboxProcess):
     """A live `sbx exec` process. A caller PTY request gets a local PTY pair,
     because the CLI refuses `-t` on pipes. The exec is a daemon session: a
     stopped sandbox wakes on open and stays awake while the process runs."""
-
-    # The sandbox image installs OpenSSH at the standard Debian path.
-    sftp_server_command: ClassVar[str] = "exec /usr/lib/openssh/sftp-server"
 
     def __init__(
         self,

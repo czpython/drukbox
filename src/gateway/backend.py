@@ -77,11 +77,13 @@ class SandboxSftpBackend:
         self,
         process_class: type[SandboxProcess],
         host_name: str,
+        sftp_server_command: str,
         *,
         idle_close_seconds: float = IDLE_CLOSE_SECONDS,
     ) -> None:
         self._process_class = process_class
         self._host_name = host_name
+        self._sftp_server_command = sftp_server_command
         self._idle_close_seconds = idle_close_seconds
         self._lock = asyncio.Lock()
         self._process: SandboxProcess | None = None
@@ -134,7 +136,7 @@ class SandboxSftpBackend:
         # the sandbox awake.
         self._process = await self._process_class.open(
             self._host_name,
-            command=self._process_class.sftp_server_command,
+            command=self._sftp_server_command,
             terminal=None,
         )
         # The client handler reads exact byte counts and writes framed

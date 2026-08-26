@@ -23,30 +23,26 @@ _RECEIVE_CHUNK_BYTES = 32768
 # handle. Two SFTP extensions ask the server to seek inside an open file:
 # server-side copy and sparse-range detection. The gateway cannot serve
 # them on an opaque handle. asyncssh advertises them from this class list
-# and gives no per-server control, so the gateway removes them once, before
-# it serves the first SFTP session.
+# and gives no per-server control, so the gateway removes them from the
+# list. The filter is idempotent, thus it can run on each SFTP session.
 _UNSUPPORTED_SFTP_EXTENSIONS = (b"copy-data", b"ranges@asyncssh.com")
-_extensions_disabled = False
 
 
 def _disable_unsupported_sftp_extensions() -> None:
-    global _extensions_disabled
-    if _extensions_disabled:
-        return
     asyncssh.sftp.SFTPServerHandler._extensions = [
         extension
         for extension in asyncssh.sftp.SFTPServerHandler._extensions
         if extension[0] not in _UNSUPPORTED_SFTP_EXTENSIONS
     ]
-    _extensions_disabled = True
 
 
 class GatewayConnection(asyncssh.SSHServer):
     """One caller connection. The key is the identity; the username must name
     the same host, so one leaked key cannot probe other host names."""
 
-    def __init__(self) -> None:
+    def __init__(self, sftp_server_command: str) -> None:
         self.host: Host | None = None
+        self._sftp_server_command = sftp_server_command
         self._sftp_backend: SandboxSftpBackend | None = None
         self._cleanup: asyncio.Task[None] | None = None
 
@@ -58,7 +54,9 @@ class GatewayConnection(asyncssh.SSHServer):
             process_class = get_vm_provider(self.host.provider).gateway_process_class
             if not process_class:
                 raise asyncssh.SFTPOpUnsupported("cannot open a session for this host")
-            self._sftp_backend = SandboxSftpBackend(process_class, self.host.name)
+            self._sftp_backend = SandboxSftpBackend(
+                process_class, self.host.name, self._sftp_server_command
+            )
         return self._sftp_backend
 
     def connection_lost(self, exc: Exception | None) -> None:
@@ -199,7 +197,7 @@ async def start(settings: GatewaySettings) -> asyncssh.SSHAcceptor:
         host=settings.bind_host,
         port=settings.ssh_port,
         server_host_keys=[_load_host_key(settings)],
-        server_factory=GatewayConnection,
+        server_factory=lambda: GatewayConnection(settings.sftp_server_command),
         process_factory=_bridge,
         encoding=None,
         allow_scp=False,

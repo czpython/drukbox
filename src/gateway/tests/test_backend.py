@@ -4,7 +4,7 @@ import os
 import pytest
 
 from gateway.backend import SandboxSftpBackend
-from gateway.tests.localprocess import SFTP_SERVER, LocalProcess
+from gateway.tests.localprocess import SFTP_SERVER, SFTP_SERVER_COMMAND, LocalProcess
 
 pytestmark = pytest.mark.skipif(
     not os.path.exists(SFTP_SERVER), reason="no local sftp-server to back the tests"
@@ -17,7 +17,7 @@ def _reset_open_count():
 
 
 def _backend(**kwargs) -> SandboxSftpBackend:
-    return SandboxSftpBackend(LocalProcess, "sb-backend", **kwargs)
+    return SandboxSftpBackend(LocalProcess, "sb-backend", SFTP_SERVER_COMMAND, **kwargs)
 
 
 async def test_the_process_opens_once_and_is_reused():
