@@ -4,8 +4,8 @@ from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import HttpProxyCapability, TemplateCapability
 from providers.docker.api import DockerCLI
-from providers.docker.derived_image import build_derived_image, remove_derived_image
 from providers.docker.exceptions import DockerProviderError
+from providers.docker.images import build_derived_image, remove_derived_image
 from providers.exceptions import (
     ProviderCommandError,
     ProviderHttpProxyExistsError,

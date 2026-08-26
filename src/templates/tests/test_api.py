@@ -12,7 +12,7 @@ from uuid6 import uuid7
 from core.database import async_session_factory
 from providers import registry as registry_module
 from providers.base import VMProvider
-from providers.docker.derived_image import derive_image_tag
+from providers.docker.images import derive_image_tag
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
 from templates.exceptions import TemplateStateError
 from templates.models import Template, TemplateStatus

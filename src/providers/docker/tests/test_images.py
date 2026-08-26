@@ -1,4 +1,4 @@
-from providers.docker.derived_image import create_build_context, derive_image_tag
+from providers.docker.images import create_build_context, derive_image_tag
 
 
 def test_create_build_context_contains_the_base_and_verbatim_script() -> None:

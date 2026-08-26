@@ -12,8 +12,8 @@ from providers.exceptions import (
 from providers.ssh_keys import generate_ed25519_keypair
 
 from .api import DockerCLI
-from .derived_image import build_derived_image, remove_derived_image
 from .exceptions import DockerProviderError, DockerVMNotFoundError
+from .images import build_derived_image, remove_derived_image
 from .settings import DockerSettings
 
 _AUTHORIZED_KEY_ENV = "DRUKBOX_AUTHORIZED_KEY"
