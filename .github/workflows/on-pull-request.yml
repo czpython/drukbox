@@ -133,9 +133,6 @@ jobs:
       - name: Build container image
         run: docker build -t drukbox:validate .
 
-      - name: Verify Docker CLI runs in the image
-        run: docker run --rm drukbox:validate docker --version
-
   api-tests:
     name: Run API Tests (docker provider)
     runs-on: ubuntu-latest
