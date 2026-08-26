@@ -4,8 +4,8 @@ import asyncssh
 
 from gateway.backend import SandboxSftpBackend
 
-# The SFTP protocol version drukbox speaks upstream and to callers. It has
-# no attribute flag, so a stat asks the server for everything it knows.
+# The SFTP protocol version drukbox speaks upstream and to callers. A stat
+# with these flags asks the server for every attribute it knows.
 _STAT_ALL = 0x8000_01FD
 
 
@@ -13,10 +13,10 @@ class GatewaySFTPServer(asyncssh.SFTPServer):
     """One caller SFTP session, forwarded to the sandbox's own SFTP server.
 
     The connection's backend holds the real upstream client. Every operation
-    delegates to it, so the sandbox's OpenSSH server does the file work and
-    its errors — already SFTP errors — pass straight back to the caller.
-    Many sessions share one backend, thus a per-session poll costs no new
-    process start.
+    delegates to it. Thus the sandbox's OpenSSH server does the file work,
+    and its errors — already SFTP errors — go straight back to the caller.
+    Many sessions share one backend, so a per-session poll starts no new
+    process.
     """
 
     def __init__(self, chan: asyncssh.SSHServerChannel, backend: SandboxSftpBackend) -> None:

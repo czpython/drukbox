@@ -19,15 +19,20 @@ logger = logging.getLogger(__name__)
 
 _RECEIVE_CHUNK_BYTES = 32768
 
-# The gateway forwards file operations to the sandbox by an opaque handle,
-# so the two SFTP extensions that ask the server to seek within a file —
-# server-side copy and sparse-range detection — cannot be served. Drop them
-# from the advertised set so clients do not try them.
-asyncssh.sftp.SFTPServerHandler._extensions = [
-    extension
-    for extension in asyncssh.sftp.SFTPServerHandler._extensions
-    if extension[0] not in (b"copy-data", b"ranges@asyncssh.com")
-]
+# The gateway forwards each file operation to the sandbox by an opaque
+# handle. Two SFTP extensions ask the server to seek inside an open file:
+# server-side copy and sparse-range detection. The gateway cannot serve
+# them on an opaque handle. asyncssh advertises them from this class list
+# and gives no per-server control, so the gateway removes them here.
+_UNSUPPORTED_SFTP_EXTENSIONS = (b"copy-data", b"ranges@asyncssh.com")
+
+
+def _disable_unsupported_sftp_extensions() -> None:
+    asyncssh.sftp.SFTPServerHandler._extensions = [
+        extension
+        for extension in asyncssh.sftp.SFTPServerHandler._extensions
+        if extension[0] not in _UNSUPPORTED_SFTP_EXTENSIONS
+    ]
 
 
 class GatewayConnection(asyncssh.SSHServer):
@@ -40,8 +45,8 @@ class GatewayConnection(asyncssh.SSHServer):
         self._cleanup: asyncio.Task[None] | None = None
 
     def sftp_backend(self) -> SandboxSftpBackend:
-        """The connection's one SFTP backend, shared by every SFTP session.
-        Made on first use; the process behind it opens lazily."""
+        """Return the connection's one SFTP backend, shared by every SFTP
+        session. It is made on first use; its process opens lazily."""
         assert self.host is not None
         if self._sftp_backend is None:
             process_class = get_vm_provider(self.host.provider).gateway_process_class
@@ -51,9 +56,9 @@ class GatewayConnection(asyncssh.SSHServer):
         return self._sftp_backend
 
     def connection_lost(self, exc: Exception | None) -> None:
-        # Close the backend so its exec ends and the sandbox can sleep. The
-        # task reference is held until it finishes, or the loop may collect
-        # it mid-cleanup.
+        # Close the backend, so its exec process ends and the sandbox can
+        # sleep. Keep the task until it finishes: the loop can otherwise
+        # collect it during the cleanup.
         if self._sftp_backend:
             with contextlib.suppress(RuntimeError):
                 self._cleanup = asyncio.get_running_loop().create_task(self._sftp_backend.aclose())
@@ -183,6 +188,7 @@ def _open_sftp(channel: asyncssh.SSHServerChannel) -> GatewaySFTPServer:
 
 
 async def start(settings: GatewaySettings) -> asyncssh.SSHAcceptor:
+    _disable_unsupported_sftp_extensions()
     server = await asyncssh.listen(
         host=settings.bind_host,
         port=settings.ssh_port,

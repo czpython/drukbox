@@ -11,22 +11,22 @@ from providers.base import SandboxProcess
 
 logger = logging.getLogger(__name__)
 
-# The sandbox's own OpenSSH SFTP server. The daemon owns the data plane,
-# thus file transfer runs this real server inside the sandbox and speaks
-# the SFTP protocol to it, rather than reimplementing file operations.
+# The sandbox's own OpenSSH SFTP server. The daemon owns the data plane.
+# Thus drukbox runs this real server in the sandbox and speaks SFTP to it.
+# drukbox does not reimplement the file operations.
 SFTP_SERVER_COMMAND = "exec /usr/lib/openssh/sftp-server"
 
 _SFTP_VERSION = 3
 
-# One `sbx exec` costs seconds of CLI startup, thus the server stays open
-# between operations. It closes after this idle period, so an unused
-# sandbox goes back to sleep, and opens again on the next operation.
+# One `sbx exec` costs seconds of CLI startup. Thus the server stays open
+# between operations. It closes after this idle time, so an unused sandbox
+# sleeps again, and it opens again on the next operation.
 IDLE_CLOSE_SECONDS = 30.0
 
 
 class _ExecReader:
-    """Adapts a process byte stream to the reader the SFTP client expects:
-    exact reads, a place for connection info, and a child logger."""
+    """Give the SFTP client the reader it expects on the process byte
+    stream: exact reads, connection info, and a child logger."""
 
     def __init__(self, process: SandboxProcess) -> None:
         self._process = process
@@ -71,8 +71,8 @@ class SandboxSftpBackend:
     """The one SFTP server behind every SFTP session on one SSH connection.
 
     An SFTP client drives the sandbox's own OpenSSH SFTP server over a
-    persistent `sbx exec`. Sessions share it, so per-session polling costs
-    no new process start. It closes after an idle period and opens again on
+    persistent `sbx exec`. The sessions share it, so a per-session poll
+    starts no new process. It closes after an idle time and opens again on
     the next use, so an inactive sandbox still sleeps.
     """
 
@@ -96,8 +96,9 @@ class SandboxSftpBackend:
 
     @contextlib.asynccontextmanager
     async def session(self) -> AsyncIterator[SFTPClientHandler]:
-        """The live SFTP handler for one operation. Opens the process on
-        first use; the idle timer runs only while nothing is in flight."""
+        """Give the live SFTP handler for one operation. It opens the
+        process on first use. The idle timer runs only when no operation
+        is in flight."""
         handler = await self._acquire()
         try:
             yield handler
@@ -131,14 +132,14 @@ class SandboxSftpBackend:
             await self._teardown()
 
     async def _open(self) -> None:
-        # Record the process before the handshake, so a handshake failure
-        # still tears the process down instead of leaking a live exec that
-        # would keep the sandbox awake.
+        # Store the process before the handshake. A failed handshake then
+        # closes the process, and does not leak a live exec that would keep
+        # the sandbox awake.
         self._process = await self._process_class.open(
             self._host_name, command=SFTP_SERVER_COMMAND, terminal=None
         )
         # The client handler reads exact byte counts and writes framed
-        # packets; the exec adapters supply exactly that surface.
+        # packets. The exec adapters give that surface.
         handler = SFTPClientHandler(
             asyncio.get_running_loop(),
             "strict",
@@ -165,8 +166,8 @@ class SandboxSftpBackend:
     async def _teardown(self) -> None:
         if self._recv_task:
             self._recv_task.cancel()
-            # The task may already have finished with a pipe error; teardown
-            # only cares that it is done, not how it ended.
+            # The task can already have ended with a pipe error. Teardown
+            # needs it to be done. How it ended does not matter.
             with contextlib.suppress(BaseException):
                 await self._recv_task
             self._recv_task = None

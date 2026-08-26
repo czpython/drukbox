@@ -15,8 +15,6 @@ from providers.exceptions import ProviderTransportError
 
 
 class FakeProcess(SandboxProcess):
-    """Consumes caller input until EOF, echoes one payload, exits with 7."""
-
     opened: ClassVar[list["FakeProcess"]] = []
 
     @classmethod

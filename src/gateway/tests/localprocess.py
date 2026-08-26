@@ -1,10 +1,3 @@
-"""A SandboxProcess that runs a command as a local subprocess.
-
-The gateway needs a process that runs a command with piped stdio. Locally
-that command is the host's own sftp-server (for SFTP tests) or bash (for
-exec tests), so the tests exercise real components without a sandbox.
-"""
-
 import asyncio
 
 from providers.base import SandboxProcess, TerminalSize
