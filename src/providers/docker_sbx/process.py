@@ -15,6 +15,12 @@ def _set_terminal_size(descriptor: int, size: TerminalSize) -> None:
     fcntl.ioctl(descriptor, termios.TIOCSWINSZ, winsize)
 
 
+def _session_script(name: str, command: str | None) -> str:
+    home = f"/home/{name}"
+    payload = command if command is not None else "exec bash -l"
+    return f"mkdir -p {home} && cd {home} && export HOME={home}\n{payload}"
+
+
 class SbxExecProcess(SandboxProcess):
     """A live `sbx exec` process. A caller PTY request gets a local PTY pair,
     because the CLI refuses `-t` on pipes. The exec is a daemon session: a
@@ -45,9 +51,7 @@ class SbxExecProcess(SandboxProcess):
         argv = ["sbx", "exec", "--interactive"]
         if terminal:
             argv.append("--tty")
-        argv.extend([name, "bash", "-l"])
-        if command is not None:
-            argv.extend(["-c", command])
+        argv.extend([name, "bash", "-l", "-c", _session_script(name, command)])
         environment = {**os.environ, "SBX_NO_TELEMETRY": "1"}
 
         try:

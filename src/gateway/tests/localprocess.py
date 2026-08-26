@@ -1,4 +1,5 @@
 import asyncio
+import os
 
 from providers.base import SandboxProcess, TerminalSize
 
@@ -8,6 +9,9 @@ SFTP_SERVER_COMMAND = f"exec {SFTP_SERVER}"
 
 class LocalProcess(SandboxProcess):
     open_count = 0
+    # Per-host homes live under this root. A test points it at a writable
+    # temporary directory, the way the sandbox uses /home.
+    home_root = "/tmp"
 
     def __init__(self, process: asyncio.subprocess.Process) -> None:
         self._process = process
@@ -15,12 +19,16 @@ class LocalProcess(SandboxProcess):
     @classmethod
     async def open(cls, name, *, command, terminal):
         cls.open_count += 1
+        home = os.path.join(cls.home_root, name)
+        os.makedirs(home, exist_ok=True)
         argv = ["bash", "-c", command] if command else ["bash"]
         process = await asyncio.create_subprocess_exec(
             *argv,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=home,
+            env={**os.environ, "HOME": home},
             start_new_session=True,
         )
         return cls(process)

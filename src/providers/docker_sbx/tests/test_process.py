@@ -4,7 +4,7 @@ import os
 import pytest
 
 from providers.base import TerminalSize
-from providers.docker_sbx.process import SbxExecProcess
+from providers.docker_sbx.process import SbxExecProcess, _session_script
 from providers.exceptions import ProviderTransportError
 
 _REAL_EXEC = asyncio.create_subprocess_exec
@@ -39,7 +39,7 @@ async def test_exec_session_bridges_pipes_in_both_directions(monkeypatch):
     status = await session.wait()
     await session.aclose()
 
-    assert captured["argv"] == (
+    assert captured["argv"][:7] == (
         "sbx",
         "exec",
         "--interactive",
@@ -47,8 +47,8 @@ async def test_exec_session_bridges_pipes_in_both_directions(monkeypatch):
         "bash",
         "-l",
         "-c",
-        "true",
     )
+    assert captured["argv"][7] == _session_script("sb-test", "true")
     assert output == b"round-trip"
     assert status == 5
 
@@ -84,7 +84,8 @@ async def test_terminal_request_allocates_a_real_pty_at_the_requested_size(monke
     await session.aclose()
 
     assert "--tty" in captured["argv"]
-    assert captured["argv"][-2:] == ("bash", "-l")
+    assert captured["argv"][-4:-1] == ("bash", "-l", "-c")
+    assert captured["argv"][-1] == _session_script("sb-test", None)
     assert b"ISTTY" in output
     assert b"42 101" in output
     assert status == 3
@@ -105,6 +106,21 @@ async def test_aclose_releases_the_terminal_descriptor(monkeypatch):
 
     with pytest.raises(OSError):
         os.fstat(master)
+
+
+def test_session_prepares_the_per_host_home_before_the_command():
+    script = _session_script("sb-abc", "git status")
+    assert "mkdir -p /home/sb-abc" in script
+    assert "export HOME=/home/sb-abc" in script
+    # The home exists and HOME is set before the command runs.
+    assert script.index("mkdir -p /home/sb-abc") < script.index("git status")
+    assert script.index("export HOME=/home/sb-abc") < script.index("git status")
+
+
+def test_session_without_a_command_runs_a_login_shell_in_the_home():
+    script = _session_script("sb-abc", None)
+    assert "mkdir -p /home/sb-abc" in script
+    assert script.endswith("exec bash -l")
 
 
 async def test_missing_sbx_binary_maps_to_transport_error(monkeypatch):
