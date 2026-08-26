@@ -53,9 +53,7 @@ class GatewayConnection(asyncssh.SSHServer):
             provider = get_vm_provider(self.host.provider)
             if not provider.gateway_process_class:
                 raise asyncssh.SFTPOpUnsupported("cannot open a session for this host")
-            self._sftp_backend = SandboxSftpBackend(
-                provider.gateway_process_class, self.host.name, provider.sftp_server_command
-            )
+            self._sftp_backend = SandboxSftpBackend(provider.gateway_process_class, self.host.name)
         return self._sftp_backend
 
     def connection_lost(self, exc: Exception | None) -> None:
