@@ -1,7 +1,7 @@
 import io
 import tarfile
 
-from providers.docker.images import create_build_context, derive_image_tag
+from providers.docker.images import create_build_context, derive_image_name
 
 
 def test_create_build_context_contains_the_base_and_verbatim_script() -> None:
@@ -22,10 +22,10 @@ def test_create_build_context_contains_the_base_and_verbatim_script() -> None:
         )
 
 
-def test_derive_image_tag_is_deterministic_and_base_specific() -> None:
-    first = derive_image_tag(base_image="sandbox:base", setup_script="apt-get update")
-    repeated = derive_image_tag(base_image="sandbox:base", setup_script="apt-get update")
-    different_base = derive_image_tag(base_image="sandbox:other", setup_script="apt-get update")
+def test_derive_image_name_is_deterministic_and_base_specific() -> None:
+    first = derive_image_name(base_image="sandbox:base", setup_script="apt-get update")
+    repeated = derive_image_name(base_image="sandbox:base", setup_script="apt-get update")
+    different_base = derive_image_name(base_image="sandbox:other", setup_script="apt-get update")
 
     assert first == repeated
     assert first.startswith("drukbox-template:")

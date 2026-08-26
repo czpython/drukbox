@@ -29,7 +29,7 @@ class DockerAPI:
     def __init__(self, docker: aiodocker.Docker | None = None) -> None:
         self._docker = docker
 
-    def _client(self) -> aiodocker.Docker:
+    def _get_client(self) -> aiodocker.Docker:
         if not self._docker:
             try:
                 self._docker = aiodocker.Docker()
@@ -60,14 +60,14 @@ class DockerAPI:
             },
         }
         try:
-            container = await self._client().containers.run(config, name=name)
+            container = await self._get_client().containers.run(config, name=name)
         except (aiodocker.DockerError, aiohttp.ClientError) as exc:
             raise DockerTransportError(_detail(exc)) from exc
         return container.id
 
     async def published_ssh_port(self, name: str) -> int:
         try:
-            bindings = await self._client().containers.container(name).port(22)
+            bindings = await self._get_client().containers.container(name).port(22)
         except aiodocker.DockerError as exc:
             if exc.status == 404:
                 raise DockerVMNotFoundError(str(exc)) from exc
@@ -82,7 +82,7 @@ class DockerAPI:
 
     async def remove_container(self, name: str) -> None:
         try:
-            await self._client().containers.container(name).delete(force=True, v=True)
+            await self._get_client().containers.container(name).delete(force=True, v=True)
         except aiodocker.DockerError as exc:
             if exc.status == 404:
                 raise DockerVMNotFoundError(str(exc)) from exc
@@ -90,19 +90,19 @@ class DockerAPI:
         except aiohttp.ClientError as exc:
             raise DockerTransportError(str(exc)) from exc
 
-    async def build_image(self, tag: str, context_tar: bytes) -> None:
+    async def build_image(self, image: str, context_tar: bytes) -> None:
         try:
-            await self._client().images.build(
+            await self._get_client().images.build(
                 fileobj=io.BytesIO(context_tar),
                 encoding="gzip",
-                tag=tag,
+                tag=image,
             )
         except (aiodocker.DockerError, aiohttp.ClientError) as exc:
             raise DockerTransportError(_detail(exc)) from exc
 
-    async def remove_image(self, tag: str) -> None:
+    async def remove_image(self, image: str) -> None:
         try:
-            await self._client().images.delete(tag)
+            await self._get_client().images.delete(image)
         except aiodocker.DockerError as exc:
             if exc.status == 404:
                 raise DockerImageNotFoundError(str(exc)) from exc
@@ -112,7 +112,7 @@ class DockerAPI:
 
     async def push_image(
         self,
-        tag: str,
+        image: str,
         *,
         username: str | None = None,
         password: str | None = None,
@@ -121,13 +121,13 @@ class DockerAPI:
         # global docker credential store is never touched.
         auth = {"username": username, "password": password} if username and password else None
         try:
-            await self._client().images.push(tag, auth=auth)
+            await self._get_client().images.push(image, auth=auth)
         except (aiodocker.DockerError, aiohttp.ClientError) as exc:
             raise DockerTransportError(_detail(exc)) from exc
 
     async def server_version(self) -> str:
         try:
-            version = await self._client().version()
+            version = await self._get_client().version()
         except (aiodocker.DockerError, aiohttp.ClientError) as exc:
             raise DockerTransportError(_detail(exc)) from exc
         return str(version["Version"])

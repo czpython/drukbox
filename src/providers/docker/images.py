@@ -8,7 +8,7 @@ from .api import DockerAPI
 from .exceptions import DockerImageNotFoundError, DockerProviderError
 
 
-def derive_image_tag(
+def derive_image_name(
     *,
     base_image: str,
     setup_script: str,
@@ -43,17 +43,17 @@ async def build_derived_image(
     setup_script: str,
     repository: str = "drukbox-template",
 ) -> str:
-    tag = derive_image_tag(
+    image = derive_image_name(
         base_image=base_image,
         setup_script=setup_script,
         repository=repository,
     )
     context_tar = create_build_context(base_image=base_image, setup_script=setup_script)
     try:
-        await docker.build_image(tag, context_tar)
+        await docker.build_image(image, context_tar)
     except DockerProviderError as exc:
         raise ProviderTransportError(str(exc)) from exc
-    return tag
+    return image
 
 
 async def remove_derived_image(docker: DockerAPI, image: str) -> None:

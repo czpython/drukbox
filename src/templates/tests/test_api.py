@@ -12,7 +12,7 @@ from uuid6 import uuid7
 from core.database import async_session_factory
 from providers import registry as registry_module
 from providers.base import VMProvider
-from providers.docker.images import derive_image_tag
+from providers.docker.images import derive_image_name
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
 from templates.exceptions import TemplateStateError
 from templates.models import Template, TemplateStatus
@@ -51,7 +51,7 @@ async def test_create_template_returns_building_then_becomes_available(client, t
 
     assert polled.status_code == 200
     assert polled.json()["status"] == TemplateStatus.AVAILABLE.value
-    assert polled.json()["image"] == derive_image_tag(
+    assert polled.json()["image"] == derive_image_name(
         base_image=template_provider.default_image,
         setup_script=SETUP_SCRIPT,
     )

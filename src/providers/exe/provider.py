@@ -133,21 +133,21 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
                 f"exe template registry is not configured. Set: {', '.join(missing_settings)}"
             )
 
-        tag = await build_derived_image(
+        image = await build_derived_image(
             self.docker,
             base_image=base_image,
             setup_script=setup_script,
             repository=registry,
         )
         try:
-            await self.docker.push_image(tag, username=username, password=password)
+            await self.docker.push_image(image, username=username, password=password)
         except DockerProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
-        return tag
+        return image
 
     async def delete_template_image(self, image: str) -> None:
         # Registry deletion is registry-specific. This provider only removes
-        # the local build tag.
+        # the local image.
         await remove_derived_image(self.docker, image)
 
     async def aclose(self) -> None:
