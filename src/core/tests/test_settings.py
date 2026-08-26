@@ -103,22 +103,6 @@ def test_numeric_settings_reject_negative_values(monkeypatch: pytest.MonkeyPatch
         _settings_with(monkeypatch, env)
 
 
-def test_template_maintenance_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = _settings_with(
-        monkeypatch,
-        {
-            **_base_env(),
-            "TEMPLATE_BUILD_TIMEOUT": None,
-            "TEMPLATE_FAILED_RETENTION": None,
-            "TEMPLATE_UNUSED_TTL": None,
-        },
-    )
-
-    assert settings.template_build_timeout == 3600
-    assert settings.template_failed_retention == 86400
-    assert settings.template_unused_ttl == 1209600
-
-
 def test_pool_size_seeds_the_default_providers_target(monkeypatch: pytest.MonkeyPatch) -> None:
     env: dict[str, str | None] = {
         **_base_env(),

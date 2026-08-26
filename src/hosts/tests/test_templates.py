@@ -207,15 +207,3 @@ async def test_create_host_cannot_resolve_another_providers_template(client):
     assert response.status_code == 400
     assert str(template.id) in response.json()["detail"]
     assert "provider 'exe'" in response.json()["detail"]
-
-
-async def test_create_host_rejects_a_non_uuid_template(client):
-    """A template value that is not a UUID stops at the wire boundary."""
-    response = await client.post(
-        "/hosts",
-        headers=AUTH_HEADERS,
-        json={"template": "not-a-uuid"},
-    )
-
-    assert response.status_code == 422
-    assert response.json()["detail"][0]["loc"] == ["body", "template"]

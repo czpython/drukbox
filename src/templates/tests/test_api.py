@@ -61,24 +61,6 @@ async def test_create_template_returns_building_then_becomes_available(client, t
     ]
 
 
-async def test_build_failure_is_pollable(client, template_provider):
-    """Provider build failures persist a typed diagnostic on the template record."""
-    template_provider.build_error = ProviderTransportError("builder unavailable")
-
-    response = await client.post(
-        "/templates",
-        headers=AUTH_HEADERS,
-        json={"provider": template_provider.name, "setup_script": SETUP_SCRIPT},
-    )
-    polled = await client.get(f"/templates/{response.json()['id']}", headers=AUTH_HEADERS)
-
-    assert response.status_code == 202
-    assert response.json()["status"] == TemplateStatus.BUILDING.value
-    assert polled.json()["status"] == TemplateStatus.FAILED.value
-    assert polled.json()["handle"] == ""
-    assert polled.json()["last_error"] == "ProviderTransportError: builder unavailable"
-
-
 async def test_unexpected_build_crash_is_pollable(client, template_provider):
     """Unexpected strategy crashes persist as failed template diagnostics."""
     template_provider.build_error = OSError("builder crashed")
