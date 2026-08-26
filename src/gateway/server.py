@@ -3,10 +3,13 @@ import contextlib
 import logging
 
 import asyncssh
+import asyncssh.sftp
 from sqlalchemy import select
 
 from core.database import async_session_factory
+from gateway.backend import SandboxSftpBackend
 from gateway.settings import GatewaySettings
+from gateway.sftp import GatewaySFTPServer
 from hosts.models import Host, HostStatus
 from providers.base import SandboxProcess, TerminalSize
 from providers.exceptions import ProviderError
@@ -16,6 +19,22 @@ logger = logging.getLogger(__name__)
 
 _RECEIVE_CHUNK_BYTES = 32768
 
+# The gateway forwards each file operation to the sandbox by an opaque
+# handle. Two SFTP extensions ask the server to seek inside an open file:
+# server-side copy and sparse-range detection. The gateway cannot serve
+# them on an opaque handle. asyncssh advertises them from this class list
+# and gives no per-server control, so the gateway removes them from the
+# list. The filter is idempotent, thus it can run on each SFTP session.
+_UNSUPPORTED_SFTP_EXTENSIONS = (b"copy-data", b"ranges@asyncssh.com")
+
+
+def _disable_unsupported_sftp_extensions() -> None:
+    asyncssh.sftp.SFTPServerHandler._extensions = [
+        extension
+        for extension in asyncssh.sftp.SFTPServerHandler._extensions
+        if extension[0] not in _UNSUPPORTED_SFTP_EXTENSIONS
+    ]
+
 
 class GatewayConnection(asyncssh.SSHServer):
     """One caller connection. The key is the identity; the username must name
@@ -23,6 +42,27 @@ class GatewayConnection(asyncssh.SSHServer):
 
     def __init__(self) -> None:
         self.host: Host | None = None
+        self._sftp_backend: SandboxSftpBackend | None = None
+        self._cleanup: asyncio.Task[None] | None = None
+
+    def sftp_backend(self) -> SandboxSftpBackend:
+        """Return the connection's one SFTP backend, shared by every SFTP
+        session. It is made on first use; its process opens lazily."""
+        assert self.host is not None
+        if self._sftp_backend is None:
+            provider = get_vm_provider(self.host.provider)
+            if not provider.gateway_process_class:
+                raise asyncssh.SFTPOpUnsupported("cannot open a session for this host")
+            self._sftp_backend = SandboxSftpBackend(provider.gateway_process_class, self.host.name)
+        return self._sftp_backend
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        # Close the backend, so its exec process ends and the sandbox can
+        # sleep. Keep the task until it finishes: the loop can otherwise
+        # collect it during the cleanup.
+        if self._sftp_backend:
+            with contextlib.suppress(RuntimeError):
+                self._cleanup = asyncio.get_running_loop().create_task(self._sftp_backend.aclose())
 
     def begin_auth(self, username: str) -> bool:
         return True
@@ -142,6 +182,13 @@ def _load_host_key(settings: GatewaySettings) -> asyncssh.SSHKey:
     return key
 
 
+def _open_sftp(channel: asyncssh.SSHServerChannel) -> GatewaySFTPServer:
+    _disable_unsupported_sftp_extensions()
+    server = channel.get_connection().get_owner()
+    assert isinstance(server, GatewayConnection)
+    return GatewaySFTPServer(channel, server.sftp_backend())
+
+
 async def start(settings: GatewaySettings) -> asyncssh.SSHAcceptor:
     server = await asyncssh.listen(
         host=settings.bind_host,
@@ -151,7 +198,7 @@ async def start(settings: GatewaySettings) -> asyncssh.SSHAcceptor:
         process_factory=_bridge,
         encoding=None,
         allow_scp=False,
-        sftp_factory=None,
+        sftp_factory=_open_sftp,
         agent_forwarding=False,
         x11_forwarding=False,
     )
