@@ -11,7 +11,7 @@ from providers.exceptions import (
 )
 from providers.ssh_keys import generate_ed25519_keypair
 
-from .api import DockerCLI
+from .api import DockerAPI
 from .exceptions import DockerProviderError, DockerVMNotFoundError
 from .images import build_derived_image, remove_derived_image
 from .settings import DockerSettings
@@ -30,7 +30,7 @@ class DockerProvider(VMProvider, TemplateCapability):
 
     def __init__(
         self,
-        api: DockerCLI,
+        api: DockerAPI,
         settings: DockerSettings,
         *,
         service_label: str = "drukbox",
@@ -43,7 +43,7 @@ class DockerProvider(VMProvider, TemplateCapability):
     def from_settings(cls) -> Self:
         core = get_settings()
         return cls(
-            DockerCLI(),
+            DockerAPI(),
             DockerSettings(),  # pyright: ignore[reportCallIssue]
             service_label=core.service_label,
         )
@@ -149,4 +149,4 @@ class DockerProvider(VMProvider, TemplateCapability):
         return f"docker server {await self.api.server_version()}"
 
     async def aclose(self) -> None:
-        return
+        await self.api.aclose()

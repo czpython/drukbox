@@ -42,9 +42,9 @@ def _provider(
     api: MagicMock,
     settings: DockerSbxSettings,
     *,
-    docker_cli: MagicMock | None = None,
+    docker: MagicMock | None = None,
 ) -> DockerSbxProvider:
-    return DockerSbxProvider(api, settings, docker_cli=docker_cli or _docker_mock())
+    return DockerSbxProvider(api, settings, docker=docker or _docker_mock())
 
 
 @pytest.mark.asyncio
@@ -216,7 +216,7 @@ async def test_delete_vm_keeps_the_workspace_when_teardown_fails(tmp_path):
 async def test_build_template_image_builds_and_returns_the_local_image_tag(tmp_path):
     api = _api_mock()
     docker = _docker_mock()
-    provider = _provider(api, _settings(tmp_path), docker_cli=docker)
+    provider = _provider(api, _settings(tmp_path), docker=docker)
 
     image = await provider.build_template_image(
         base_image="sandbox:base",
@@ -232,7 +232,7 @@ async def test_build_template_image_builds_and_returns_the_local_image_tag(tmp_p
 async def test_delete_template_image_removes_the_local_image(tmp_path):
     api = _api_mock()
     docker = _docker_mock()
-    provider = _provider(api, _settings(tmp_path), docker_cli=docker)
+    provider = _provider(api, _settings(tmp_path), docker=docker)
 
     await provider.delete_template_image("drukbox-template:123456789abc")
 
@@ -244,7 +244,7 @@ async def test_delete_template_image_translates_a_missing_image(tmp_path):
     api = _api_mock()
     docker = _docker_mock()
     docker.remove_image.side_effect = DockerImageNotFoundError("No such image")
-    provider = _provider(api, _settings(tmp_path), docker_cli=docker)
+    provider = _provider(api, _settings(tmp_path), docker=docker)
 
     with pytest.raises(ProviderNotFoundError, match="was not found"):
         await provider.delete_template_image("drukbox-template:missing")

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from providers.docker.api import DockerCLI
+from providers.docker.api import DockerAPI
 from providers.docker.exceptions import DockerImageNotFoundError, DockerTransportError
 from providers.exceptions import ProviderCommandError, ProviderNotFoundError, ProviderTransportError
 from providers.exe.api import ExeAPI
@@ -23,12 +23,12 @@ def _docker_mock() -> SimpleNamespace:
         build_image=AsyncMock(),
         remove_image=AsyncMock(),
         push_image=AsyncMock(),
-        login=AsyncMock(),
+        aclose=AsyncMock(),
     )
 
 
 def _make_provider(api: object) -> ExeProvider:
-    return ExeProvider(api, _settings(), docker_cli=_docker_mock())  # type: ignore[arg-type]
+    return ExeProvider(api, _settings(), docker=_docker_mock())  # type: ignore[arg-type]
 
 
 async def test_create_vm_forwards_kwargs_and_maps_result() -> None:
@@ -76,7 +76,7 @@ async def test_create_vm_sends_registry_auth_for_configured_registry_images() ->
         registry_username="bot",
         registry_password="secret",
     )
-    provider = ExeProvider(api, settings, docker_cli=_docker_mock())  # type: ignore[arg-type]
+    provider = ExeProvider(api, settings, docker=_docker_mock())  # type: ignore[arg-type]
 
     await provider.create_vm(name="sb-1", image="ghcr.io/acme/templates:abc123")
 
@@ -90,7 +90,7 @@ async def test_create_vm_keeps_credentials_off_other_registries() -> None:
         registry_username="bot",
         registry_password="secret",
     )
-    provider = ExeProvider(api, settings, docker_cli=_docker_mock())  # type: ignore[arg-type]
+    provider = ExeProvider(api, settings, docker=_docker_mock())  # type: ignore[arg-type]
 
     await provider.create_vm(name="sb-1", image="docker.io/library/ubuntu:24.04")
 
@@ -124,12 +124,14 @@ async def test_delete_vm_translates_not_found_to_provider_not_found() -> None:
         await provider.delete_vm("sb-1")
 
 
-async def test_aclose_delegates_to_api() -> None:
+async def test_aclose_closes_both_clients() -> None:
     api = SimpleNamespace(aclose=AsyncMock())
-    provider = _make_provider(api)
+    docker = _docker_mock()
+    provider = ExeProvider(api, _settings(), docker=docker)  # type: ignore[arg-type]
 
     await provider.aclose()
     api.aclose.assert_awaited_once_with()
+    docker.aclose.assert_awaited_once_with()
 
 
 @pytest.mark.parametrize(
@@ -160,7 +162,7 @@ async def test_http_proxy_methods_delegate_to_api(method_name: str, kwargs: dict
 def test_from_settings_constructs_with_exeapi() -> None:
     provider = ExeProvider.from_settings()
     assert isinstance(provider.api, ExeAPI)
-    assert isinstance(provider.docker_cli, DockerCLI)
+    assert isinstance(provider.docker, DockerAPI)
 
 
 async def test_build_template_image_builds_logs_in_and_pushes() -> None:
@@ -172,7 +174,7 @@ async def test_build_template_image_builds_logs_in_and_pushes() -> None:
             registry_username="builder",
             registry_password="registry-secret",
         ),
-        docker_cli=docker,  # type: ignore[arg-type]
+        docker=docker,  # type: ignore[arg-type]
     )
 
     image = await provider.build_template_image(
@@ -184,8 +186,9 @@ async def test_build_template_image_builds_logs_in_and_pushes() -> None:
     assert image.startswith("ghcr.io/acme/drukbox-templates:")
     assert len(image.rpartition(":")[2]) == 12
     assert docker.build_image.await_args.args[0] == image
-    docker.login.assert_awaited_once_with("ghcr.io", "builder", "registry-secret")
-    docker.push_image.assert_awaited_once_with(image)
+    docker.push_image.assert_awaited_once_with(
+        image, username="builder", password="registry-secret"
+    )
 
 
 async def test_build_template_image_names_each_missing_registry_setting() -> None:
@@ -193,7 +196,7 @@ async def test_build_template_image_names_each_missing_registry_setting() -> Non
     provider = ExeProvider(
         SimpleNamespace(),  # type: ignore[arg-type]
         _settings(),
-        docker_cli=docker,  # type: ignore[arg-type]
+        docker=docker,  # type: ignore[arg-type]
     )
 
     with pytest.raises(ProviderCommandError) as error:
@@ -219,7 +222,7 @@ async def test_build_template_image_translates_push_failure() -> None:
             registry_username="builder",
             registry_password="registry-secret",
         ),
-        docker_cli=docker,  # type: ignore[arg-type]
+        docker=docker,  # type: ignore[arg-type]
     )
 
     with pytest.raises(ProviderTransportError, match="push log tail"):
@@ -235,7 +238,7 @@ async def test_delete_template_image_removes_the_local_image() -> None:
     provider = ExeProvider(
         SimpleNamespace(),  # type: ignore[arg-type]
         _settings(),
-        docker_cli=docker,  # type: ignore[arg-type]
+        docker=docker,  # type: ignore[arg-type]
     )
 
     await provider.delete_template_image("ghcr.io/acme/drukbox-templates:123456789abc")
@@ -249,7 +252,7 @@ async def test_delete_template_image_translates_a_missing_local_image() -> None:
     provider = ExeProvider(
         SimpleNamespace(),  # type: ignore[arg-type]
         _settings(),
-        docker_cli=docker,  # type: ignore[arg-type]
+        docker=docker,  # type: ignore[arg-type]
     )
 
     with pytest.raises(ProviderNotFoundError, match="was not found"):

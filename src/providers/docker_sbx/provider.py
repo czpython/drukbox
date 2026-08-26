@@ -6,7 +6,7 @@ from typing import ClassVar, Self
 
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import TemplateCapability
-from providers.docker.api import DockerCLI
+from providers.docker.api import DockerAPI
 from providers.docker.images import build_derived_image, remove_derived_image
 from providers.exceptions import (
     ProviderCommandError,
@@ -62,18 +62,18 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
         api: SbxCLI,
         settings: DockerSbxSettings,
         *,
-        docker_cli: DockerCLI,
+        docker: DockerAPI,
     ) -> None:
         self.api = api
         self.settings = settings
-        self.docker_cli = docker_cli
+        self.docker = docker
 
     @classmethod
     def from_settings(cls) -> Self:
         return cls(
             SbxCLI(),
             DockerSbxSettings(),  # pyright: ignore[reportCallIssue]
-            docker_cli=DockerCLI(),
+            docker=DockerAPI(),
         )
 
     @property
@@ -187,13 +187,13 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
         label: str,
     ) -> str:
         return await build_derived_image(
-            self.docker_cli,
+            self.docker,
             base_image=base_image,
             setup_script=setup_script,
         )
 
     async def delete_template_image(self, image: str) -> None:
-        await remove_derived_image(self.docker_cli, image)
+        await remove_derived_image(self.docker, image)
 
     async def diagnose(self) -> str:
         # The sandbox list is one fast check of the CLI, the daemon
@@ -201,7 +201,7 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
         return f"sandboxd reachable, {await self.api.sandbox_count()} sandbox(es)"
 
     async def aclose(self) -> None:
-        return
+        await self.docker.aclose()
 
     def _workspace(self, name: str) -> Path:
         return self.settings.workspace_root / name

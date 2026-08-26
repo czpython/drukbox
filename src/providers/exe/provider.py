@@ -3,7 +3,7 @@ from typing import ClassVar, Self
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import HttpProxyCapability, TemplateCapability
-from providers.docker.api import DockerCLI
+from providers.docker.api import DockerAPI
 from providers.docker.exceptions import DockerProviderError
 from providers.docker.images import build_derived_image, remove_derived_image
 from providers.exceptions import (
@@ -32,12 +32,12 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
         api: ExeAPI,
         settings: ExeSettings,
         *,
-        docker_cli: DockerCLI,
+        docker: DockerAPI,
         service_label: str = "drukbox",
     ) -> None:
         self.api = api
         self.settings = settings
-        self.docker_cli = docker_cli
+        self.docker = docker
         self._service_label = service_label
 
     @classmethod
@@ -46,7 +46,7 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
         return cls(
             ExeAPI.from_settings(),
             ExeSettings(),  # pyright: ignore[reportCallIssue]
-            docker_cli=DockerCLI(),
+            docker=DockerAPI(),
             service_label=core.service_label,
         )
 
@@ -134,15 +134,13 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
             )
 
         tag = await build_derived_image(
-            self.docker_cli,
+            self.docker,
             base_image=base_image,
             setup_script=setup_script,
             repository=registry,
         )
-        registry_host, *_ = registry.partition("/")
         try:
-            await self.docker_cli.login(registry_host, username, password)
-            await self.docker_cli.push_image(tag)
+            await self.docker.push_image(tag, username=username, password=password)
         except DockerProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
         return tag
@@ -150,10 +148,11 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
     async def delete_template_image(self, image: str) -> None:
         # Registry deletion is registry-specific. This provider only removes
         # the local build tag.
-        await remove_derived_image(self.docker_cli, image)
+        await remove_derived_image(self.docker, image)
 
     async def aclose(self) -> None:
         await self.api.aclose()
+        await self.docker.aclose()
 
     async def diagnose(self) -> str:
         payload = await self.api.whoami()

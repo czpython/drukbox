@@ -1,12 +1,10 @@
-import contextlib
 import hashlib
-import tempfile
-from collections.abc import Iterator
-from pathlib import Path
+import io
+import tarfile
 
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
 
-from .api import DockerCLI
+from .api import DockerAPI
 from .exceptions import DockerImageNotFoundError, DockerProviderError
 
 
@@ -21,22 +19,25 @@ def derive_image_tag(
     return f"{repository}:{digest}"
 
 
-@contextlib.contextmanager
-def create_build_context(*, base_image: str, setup_script: str) -> Iterator[Path]:
-    with tempfile.TemporaryDirectory(prefix="drukbox-template-") as directory:
-        context = Path(directory)
-        context.joinpath("setup.sh").write_bytes(setup_script.encode("utf-8"))
-        context.joinpath("Dockerfile").write_text(
-            f"FROM {base_image}\n"
-            "COPY setup.sh /drukbox-setup.sh\n"
-            "RUN sh /drukbox-setup.sh && rm /drukbox-setup.sh\n",
-            encoding="utf-8",
-        )
-        yield context
+def create_build_context(*, base_image: str, setup_script: str) -> bytes:
+    """A gzipped tar holding the synthesized Dockerfile and the setup script."""
+    dockerfile = (
+        f"FROM {base_image}\n"
+        "COPY setup.sh /drukbox-setup.sh\n"
+        "RUN sh /drukbox-setup.sh && rm /drukbox-setup.sh\n"
+    )
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for name, content in (("Dockerfile", dockerfile), ("setup.sh", setup_script)):
+            data = content.encode("utf-8")
+            member = tarfile.TarInfo(name)
+            member.size = len(data)
+            archive.addfile(member, io.BytesIO(data))
+    return buffer.getvalue()
 
 
 async def build_derived_image(
-    docker_cli: DockerCLI,
+    docker: DockerAPI,
     *,
     base_image: str,
     setup_script: str,
@@ -47,17 +48,17 @@ async def build_derived_image(
         setup_script=setup_script,
         repository=repository,
     )
+    context_tar = create_build_context(base_image=base_image, setup_script=setup_script)
     try:
-        with create_build_context(base_image=base_image, setup_script=setup_script) as context:
-            await docker_cli.build_image(tag, context)
+        await docker.build_image(tag, context_tar)
     except DockerProviderError as exc:
         raise ProviderTransportError(str(exc)) from exc
     return tag
 
 
-async def remove_derived_image(docker_cli: DockerCLI, image: str) -> None:
+async def remove_derived_image(docker: DockerAPI, image: str) -> None:
     try:
-        await docker_cli.remove_image(image)
+        await docker.remove_image(image)
     except DockerImageNotFoundError as exc:
         raise ProviderNotFoundError(f"docker image '{image}' was not found") from exc
     except DockerProviderError as exc:
