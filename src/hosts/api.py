@@ -54,6 +54,7 @@ async def create_host(
         return await service.get_or_create_host(
             env=host_create.env,
             image=host_create.image,
+            template=host_create.template,
             expires_at=expires_at,
             idempotency_key=idempotency_key,
             provider=host_create.provider,

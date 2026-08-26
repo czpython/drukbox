@@ -1,18 +1,43 @@
-import asyncio
-import os
-import tempfile
+import io
 
-from .exceptions import DockerTransportError, DockerVMNotFoundError
+import aiodocker
+import aiohttp
+
+from .exceptions import DockerImageNotFoundError, DockerTransportError, DockerVMNotFoundError
+
+_MAX_ERROR_DETAIL_CHARS = 8_000
 
 
-class DockerCLI:
-    """Thin async wrapper over the local ``docker`` command-line interface.
+def _detail(exc: Exception) -> str:
+    # The engine's message, capped so a long build log stays readable.
+    return str(exc)[-_MAX_ERROR_DETAIL_CHARS:]
 
-    Every method shells out to ``docker`` through ``create_subprocess_exec`` so
-    the subprocess boundary stays in one place. It talks to whatever daemon the
-    CLI is configured for (Docker Desktop, OrbStack, Colima, a remote
-    ``DOCKER_HOST``); the CLI owns that resolution, not drukbox.
+
+class DockerAPI:
+    """Async client for the Docker Engine API, through aiodocker.
+
+    The daemon address resolves the way the docker CLI's own does —
+    explicit ``DOCKER_HOST``, the active docker context, or the default
+    socket — aiodocker implements that chain. The session is created
+    lazily on first use: providers are constructed by the registry in
+    sync code, and an aiohttp session must be born on the running loop.
+
+    aiodocker and aiohttp exception types stop at this class; callers see
+    only the ``Docker*Error`` hierarchy.
     """
+
+    def __init__(self, docker: aiodocker.Docker | None = None) -> None:
+        self._docker = docker
+
+    def _get_client(self) -> aiodocker.Docker:
+        if not self._docker:
+            try:
+                self._docker = aiodocker.Docker()
+            except ValueError as exc:
+                # No resolvable daemon address: no DOCKER_HOST, no docker
+                # context, no socket at the default paths.
+                raise DockerTransportError(str(exc)) from exc
+        return self._docker
 
     async def run_container(
         self,
@@ -25,81 +50,89 @@ class DockerCLI:
         # Publish the in-container sshd on a random loopback host port: the
         # sandbox is reachable from the host that runs drukbox, never from the
         # network. The per-VM key remains the auth boundary.
-        args = ["run", "--detach", "--name", name, "--publish", "127.0.0.1::22"]
-        for key, value in labels.items():
-            args.extend(["--label", f"{key}={value}"])
-        env_file = _write_env_file(env) if env else None
-        if env_file is not None:
-            # --env-file keeps caller secrets off argv (world-readable via ps/proc
-            # for the lifetime of `docker run`); only the path is passed, and the
-            # file is removed in the finally once docker has read it.
-            args.extend(["--env-file", env_file])
-        args.append(image)
+        config = {
+            "Image": image,
+            "Env": [f"{key}={value}" for key, value in env.items()],
+            "Labels": labels,
+            "ExposedPorts": {"22/tcp": {}},
+            "HostConfig": {
+                "PortBindings": {"22/tcp": [{"HostIp": "127.0.0.1", "HostPort": ""}]},
+            },
+        }
         try:
-            return (await self._run(*args)).strip()
-        finally:
-            if env_file is not None:
-                os.unlink(env_file)
+            container = await self._get_client().containers.run(config, name=name)
+        except (aiodocker.DockerError, aiohttp.ClientError) as exc:
+            raise DockerTransportError(_detail(exc)) from exc
+        return container.id
 
     async def published_ssh_port(self, name: str) -> int:
-        output = await self._run("port", name, "22/tcp")
-        # `docker port` prints one binding per line, e.g. "127.0.0.1:49160".
-        # An empty result means sshd's port never bound — the container exited.
-        lines = [line for line in output.splitlines() if line.strip()]
-        if not lines:
-            raise DockerTransportError(f"container {name!r} published no SSH port")
         try:
-            return int(lines[0].rsplit(":", 1)[1])
-        except (ValueError, IndexError) as exc:
-            # Keep unparsable output a DockerProviderError so the provider's
-            # create_vm cleanup (keyed on it) still removes the container.
-            raise DockerTransportError(
-                f"container {name!r} published an unparsable SSH port: {lines[0]!r}"
-            ) from exc
+            bindings = await self._get_client().containers.container(name).port(22)
+        except aiodocker.DockerError as exc:
+            if exc.status == 404:
+                raise DockerVMNotFoundError(str(exc)) from exc
+            raise DockerTransportError(_detail(exc)) from exc
+        except aiohttp.ClientError as exc:
+            raise DockerTransportError(str(exc)) from exc
+        # An absent binding means sshd's port never bound — the container
+        # exited before publishing.
+        if not bindings or not bindings[0].get("HostPort"):
+            raise DockerTransportError(f"container {name!r} published no SSH port")
+        return int(bindings[0]["HostPort"])
 
     async def remove_container(self, name: str) -> None:
-        await self._run("rm", "--force", "--volumes", name)
+        try:
+            await self._get_client().containers.container(name).delete(force=True, v=True)
+        except aiodocker.DockerError as exc:
+            if exc.status == 404:
+                raise DockerVMNotFoundError(str(exc)) from exc
+            raise DockerTransportError(_detail(exc)) from exc
+        except aiohttp.ClientError as exc:
+            raise DockerTransportError(str(exc)) from exc
+
+    async def build_image(self, image: str, context_tar: bytes) -> None:
+        try:
+            await self._get_client().images.build(
+                fileobj=io.BytesIO(context_tar),
+                encoding="gzip",
+                tag=image,
+            )
+        except (aiodocker.DockerError, aiohttp.ClientError) as exc:
+            raise DockerTransportError(_detail(exc)) from exc
+
+    async def remove_image(self, image: str) -> None:
+        try:
+            await self._get_client().images.delete(image)
+        except aiodocker.DockerError as exc:
+            if exc.status == 404:
+                raise DockerImageNotFoundError(str(exc)) from exc
+            raise DockerTransportError(_detail(exc)) from exc
+        except aiohttp.ClientError as exc:
+            raise DockerTransportError(str(exc)) from exc
+
+    async def push_image(
+        self,
+        image: str,
+        *,
+        username: str | None = None,
+        password: str | None = None,
+    ) -> None:
+        # Credentials travel per call as an X-Registry-Auth header; the
+        # global docker credential store is never touched.
+        auth = {"username": username, "password": password} if username and password else None
+        try:
+            await self._get_client().images.push(image, auth=auth)
+        except (aiodocker.DockerError, aiohttp.ClientError) as exc:
+            raise DockerTransportError(_detail(exc)) from exc
 
     async def server_version(self) -> str:
-        return (await self._run("version", "--format", "{{.Server.Version}}")).strip()
-
-    async def _run(self, *args: str) -> str:
         try:
-            process = await asyncio.create_subprocess_exec(
-                "docker",
-                *args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except OSError as error:
-            # Missing binary (FileNotFoundError) or e.g. a non-executable one
-            # (PermissionError) — translate both so a launch failure can't
-            # escape the provider boundary as a raw OSError.
-            raise DockerTransportError(f"docker CLI could not be started: {error}") from error
-        stdout, stderr = await process.communicate()
-        if process.returncode != 0:
-            detail = stderr.decode().strip() or f"docker {args[0]} exited {process.returncode}"
-            if "no such container" in detail.lower():
-                raise DockerVMNotFoundError(detail)
-            raise DockerTransportError(detail)
-        return stdout.decode()
+            version = await self._get_client().version()
+        except (aiodocker.DockerError, aiohttp.ClientError) as exc:
+            raise DockerTransportError(_detail(exc)) from exc
+        return str(version["Version"])
 
-
-def _write_env_file(env: dict[str, str]) -> str:
-    """Write ``env`` to a fresh 0600 temp file in docker --env-file format.
-
-    Validates before creating the file (so a bad entry can't leak one): a NUL or
-    newline in a value would inject extra env entries into the line-based format,
-    and neither is representable in it.
-    """
-    lines: list[str] = []
-    for key, value in env.items():
-        if any(ch in key or ch in value for ch in "\x00\r\n"):
-            raise DockerTransportError(
-                f"docker env entry {key!r} cannot contain NUL or newline characters"
-            )
-        lines.append(f"{key}={value}\n")
-    fd, path = tempfile.mkstemp(prefix="drukbox-docker-env-", suffix=".env")
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write("".join(lines))
-    return path
+    async def aclose(self) -> None:
+        if self._docker:
+            await self._docker.close()
+            self._docker = None

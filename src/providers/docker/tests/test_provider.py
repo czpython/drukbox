@@ -3,7 +3,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from providers.docker.exceptions import DockerTransportError, DockerVMNotFoundError
+from providers.docker.exceptions import (
+    DockerImageNotFoundError,
+    DockerTransportError,
+    DockerVMNotFoundError,
+)
 from providers.docker.provider import DockerProvider
 from providers.docker.settings import DockerSettings
 from providers.exceptions import (
@@ -22,6 +26,8 @@ def _api_mock() -> MagicMock:
     api.run_container = AsyncMock(return_value="container-id")
     api.published_ssh_port = AsyncMock(return_value=49160)
     api.remove_container = AsyncMock()
+    api.build_image = AsyncMock()
+    api.remove_image = AsyncMock()
     api.server_version = AsyncMock(return_value="27.0.3")
     return api
 
@@ -43,7 +49,7 @@ async def test_create_vm_runs_container_and_returns_loopback_coords():
     assert result.ssh_host == "127.0.0.1"
     assert result.ssh_port == 49160
     assert result.ssh_username == "root"
-    assert result.private_key is not None
+    assert result.private_key
     assert "-----BEGIN OPENSSH PRIVATE KEY-----" in result.private_key
 
 
@@ -127,6 +133,56 @@ async def test_delete_vm_raises_not_found_when_container_missing():
 
     with pytest.raises(ProviderNotFoundError):
         await provider.delete_vm("sb-test")
+
+
+@pytest.mark.asyncio
+async def test_build_template_image_builds_and_returns_the_derived_tag():
+    api = _api_mock()
+    provider = DockerProvider(api, _settings())
+
+    image = await provider.build_template_image(
+        base_image="sandbox:base",
+        setup_script="apt-get update",
+        label="Node tools",
+    )
+
+    assert image.startswith("drukbox-template:")
+    assert len(image.removeprefix("drukbox-template:")) == 12
+    assert api.build_image.await_args.args[0] == image
+
+
+@pytest.mark.asyncio
+async def test_build_template_image_translates_build_failure():
+    api = _api_mock()
+    api.build_image.side_effect = DockerTransportError("build log tail")
+    provider = DockerProvider(api, _settings())
+
+    with pytest.raises(ProviderTransportError, match="build log tail"):
+        await provider.build_template_image(
+            base_image="sandbox:base",
+            setup_script="apt-get update",
+            label="Node tools",
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_template_image_removes_the_local_image():
+    api = _api_mock()
+    provider = DockerProvider(api, _settings())
+
+    await provider.delete_template_image("drukbox-template:123456789abc")
+
+    api.remove_image.assert_awaited_once_with("drukbox-template:123456789abc")
+
+
+@pytest.mark.asyncio
+async def test_delete_template_image_translates_a_missing_image():
+    api = _api_mock()
+    api.remove_image.side_effect = DockerImageNotFoundError("No such image")
+    provider = DockerProvider(api, _settings())
+
+    with pytest.raises(ProviderNotFoundError, match="was not found"):
+        await provider.delete_template_image("drukbox-template:missing")
 
 
 @pytest.mark.asyncio

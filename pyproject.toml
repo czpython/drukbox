@@ -10,8 +10,10 @@ packages = [
     "src/gateway",
     "src/hosts",
     "src/http_proxies",
+    "src/janitor",
     "src/networking",
     "src/providers",
+    "src/templates",
 ]
 exclude = ["**/tests", "**/tests/**"]
 
@@ -61,6 +63,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0",
     "uuid6>=2024.7.10",
     "uvicorn[standard]>=0.34",
+    "aiodocker>=0.27.0",
 ]
 
 [project.optional-dependencies]

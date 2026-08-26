@@ -1,165 +1,180 @@
-import os
+import io
+import tarfile
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+import aiohttp
 import pytest
+from aiodocker import DockerError
 
-from providers.docker.api import DockerCLI
-from providers.docker.exceptions import DockerTransportError, DockerVMNotFoundError
+from providers.docker.api import DockerAPI
+from providers.docker.exceptions import (
+    DockerImageNotFoundError,
+    DockerTransportError,
+    DockerVMNotFoundError,
+)
 
 
-def _process(*, returncode: int = 0, stdout: bytes = b"", stderr: bytes = b"") -> SimpleNamespace:
-    return SimpleNamespace(
-        returncode=returncode,
-        communicate=AsyncMock(return_value=(stdout, stderr)),
+def _fake_docker(**overrides: object) -> SimpleNamespace:
+    """One canonical aiodocker fake used across tests; overrides per case."""
+    container = SimpleNamespace(
+        port=AsyncMock(return_value=[{"HostIp": "127.0.0.1", "HostPort": "49160"}]),
+        delete=AsyncMock(),
     )
+    fake = SimpleNamespace(
+        containers=SimpleNamespace(
+            run=AsyncMock(return_value=SimpleNamespace(id="abc123")),
+            container=MagicMock(return_value=container),
+        ),
+        images=SimpleNamespace(
+            build=AsyncMock(),
+            delete=AsyncMock(),
+            push=AsyncMock(),
+        ),
+        version=AsyncMock(return_value={"Version": "29.6.2"}),
+        close=AsyncMock(),
+    )
+    for name, value in overrides.items():
+        setattr(fake, name, value)
+    return fake
 
 
-@pytest.mark.asyncio
-async def test_run_container_publishes_on_loopback_and_passes_env_via_file(monkeypatch):
-    captured: dict = {}
+def _api(fake: SimpleNamespace) -> DockerAPI:
+    return DockerAPI(docker=fake)  # type: ignore[arg-type]
 
-    async def fake_exec(*args, **kwargs):
-        captured["args"] = args
-        # Read the env-file while it exists; run_container unlinks it afterwards.
-        env_file = args[args.index("--env-file") + 1]
-        captured["path"] = env_file
-        captured["mode"] = os.stat(env_file).st_mode & 0o777
-        with open(env_file, encoding="utf-8") as handle:
-            captured["env_file"] = handle.read()
-        return _process(stdout=b"container-id\n")
 
-    monkeypatch.setattr("providers.docker.api.asyncio.create_subprocess_exec", fake_exec)
+async def test_run_container_publishes_on_loopback_and_passes_env_in_the_body() -> None:
+    fake = _fake_docker()
 
-    container_id = await DockerCLI().run_container(
+    container_id = await _api(fake).run_container(
         name="sb-test",
-        image="drukbox/sandbox:latest",
-        env={"DRUKBOX_AUTHORIZED_KEY": "ssh-ed25519 KEY", "SECRET_TOKEN": "s3cr3t"},
+        image="sandbox:latest",
+        env={"KEY": "value", "MULTI": "line one\nline two"},
         labels={"managed-by": "drukbox"},
     )
 
-    assert container_id == "container-id"
-    args = captured["args"]
-    # Loopback publish + label still on argv; secrets are not.
-    assert args[:8] == (
-        "docker",
-        "run",
-        "--detach",
-        "--name",
-        "sb-test",
-        "--publish",
-        "127.0.0.1::22",
-        "--label",
-    )
-    assert args[-1] == "drukbox/sandbox:latest"
-    # Neither the secret value nor its name may appear in ANY argv token —
-    # substring, not just standalone element — so a `-e KEY=val` / `--env=KEY=val`
-    # regression that inlines a secret onto the command line fails here.
-    assert all("s3cr3t" not in arg and "SECRET_TOKEN" not in arg for arg in args)
-    assert not any(arg == "-e" or (arg.startswith("--env") and arg != "--env-file") for arg in args)
-    # Env lives in the 0600 file (cleaned up after the run), not on the command line.
-    assert "SECRET_TOKEN=s3cr3t" in captured["env_file"]
-    assert "DRUKBOX_AUTHORIZED_KEY=ssh-ed25519 KEY" in captured["env_file"]
-    assert captured["mode"] == 0o600
-    assert not os.path.exists(captured["path"])
+    assert container_id == "abc123"
+    config = fake.containers.run.await_args.args[0]
+    assert fake.containers.run.await_args.kwargs == {"name": "sb-test"}
+    assert config["Image"] == "sandbox:latest"
+    assert config["Env"] == ["KEY=value", "MULTI=line one\nline two"]
+    assert config["Labels"] == {"managed-by": "drukbox"}
+    assert config["HostConfig"]["PortBindings"] == {
+        "22/tcp": [{"HostIp": "127.0.0.1", "HostPort": ""}]
+    }
 
 
-@pytest.mark.asyncio
-async def test_run_container_rejects_newline_in_env(monkeypatch):
-    create = AsyncMock(return_value=_process(stdout=b"id\n"))
-    monkeypatch.setattr("providers.docker.api.asyncio.create_subprocess_exec", create)
+async def test_run_container_translates_engine_errors() -> None:
+    fake = _fake_docker()
+    fake.containers.run.side_effect = DockerError(409, "name already in use")
 
-    with pytest.raises(DockerTransportError, match="NUL or newline"):
-        await DockerCLI().run_container(
-            name="sb-test",
-            image="img",
-            env={"EVIL": "value\nINJECTED=x"},
-            labels={},
-        )
-    create.assert_not_awaited()
+    with pytest.raises(DockerTransportError, match="name already in use"):
+        await _api(fake).run_container(name="sb-test", image="sandbox:latest", env={}, labels={})
 
 
-@pytest.mark.asyncio
-async def test_published_ssh_port_parses_loopback_binding(monkeypatch):
-    create = AsyncMock(return_value=_process(stdout=b"127.0.0.1:49160\n"))
-    monkeypatch.setattr("providers.docker.api.asyncio.create_subprocess_exec", create)
+async def test_published_ssh_port_reads_the_loopback_binding() -> None:
+    fake = _fake_docker()
 
-    assert await DockerCLI().published_ssh_port("sb-test") == 49160
-
-
-@pytest.mark.asyncio
-async def test_published_ssh_port_raises_when_container_published_nothing(monkeypatch):
-    create = AsyncMock(return_value=_process(stdout=b"\n"))
-    monkeypatch.setattr("providers.docker.api.asyncio.create_subprocess_exec", create)
-
-    with pytest.raises(DockerTransportError):
-        await DockerCLI().published_ssh_port("sb-test")
+    assert await _api(fake).published_ssh_port("sb-test") == 49160
+    fake.containers.container.assert_called_once_with("sb-test")
 
 
-@pytest.mark.asyncio
-async def test_missing_container_maps_to_not_found(monkeypatch):
-    create = AsyncMock(
-        return_value=_process(
-            returncode=1,
-            stderr=b"Error response from daemon: No such container: sb-test",
-        )
-    )
-    monkeypatch.setattr("providers.docker.api.asyncio.create_subprocess_exec", create)
+async def test_published_ssh_port_raises_when_container_published_nothing() -> None:
+    fake = _fake_docker()
+    fake.containers.container.return_value.port.return_value = None
+
+    with pytest.raises(DockerTransportError, match="published no SSH port"):
+        await _api(fake).published_ssh_port("sb-test")
+
+
+async def test_missing_container_maps_to_not_found() -> None:
+    fake = _fake_docker()
+    fake.containers.container.return_value.port.side_effect = DockerError(404, "No such container")
 
     with pytest.raises(DockerVMNotFoundError):
-        await DockerCLI().remove_container("sb-test")
+        await _api(fake).published_ssh_port("sb-test")
 
 
-@pytest.mark.asyncio
-async def test_other_failure_maps_to_transport_error(monkeypatch):
-    create = AsyncMock(return_value=_process(returncode=1, stderr=b"Cannot connect to daemon"))
-    monkeypatch.setattr("providers.docker.api.asyncio.create_subprocess_exec", create)
+async def test_remove_container_forces_and_drops_volumes() -> None:
+    fake = _fake_docker()
 
-    with pytest.raises(DockerTransportError):
-        await DockerCLI().server_version()
+    await _api(fake).remove_container("sb-test")
 
-
-@pytest.mark.asyncio
-async def test_missing_docker_binary_maps_to_transport_error(monkeypatch):
-    create = AsyncMock(side_effect=FileNotFoundError("docker"))
-    monkeypatch.setattr("providers.docker.api.asyncio.create_subprocess_exec", create)
-
-    with pytest.raises(DockerTransportError):
-        await DockerCLI().server_version()
+    fake.containers.container.return_value.delete.assert_awaited_once_with(force=True, v=True)
 
 
-@pytest.mark.asyncio
-async def test_unstartable_docker_binary_maps_to_transport_error(monkeypatch):
-    # A non-executable docker binary raises PermissionError (an OSError, not a
-    # FileNotFoundError) at spawn; it must still be translated, not leak raw.
-    create = AsyncMock(side_effect=PermissionError("docker"))
-    monkeypatch.setattr("providers.docker.api.asyncio.create_subprocess_exec", create)
+async def test_build_image_sends_the_context_tar_under_the_tag() -> None:
+    fake = _fake_docker()
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz"):
+        pass
+    context_tar = buffer.getvalue()
 
-    with pytest.raises(DockerTransportError):
-        await DockerCLI().server_version()
+    await _api(fake).build_image("drukbox-template:123456789abc", context_tar)
 
-
-@pytest.mark.asyncio
-async def test_run_container_cleans_up_env_file_when_docker_fails(monkeypatch):
-    captured: dict = {}
-
-    async def fake_exec(*args, **kwargs):
-        captured["path"] = args[args.index("--env-file") + 1]
-        return _process(returncode=1, stderr=b"boom")
-
-    monkeypatch.setattr("providers.docker.api.asyncio.create_subprocess_exec", fake_exec)
-
-    with pytest.raises(DockerTransportError):
-        await DockerCLI().run_container(
-            name="sb-test", image="img", env={"SECRET_TOKEN": "s3cr3t"}, labels={}
-        )
-    assert not os.path.exists(captured["path"])
+    kwargs = fake.images.build.await_args.kwargs
+    assert kwargs["tag"] == "drukbox-template:123456789abc"
+    assert kwargs["encoding"] == "gzip"
+    assert kwargs["fileobj"].getvalue() == context_tar
 
 
-@pytest.mark.asyncio
-async def test_published_ssh_port_raises_on_unparsable_output(monkeypatch):
-    create = AsyncMock(return_value=_process(stdout=b"127.0.0.1:notaport\n"))
-    monkeypatch.setattr("providers.docker.api.asyncio.create_subprocess_exec", create)
+async def test_build_failure_keeps_the_engine_detail() -> None:
+    fake = _fake_docker()
+    fake.images.build.side_effect = DockerError(0, "RUN sh /drukbox-setup.sh: exit code 127")
 
-    with pytest.raises(DockerTransportError, match="unparsable"):
-        await DockerCLI().published_ssh_port("sb-test")
+    with pytest.raises(DockerTransportError, match="exit code 127"):
+        await _api(fake).build_image("drukbox-template:123456789abc", b"")
+
+
+async def test_missing_image_maps_to_not_found() -> None:
+    fake = _fake_docker()
+    fake.images.delete.side_effect = DockerError(404, "No such image")
+
+    with pytest.raises(DockerImageNotFoundError):
+        await _api(fake).remove_image("drukbox-template:missing")
+
+
+async def test_push_image_sends_per_call_credentials() -> None:
+    fake = _fake_docker()
+
+    await _api(fake).push_image(
+        "ghcr.io/acme/template:tag", username="builder", password="registry-secret"
+    )
+
+    fake.images.push.assert_awaited_once_with(
+        "ghcr.io/acme/template:tag",
+        auth={"username": "builder", "password": "registry-secret"},
+    )
+
+
+async def test_push_image_without_credentials_sends_no_auth() -> None:
+    fake = _fake_docker()
+
+    await _api(fake).push_image("ghcr.io/acme/template:tag")
+
+    assert fake.images.push.await_args.kwargs == {"auth": None}
+
+
+async def test_server_version_reads_the_engine_version() -> None:
+    fake = _fake_docker()
+
+    assert await _api(fake).server_version() == "29.6.2"
+
+
+async def test_unreachable_daemon_maps_to_transport_error() -> None:
+    fake = _fake_docker()
+    fake.version.side_effect = aiohttp.ClientError("connection refused")
+
+    with pytest.raises(DockerTransportError, match="connection refused"):
+        await _api(fake).server_version()
+
+
+async def test_aclose_closes_the_client_once_created() -> None:
+    fake = _fake_docker()
+    api = _api(fake)
+
+    await api.server_version()
+    await api.aclose()
+    await api.aclose()
+
+    fake.close.assert_awaited_once_with()

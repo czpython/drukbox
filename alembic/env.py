@@ -6,6 +6,7 @@ from sqlalchemy import engine_from_config, pool
 from core.database import Base
 from core.settings import get_settings
 from hosts import models  # noqa: F401
+from templates import models as template_models  # noqa: F401
 
 config = context.config
 

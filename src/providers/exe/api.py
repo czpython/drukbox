@@ -75,6 +75,7 @@ class ExeAPI:
         setup_script: str | None = None,
         tags: list[str] | None = None,
         no_email: bool = True,
+        registry_auth: str | None = None,
     ) -> dict[str, Any]:
         command_parts = ["new", "--json"]
 
@@ -85,6 +86,9 @@ class ExeAPI:
 
         if vm_image:
             command_parts.append(f"--image={shlex.quote(vm_image)}")
+
+        if registry_auth:
+            command_parts.append(f"--registry-auth={shlex.quote(registry_auth)}")
 
         if setup_script:
             setup_script = inject_env_exports(setup_script, env)

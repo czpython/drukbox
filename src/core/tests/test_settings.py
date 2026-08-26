@@ -92,6 +92,9 @@ def test_tailscale_disabled_ignores_missing_credentials(monkeypatch: pytest.Monk
         "POOL_SIZE",
         "POOL_HOST_MAX_AGE_HOURS",
         "POOL_MAX_CREATES_PER_TICK",
+        "TEMPLATE_BUILD_TIMEOUT",
+        "TEMPLATE_FAILED_RETENTION",
+        "TEMPLATE_UNUSED_TTL",
     ],
 )
 def test_numeric_settings_reject_negative_values(monkeypatch: pytest.MonkeyPatch, key: str) -> None:

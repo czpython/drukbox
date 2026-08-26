@@ -30,6 +30,8 @@ from providers.exceptions import (
     UnsupportedSizingError,
 )
 from providers.registry import get_provider_names, get_vm_provider
+from templates.exceptions import TemplateNotAvailableError, UnknownTemplateError
+from templates.models import Template, TemplateStatus
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +94,7 @@ class HostService:
         *,
         env: dict[str, str],
         image: str | None,
+        template: uuid.UUID | None = None,
         expires_at: datetime | None | EllipsisType = ...,
         idempotency_key: str | None = None,
         provider: str | None = None,
@@ -117,10 +120,10 @@ class HostService:
         host: Host | None = None
         # Warm hosts are provider-specific, so the claim is scoped to the
         # requested provider's pool. A request is pool-eligible only when it
-        # doesn't customize the host: default image, no env, and no per-request
-        # sizing — pool members are warmed at the provider's default size.
+        # does not customize the host: no image, template, env, or per-request
+        # sizing — pool members are warmed at the provider's defaults.
         requested_provider = provider or self.settings.default_host_provider
-        customized = env or image or instance_type or disk_gb
+        customized = env or image or template or instance_type or disk_gb
         if not customized and self.settings.get_pool_targets().get(requested_provider):
             host = await self._try_claim_pool_host(
                 provider=requested_provider, expires_at=expires_at
@@ -129,6 +132,7 @@ class HostService:
             host = await self.create_host(
                 env=env,
                 image=image,
+                template=template,
                 expires_at=expires_at,
                 provider=provider,
                 instance_type=instance_type,
@@ -199,6 +203,7 @@ class HostService:
         *,
         env: dict[str, str],
         image: str | None,
+        template: uuid.UUID | None = None,
         expires_at: datetime | None | EllipsisType = ...,
         provider: str | None = None,
         instance_type: str | None = None,
@@ -217,6 +222,8 @@ class HostService:
             raise UnsupportedSizingError(
                 f"provider {vm.name!r} does not support a per-request disk_gb"
             )
+        if template and not image:
+            image = await self._resolve_template_image(template_id=template, provider=vm.name)
         uid = uuid7()
         name = Host.build_name(uid)
         now = utc_now()
@@ -274,6 +281,26 @@ class HostService:
             await ttl_session.commit()
         await self.session.refresh(host)
         return host
+
+    async def _resolve_template_image(self, *, template_id: uuid.UUID, provider: str) -> str:
+        result = await self.session.execute(
+            select(Template).where(Template.id == template_id).where(Template.provider == provider)
+        )
+        template = result.scalar_one_or_none()
+
+        if not template:
+            raise UnknownTemplateError(
+                f"template {template_id} not found for provider {provider!r}"
+            )
+
+        if template.status != TemplateStatus.AVAILABLE.value:
+            detail = f"template {template.id} is {template.status}"
+            if template.status == TemplateStatus.FAILED.value:
+                detail = f"{detail}: {template.last_error}"
+            raise TemplateNotAvailableError(detail)
+
+        template.last_used_at = utc_now()
+        return template.image
 
     async def _lookup_idempotency_key(self, key: str) -> Host | None:
         record = (

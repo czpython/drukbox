@@ -20,6 +20,10 @@ def _expires_at_must_be_future_and_tz_aware(expires_at: datetime | None) -> date
 
 class HostCreate(BaseModel):
     image: str | None = None
+    template: uuid.UUID | None = Field(
+        default=None,
+        description="Template ID to fork from. Used only when the request has no image.",
+    )
     env: dict[str, str] = Field(default_factory=dict)
     expires_at: datetime | None = None
     provider: str | None = Field(

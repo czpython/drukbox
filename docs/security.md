@@ -76,9 +76,10 @@ covered in [Networking](networking.md). The security-relevant summary:
 
 ## Secrets and in-VM metadata
 
-Provider tokens (`EXE_API_TOKEN`, `HETZNER_API_TOKEN`, Tailscale OAuth)
-and AWS credentials are read from the environment / the AWS SDK default
-chain and never written to the database or returned by the API. Caller
+Provider tokens (`EXE_API_TOKEN`, `EXE_REGISTRY_PASSWORD`,
+`HETZNER_API_TOKEN`, Tailscale OAuth) and AWS credentials are read from
+the environment / the AWS SDK default chain and never written to the
+database or returned by the API. Caller
 `env` is write-only: it is delivered to the VM but never echoed in any
 response, and reserved keys (`TAILSCALE_AUTHKEY`) are rejected at the
 schema.

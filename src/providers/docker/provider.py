@@ -3,6 +3,7 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
+from providers.capabilities import TemplateCapability
 from providers.exceptions import (
     ProviderCommandError,
     ProviderNotFoundError,
@@ -10,8 +11,9 @@ from providers.exceptions import (
 )
 from providers.ssh_keys import generate_ed25519_keypair
 
-from .api import DockerCLI
+from .api import DockerAPI
 from .exceptions import DockerProviderError, DockerVMNotFoundError
+from .images import build_derived_image, remove_derived_image
 from .settings import DockerSettings
 
 _AUTHORIZED_KEY_ENV = "DRUKBOX_AUTHORIZED_KEY"
@@ -19,7 +21,7 @@ _ENV_KEYS_ENV = "DRUKBOX_ENV_KEYS"
 _RESERVED_ENV_KEYS = frozenset({_AUTHORIZED_KEY_ENV, _ENV_KEYS_ENV})
 
 
-class DockerProvider(VMProvider):
+class DockerProvider(VMProvider, TemplateCapability):
     name: ClassVar[str] = "docker"
     diagnose_hint: ClassVar[str] = "check_docker_daemon_is_running"
     # A local container has no path onto the tailnet; its hosts keep the
@@ -28,7 +30,7 @@ class DockerProvider(VMProvider):
 
     def __init__(
         self,
-        api: DockerCLI,
+        api: DockerAPI,
         settings: DockerSettings,
         *,
         service_label: str = "drukbox",
@@ -41,7 +43,7 @@ class DockerProvider(VMProvider):
     def from_settings(cls) -> Self:
         core = get_settings()
         return cls(
-            DockerCLI(),
+            DockerAPI(),
             DockerSettings(),  # pyright: ignore[reportCallIssue]
             service_label=core.service_label,
         )
@@ -127,8 +129,24 @@ class DockerProvider(VMProvider):
         except DockerProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
 
+    async def build_template_image(
+        self,
+        *,
+        base_image: str,
+        setup_script: str,
+        label: str,
+    ) -> str:
+        return await build_derived_image(
+            self.api,
+            base_image=base_image,
+            setup_script=setup_script,
+        )
+
+    async def delete_template_image(self, image: str) -> None:
+        await remove_derived_image(self.api, image)
+
     async def diagnose(self) -> str:
         return f"docker server {await self.api.server_version()}"
 
     async def aclose(self) -> None:
-        return
+        await self.api.aclose()

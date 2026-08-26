@@ -20,15 +20,17 @@ docker run --rm -p 8780:8780 --env-file drukbox.env "$IMAGE"
 docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/alembic upgrade head
 
 # Maintenance (cron, e.g. every 10-15 min)
-docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/python -m hosts.janitor
+docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/python -m janitor
 docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/python -m hosts.pool
 ```
 
-The janitor reaps expired and orphaned hosts. The pool maintainer
+The janitor reaps expired and orphaned hosts, marks abandoned template
+builds failed, keeps failed builds for diagnosis, and deletes failed or
+unused templates. The pool maintainer
 pre-provisions warm hosts per provider and only does anything when at
 least one provider has a warm target (`POOL_SIZES` / `POOL_SIZE`).
-Schedule both under your cron infrastructure (k8s `CronJob`, systemd
-timer) from the same image and env file.
+Schedule both under your cron infrastructure (k8s `CronJob`,
+systemd timer) from the same image and env file.
 
 Use Postgres in production (`postgresql+psycopg://...`). SQLite
 (`sqlite+aiosqlite:///./drukbox.db`) is for single-process demos and
@@ -100,9 +102,8 @@ socket is host-root-equivalent. Do not expose a docker-backed drukbox to
 untrusted callers.
 
 Janitor and pool one-off containers using the Docker provider need the
-same socket mount and socket-GID supplemental group. `DOCKER_HOST` remains
-available when the daemon is remote or rootless instead of exposed through
-`/var/run/docker.sock`.
+same socket mount and socket-GID supplemental group. `DOCKER_HOST` remains available when the daemon is remote or
+rootless instead of exposed through `/var/run/docker.sock`.
 
 ## Local microVMs with Docker Sandboxes
 
@@ -294,6 +295,9 @@ Core, optional:
 | `SERVICE_LABEL` | `drukbox` | Label stamped onto provider resources (VM tags, SG tags). |
 | `UVICORN_HOST` | `0.0.0.0` | API bind address. Set `127.0.0.1` to restrict to loopback. |
 | `PROVISIONING_GRACE_SECONDS` | `600` | Safety TTL on in-flight hosts so the janitor reaps row + VM if the client disconnects mid-provision. Must exceed the worst-case provision duration. |
+| `TEMPLATE_BUILD_TIMEOUT` | `3600` | Max age in seconds of an unfinished template build before the janitor marks it failed. |
+| `TEMPLATE_FAILED_RETENTION` | `86400` | Seconds that failed template records and diagnostics remain before the janitor deletes them. |
+| `TEMPLATE_UNUSED_TTL` | `1209600` | Seconds that an available template remains after its last use, or creation when never used. |
 | `LEASE_DEFAULT_TTL` | `86400` | Lease TTL in seconds for hosts created without an explicit `expires_at`, and the extension applied by an empty `POST /hosts/{id}/renew`. An explicit `expires_at: null` at create time opts out of expiry entirely. |
 | `IDEMPOTENCY_KEY_TTL_HOURS` | `24` | Retention period for successful `Idempotency-Key` mappings. |
 | `POOL_SIZES` | `{}` | Warm hosts to keep ready per provider, as JSON (e.g. `{"exe": 2, "hetzner": 1}`). Overrides `POOL_SIZE` for the providers it names. |
@@ -319,6 +323,9 @@ exe.dev provider:
 | --- | --- | --- |
 | `EXE_API_TOKEN` | — (required) | Bearer token for the exe.dev exec API. |
 | `EXE_DEFAULT_IMAGE` | — (required) | Image used when the caller omits `image`. |
+| `EXE_IMAGE_REGISTRY` | — | Repository prefix for derived template images. A VM created from this registry gets `--registry-auth` so exe.dev can pull a private image. |
+| `EXE_REGISTRY_USERNAME` | — | Username for the derived-template image registry. |
+| `EXE_REGISTRY_PASSWORD` | — | Password or token for the derived-template image registry. |
 | `EXE_API_URL` | `https://exe.dev` | API base URL. |
 | `EXE_API_TIMEOUT` | `30.0` | Timeout for exe.dev API calls. |
 | `EXE_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `30.0` | ssh-keyscan retry budget for a fresh exe.dev sandbox. |

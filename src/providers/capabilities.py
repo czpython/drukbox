@@ -41,3 +41,23 @@ class HttpProxyCapability(abc.ABC):
 
     @abc.abstractmethod
     async def detach_http_proxy(self, name: str, *, attach_vm: str) -> None: ...
+
+
+class TemplateCapability(abc.ABC):
+    """Mix-in declaring a VMProvider can build and delete template images.
+
+    Modeled as an ABC so resolve_capability checks the inheritance chain
+    instead of accepting any object that has these method names.
+    """
+
+    @abc.abstractmethod
+    async def build_template_image(
+        self,
+        *,
+        base_image: str,
+        setup_script: str,
+        label: str,
+    ) -> str: ...
+
+    @abc.abstractmethod
+    async def delete_template_image(self, image: str) -> None: ...

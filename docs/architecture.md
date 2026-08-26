@@ -29,13 +29,15 @@ that true:
 ```text
 hosts.api          HTTP request/response concerns only
 hosts.service      host lifecycle behavior (HostService)
+templates.api      template request/response concerns only
+templates.service  template build and delete behavior (TemplateService)
 providers/<name>   one package per VM provider
 networking/        network provider framework + Tailscale adapter
 core/              settings, database, exception base
 diagnostics/       /doctor orchestration
 ```
 
-Provider-specific logic never lives in route handlers; HTTP decisions
+Provider-specific logic never lives in route imagers; HTTP decisions
 never live in service methods. Provider exceptions (`Exe*Error`,
 `Aws*Error`, `Hetzner*Error`, `Tailscale*Error`) are translated at the
 package boundary into neutral exceptions from `providers.exceptions` and
@@ -71,14 +73,15 @@ the core settings knowing any provider exists.
 
 Not every provider supports every feature, and the host contract must
 not grow provider-shaped warts. Optional features are capability
-mix-ins: `HttpProxyCapability` declares the http-proxy surface and the
-exe provider implements it. `resolve_capability` narrows a specific
-provider instance to a capability — the default provider for
-account-bound operations, the host's own provider for host-bound ones
-— and raises the shared `CapabilityUnsupportedError` when that
-provider doesn't implement it, which the routes surface as a clear
-error. New provider-specific features should follow this pattern
-rather than widening `VMProvider` or the host schema.
+mix-ins: `HttpProxyCapability` declares the http-proxy surface, and
+`TemplateCapability` declares the template create and delete surface.
+`resolve_capability` narrows a specific provider instance
+to a capability — the default provider for account-bound operations,
+the host's own provider for host-bound ones — and raises the shared
+`CapabilityUnsupportedError` when that provider does not implement it,
+which the routes surface as a clear error. New provider-specific
+features must follow this pattern rather than widening `VMProvider`
+or the host schema.
 
 The review question that guards the whole design: *does this change
 leak a provider into the contract?*
@@ -96,6 +99,19 @@ successful key returns the original host instead of a duplicate.
 Caller `env` is stored for provisioning and never returned by the API;
 keys in `hosts.schemas.RESERVED_HOST_ENV_KEYS` are rejected.
 
+A template is a persistent provider image keyed by provider, base image,
+and setup-script hash. `POST /templates` creates a `building` record and
+returns `202 Accepted`. Callers poll until the template becomes
+`available` or `failed`. Templates outlive hosts. Each provider builds
+and deletes its own templates behind `TemplateCapability`.
+
+A host request can name an available template by its ID — the ID that
+the create returned. The template's image becomes the host image. An
+explicit `image`
+wins over the template, and the template wins over the provider default.
+Host creation never builds a missing or unavailable template. It returns
+a client error, and the caller decides when to build.
+
 Every host is a renewable lease. A create without `expires_at` gets
 `now + LEASE_DEFAULT_TTL`, so a host whose owner disappears lapses and
 self-reaps instead of leaking VM cost; an explicit `expires_at: null`
@@ -106,13 +122,18 @@ hosts renew — unclaimed warm-pool members belong to pool maintenance
 and refuse with `409`.
 
 Two maintenance commands run as cron jobs from the same image:
-`hosts.janitor` reaps expired and orphaned hosts, `hosts.pool` keeps a
-warm pool of pre-provisioned hosts per provider (`POOL_SIZES`, with
-`POOL_SIZE` as the default provider's target) to hide provider cold
-starts. Pool members are warmed with the provider's default image and
-size, so a request that customizes its host — `image`, `env`,
-`instance_type`, or `disk_gb` — always provisions fresh instead of
-claiming a warm host.
+
+- `janitor` reaps expired and orphaned hosts, marks abandoned template
+  builds `failed`, and deletes failed or unused templates.
+- `hosts.pool` keeps a warm pool of pre-provisioned hosts per provider
+  (`POOL_SIZES`, with `POOL_SIZE` as the default provider's target) to
+  hide provider cold starts.
+
+When you edit a template setup script, the hash changes. The old
+template ages out after its last lease. Pool members
+are warmed with the provider's default image and size, so a request that
+customizes its host — `image`, `env`, `template`, `instance_type`, or
+`disk_gb` — always provisions fresh instead of claiming a warm host.
 
 ## Diagnostics
 

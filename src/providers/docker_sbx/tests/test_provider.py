@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from providers.docker.exceptions import DockerImageNotFoundError
 from providers.docker_sbx.exceptions import (
     DockerSbxNotFoundError,
     DockerSbxTransportError,
@@ -30,10 +31,26 @@ def _api_mock() -> MagicMock:
     return api
 
 
+def _docker_mock() -> MagicMock:
+    docker = MagicMock()
+    docker.build_image = AsyncMock()
+    docker.remove_image = AsyncMock()
+    return docker
+
+
+def _provider(
+    api: MagicMock,
+    settings: DockerSbxSettings,
+    *,
+    docker: MagicMock | None = None,
+) -> DockerSbxProvider:
+    return DockerSbxProvider(api, settings, docker=docker or _docker_mock())
+
+
 @pytest.mark.asyncio
 async def test_create_vm_creates_a_sized_sandbox_and_returns_key_material(tmp_path):
     api = _api_mock()
-    provider = DockerSbxProvider(api, _settings(tmp_path, cpus=4, memory="8g"))
+    provider = _provider(api, _settings(tmp_path, cpus=4, memory="8g"))
 
     result = await provider.create_vm(name="sb-test", image="drukbox/sbx-sandbox:latest", env={})
 
@@ -52,16 +69,16 @@ async def test_create_vm_creates_a_sized_sandbox_and_returns_key_material(tmp_pa
     assert result.ssh_host == ""
     assert result.ssh_port == 0
     assert result.ssh_username == "root"
-    assert result.private_key is not None
+    assert result.private_key
     assert "-----BEGIN OPENSSH PRIVATE KEY-----" in result.private_key
-    assert result.public_key is not None
+    assert result.public_key
     assert result.public_key.startswith("ssh-ed25519 ")
 
 
 @pytest.mark.asyncio
 async def test_create_vm_bootstrap_installs_the_public_key_and_caller_env(tmp_path):
     api = _api_mock()
-    provider = DockerSbxProvider(api, _settings(tmp_path))
+    provider = _provider(api, _settings(tmp_path))
 
     await provider.create_vm(name="sb-test", image="img", env={"API_TOKEN": "s3cr3t"})
 
@@ -77,7 +94,7 @@ async def test_create_vm_bootstrap_installs_the_public_key_and_caller_env(tmp_pa
 @pytest.mark.asyncio
 async def test_create_vm_installs_the_key_for_the_configured_ssh_user(tmp_path):
     api = _api_mock()
-    provider = DockerSbxProvider(api, _settings(tmp_path, ssh_username="dev"))
+    provider = _provider(api, _settings(tmp_path, ssh_username="dev"))
 
     result = await provider.create_vm(name="sb-test", image="img", env={})
 
@@ -91,7 +108,7 @@ async def test_create_vm_installs_the_key_for_the_configured_ssh_user(tmp_path):
 @pytest.mark.asyncio
 async def test_create_vm_rejects_setup_script_because_tailscale_is_unsupported(tmp_path):
     api = _api_mock()
-    provider = DockerSbxProvider(api, _settings(tmp_path))
+    provider = _provider(api, _settings(tmp_path))
 
     # The service does not send a script, because supports_tailnet is
     # False. This guard finds a defect in the caller.
@@ -103,7 +120,7 @@ async def test_create_vm_rejects_setup_script_because_tailscale_is_unsupported(t
 @pytest.mark.asyncio
 async def test_create_vm_rejects_env_values_that_would_forge_environment_entries(tmp_path):
     api = _api_mock()
-    provider = DockerSbxProvider(api, _settings(tmp_path))
+    provider = _provider(api, _settings(tmp_path))
 
     with pytest.raises(ProviderCommandError, match="NUL or newline"):
         await provider.create_vm(name="sb-test", image="img", env={"EVIL": "value\nINJECTED=x"})
@@ -115,7 +132,7 @@ async def test_create_vm_rejects_env_values_that_would_forge_environment_entries
 async def test_create_vm_cleans_up_when_the_sandbox_cannot_be_created(tmp_path):
     api = _api_mock()
     api.create_sandbox.side_effect = DockerSbxTransportError("daemon unavailable")
-    provider = DockerSbxProvider(api, _settings(tmp_path))
+    provider = _provider(api, _settings(tmp_path))
 
     with pytest.raises(ProviderTransportError):
         await provider.create_vm(name="sb-test", image="img", env={})
@@ -132,7 +149,7 @@ async def test_create_vm_translates_an_unwritable_workspace_root(tmp_path):
     # the same OSError type as for a missing bind mount.
     blocked_root = tmp_path / "blocked"
     blocked_root.touch()
-    provider = DockerSbxProvider(api, _settings(blocked_root))
+    provider = _provider(api, _settings(blocked_root))
 
     with pytest.raises(ProviderTransportError, match="workspace"):
         await provider.create_vm(name="sb-test", image="img", env={})
@@ -146,7 +163,7 @@ async def test_create_vm_tears_down_after_a_failed_bootstrap_and_keeps_the_first
     api = _api_mock()
     api.run_bootstrap.side_effect = DockerSbxTransportError("exec failed")
     api.remove_sandbox.side_effect = DockerSbxTransportError("cleanup failed")
-    provider = DockerSbxProvider(api, _settings(tmp_path))
+    provider = _provider(api, _settings(tmp_path))
 
     with pytest.raises(ProviderTransportError, match="exec failed"):
         await provider.create_vm(name="sb-test", image="img", env={})
@@ -159,7 +176,7 @@ async def test_delete_vm_removes_the_sandbox_and_its_workspace(tmp_path):
     api = _api_mock()
     workspace = tmp_path / "sb-test"
     workspace.mkdir(parents=True)
-    provider = DockerSbxProvider(api, _settings(tmp_path))
+    provider = _provider(api, _settings(tmp_path))
 
     await provider.delete_vm("sb-test")
 
@@ -173,7 +190,7 @@ async def test_delete_vm_drops_the_workspace_of_a_sandbox_that_never_existed(tmp
     api.remove_sandbox.side_effect = DockerSbxNotFoundError("sandbox 'sb-test' not found")
     workspace = tmp_path / "sb-test"
     workspace.mkdir(parents=True)
-    provider = DockerSbxProvider(api, _settings(tmp_path))
+    provider = _provider(api, _settings(tmp_path))
 
     with pytest.raises(ProviderNotFoundError):
         await provider.delete_vm("sb-test")
@@ -188,8 +205,46 @@ async def test_delete_vm_keeps_the_workspace_when_teardown_fails(tmp_path):
     api.remove_sandbox.side_effect = DockerSbxTransportError("daemon unavailable")
     workspace = tmp_path / "sb-test"
     workspace.mkdir(parents=True)
-    provider = DockerSbxProvider(api, _settings(tmp_path))
+    provider = _provider(api, _settings(tmp_path))
 
     with pytest.raises(ProviderTransportError):
         await provider.delete_vm("sb-test")
     assert workspace.is_dir()
+
+
+@pytest.mark.asyncio
+async def test_build_template_image_builds_and_returns_the_local_image_tag(tmp_path):
+    api = _api_mock()
+    docker = _docker_mock()
+    provider = _provider(api, _settings(tmp_path), docker=docker)
+
+    image = await provider.build_template_image(
+        base_image="sandbox:base",
+        setup_script="apt-get update",
+        label="Node tools",
+    )
+
+    assert image.startswith("drukbox-template:")
+    assert docker.build_image.await_args.args[0] == image
+
+
+@pytest.mark.asyncio
+async def test_delete_template_image_removes_the_local_image(tmp_path):
+    api = _api_mock()
+    docker = _docker_mock()
+    provider = _provider(api, _settings(tmp_path), docker=docker)
+
+    await provider.delete_template_image("drukbox-template:123456789abc")
+
+    docker.remove_image.assert_awaited_once_with("drukbox-template:123456789abc")
+
+
+@pytest.mark.asyncio
+async def test_delete_template_image_translates_a_missing_image(tmp_path):
+    api = _api_mock()
+    docker = _docker_mock()
+    docker.remove_image.side_effect = DockerImageNotFoundError("No such image")
+    provider = _provider(api, _settings(tmp_path), docker=docker)
+
+    with pytest.raises(ProviderNotFoundError, match="was not found"):
+        await provider.delete_template_image("drukbox-template:missing")

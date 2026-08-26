@@ -2,12 +2,17 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import HttpProxyCapability
+from providers.capabilities import HttpProxyCapability, TemplateCapability
+from providers.docker.api import DockerAPI
+from providers.docker.exceptions import DockerProviderError
+from providers.docker.images import build_derived_image, remove_derived_image
 from providers.exceptions import (
+    ProviderCommandError,
     ProviderHttpProxyExistsError,
     ProviderHttpProxyNotFoundError,
     ProviderNotFoundError,
     ProviderTargetVMNotFoundError,
+    ProviderTransportError,
 )
 from providers.exe.api import ExeAPI
 from providers.exe.exceptions import (
@@ -18,7 +23,7 @@ from providers.exe.exceptions import (
 from providers.exe.settings import ExeSettings
 
 
-class ExeProvider(VMProvider, HttpProxyCapability):
+class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
     name: ClassVar[str] = "exe"
     diagnose_hint: ClassVar[str] = "check_exe_dev_api_token_and_url"
 
@@ -27,10 +32,12 @@ class ExeProvider(VMProvider, HttpProxyCapability):
         api: ExeAPI,
         settings: ExeSettings,
         *,
+        docker: DockerAPI,
         service_label: str = "drukbox",
     ) -> None:
         self.api = api
         self.settings = settings
+        self.docker = docker
         self._service_label = service_label
 
     @classmethod
@@ -39,6 +46,7 @@ class ExeProvider(VMProvider, HttpProxyCapability):
         return cls(
             ExeAPI.from_settings(),
             ExeSettings(),  # pyright: ignore[reportCallIssue]
+            docker=DockerAPI(),
             service_label=core.service_label,
         )
 
@@ -60,12 +68,28 @@ class ExeProvider(VMProvider, HttpProxyCapability):
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
+        # exe.dev assumes a public image. A template pushed to the configured
+        # registry is private, so its pull gets --registry-auth (see
+        # https://exe.dev/docs/private-image). The credentials go only to
+        # the registry that they belong to.
+        registry_auth = None
+        registry = self.settings.image_registry
+        if (
+            registry
+            and self.settings.registry_username
+            and self.settings.registry_password
+            and image.partition("/")[0] == registry.partition("/")[0]
+        ):
+            registry_auth = f"{self.settings.registry_username}:{self.settings.registry_password}"
+
+        # Tags are operator-facing: `exe ls --tag=managed-by-<env>` shows what this deployment owns.
         payload = await self.api.create_vm(
             name=name,
             image=image,
             env=env,
             setup_script=setup_script,
-            tags=self._tags_for(name),
+            tags=[f"managed-by-{self._service_label}"],
+            registry_auth=registry_auth,
         )
         return VMCreateResult(
             provider_id=str(payload["vm_name"]),
@@ -78,19 +102,57 @@ class ExeProvider(VMProvider, HttpProxyCapability):
             ssh_username=self.settings.ssh_username,
         )
 
-    def _tags_for(self, name: str) -> list[str]:
-        # Tags are an operator-facing convenience: `exe ls --tag=managed-by-<env>`
-        # answers "what VMs does this deployment own?"
-        return [f"managed-by-{self._service_label}"]
-
     async def delete_vm(self, name: str) -> None:
         try:
             await self.api.delete_vm(name)
         except ExeVMNotFoundError as exc:
             raise ProviderNotFoundError(str(exc)) from exc
 
+    async def build_template_image(
+        self,
+        *,
+        base_image: str,
+        setup_script: str,
+        label: str,
+    ) -> str:
+        registry = self.settings.image_registry
+        username = self.settings.registry_username
+        password = self.settings.registry_password
+
+        if not (registry and username and password):
+            missing_settings = [
+                name
+                for name, value in (
+                    ("EXE_IMAGE_REGISTRY", registry),
+                    ("EXE_REGISTRY_USERNAME", username),
+                    ("EXE_REGISTRY_PASSWORD", password),
+                )
+                if not value
+            ]
+            raise ProviderCommandError(
+                f"exe template registry is not configured. Set: {', '.join(missing_settings)}"
+            )
+
+        image = await build_derived_image(
+            self.docker,
+            base_image=base_image,
+            setup_script=setup_script,
+            repository=registry,
+        )
+        try:
+            await self.docker.push_image(image, username=username, password=password)
+        except DockerProviderError as exc:
+            raise ProviderTransportError(str(exc)) from exc
+        return image
+
+    async def delete_template_image(self, image: str) -> None:
+        # Registry deletion is registry-specific. This provider only removes
+        # the local image.
+        await remove_derived_image(self.docker, image)
+
     async def aclose(self) -> None:
         await self.api.aclose()
+        await self.docker.aclose()
 
     async def diagnose(self) -> str:
         payload = await self.api.whoami()

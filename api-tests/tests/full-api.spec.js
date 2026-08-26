@@ -10,13 +10,17 @@ const EXPECTED_OPENAPI_OPERATIONS = [
   "DELETE /http-proxies/{name}",
   "DELETE /http-proxies/{name}/hosts/{host_id}",
   "DELETE /hosts/{host_id}",
+  "DELETE /templates/{template_id}",
   "GET /doctor",
   "GET /hosts",
   "GET /hosts/{host_id}",
+  "GET /templates",
+  "GET /templates/{template_id}",
   "POST /http-proxies",
   "POST /http-proxies/{name}/hosts/{host_id}",
   "POST /hosts",
   "POST /hosts/{host_id}/renew",
+  "POST /templates",
 ];
 
 const HOST_KEYS = [
@@ -56,6 +60,7 @@ test.describe("Drukbox API", () => {
   let publicApi;
   let createdHost;
   let createdProxyName;
+  let createdTemplate;
   let config;
 
   test.beforeAll(async () => {
@@ -75,6 +80,12 @@ test.describe("Drukbox API", () => {
     if (api && createdHost?.id) {
       try {
         await api.delete(`/hosts/${createdHost.id}`);
+      } catch {}
+    }
+
+    if (api && createdTemplate?.id) {
+      try {
+        await api.delete(`/templates/${createdTemplate.id}`);
       } catch {}
     }
 
@@ -271,6 +282,49 @@ test.describe("Drukbox API", () => {
 
     const missing = await expectJson(await api.get(`/hosts/${createdHost.id}`), 404);
     expect(missing.detail).toBe("host not found");
+  });
+
+  test("template lifecycle: build, fork a host, delete", async () => {
+    test.setTimeout(config.hostActiveTimeoutMs * 2);
+
+    createdTemplate = await expectJson(
+      await api.post("/templates", {
+        data: { setup_script: "printf drukbox > /drukbox-template-marker\n" },
+      }),
+      202,
+    );
+    expect(createdTemplate.id).toMatch(UUID_PATTERN);
+    expect(createdTemplate.status).toBe("building");
+    expect(createdTemplate.image).toBe("");
+    expect(createdTemplate).not.toHaveProperty("setup_script");
+
+    const built = await pollUntil(
+      async () => {
+        const template = await expectJson(
+          await api.get(`/templates/${createdTemplate.id}`),
+          200,
+        );
+        return template.status === "building" ? null : template;
+      },
+      { timeoutMs: config.hostActiveTimeoutMs, message: "template build did not finish" },
+    );
+    expect(built.status, built.last_error).toBe("available");
+    expect(built.image).not.toBe("");
+
+    const forked = await expectJson(
+      await api.post("/hosts", {
+        data: { template: createdTemplate.id },
+        timeout: config.hostActiveTimeoutMs,
+      }),
+      201,
+    );
+    expect(forked.image).toBe(built.image);
+    expect(forked.status).toBe("active");
+    await expectStatus(await api.delete(`/hosts/${forked.id}`), 204);
+
+    await expectStatus(await api.delete(`/templates/${createdTemplate.id}`), 204);
+    await expectStatus(await api.get(`/templates/${createdTemplate.id}`), 404);
+    createdTemplate = null;
   });
 });
 

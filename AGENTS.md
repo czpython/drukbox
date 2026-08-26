@@ -10,6 +10,7 @@ a service, not a library.
 It owns:
 
 - Host records and lifecycle state in Postgres
+- Template records, async template builds, and their provider images
 - Inline provisioning in `POST /hosts`
 - Provider VM creation and deletion (exe.dev, AWS, Hetzner, Exoscale,
   local Docker, Docker Sandboxes)
@@ -18,8 +19,9 @@ It owns:
 - An SSH gateway for hosts of gateway providers (`python -m gateway.server`)
 - Account-bound exe.dev HTTP proxy resources
 
-Periodic maintenance runs as cron jobs: `python -m hosts.janitor` reaps
-expired hosts, `python -m hosts.pool` tops up the warm pool.
+Periodic maintenance runs as cron jobs: `python -m janitor` reaps expired
+hosts and abandoned, failed, or unused templates, and `python -m hosts.pool`
+tops up the warm pool.
 
 No backwards compatibility is required unless a caller contract is explicitly
 documented in this repo.
@@ -47,8 +49,10 @@ src/
   hosts/             # Host API, models, schemas, service, janitor, pool, auth
   gateway/           # SSH gateway for gateway-provider hosts
   http_proxies/      # HTTP proxy API, schemas, service, deps
+  janitor/           # Cron entry point that runs the host and template reapers
   providers/         # VM provider ABC, capabilities, registry, adapters
   networking/        # Network provider framework and Tailscale adapter
+  templates/         # Template API, models, service, and janitor
   conftest.py        # Test env defaults and database reset fixture
 alembic/             # Database migrations
 api-tests/           # Playwright black-box API tests

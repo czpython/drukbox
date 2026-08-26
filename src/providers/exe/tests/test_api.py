@@ -116,6 +116,23 @@ async def test_create_vm_emits_tag_flag_for_each_tag(respx_mock):
 
 @pytest.mark.asyncio
 @respx.mock(base_url="https://exe.dev")
+async def test_create_vm_emits_registry_auth_flag(respx_mock):
+    route = respx_mock.post("/exec").mock(
+        return_value=httpx.Response(200, content=b'{"vm_name": "sb-1", "ssh_port": 22}'),
+    )
+
+    await _api().create_vm(
+        name="sb-1",
+        image="ghcr.io/acme/templates:abc123",
+        registry_auth="bot:secret",
+    )
+
+    body = route.calls.last.request.content.decode()
+    assert "--registry-auth=bot:secret" in body
+
+
+@pytest.mark.asyncio
+@respx.mock(base_url="https://exe.dev")
 async def test_create_vm_omits_setup_script_when_none(respx_mock):
     route = respx_mock.post("/exec").mock(
         return_value=httpx.Response(200, content=b'{"vm_name": "sb-1", "ssh_port": 22}'),

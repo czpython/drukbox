@@ -5,6 +5,9 @@ from pathlib import Path
 from typing import ClassVar, Self
 
 from providers.base import VMCreateResult, VMProvider
+from providers.capabilities import TemplateCapability
+from providers.docker.api import DockerAPI
+from providers.docker.images import build_derived_image, remove_derived_image
 from providers.exceptions import (
     ProviderCommandError,
     ProviderNotFoundError,
@@ -42,7 +45,7 @@ def _bootstrap_script(*, public_key: str, env: dict[str, str], ssh_username: str
     return "\n".join(lines) + "\n"
 
 
-class DockerSbxProvider(VMProvider):
+class DockerSbxProvider(VMProvider, TemplateCapability):
     name: ClassVar[str] = "docker-sbx"
     diagnose_hint: ClassVar[str] = "check_sandboxd_is_running_and_logged_in"
     # Sandboxes have no dialable sshd; the gateway serves them, and there is
@@ -54,15 +57,23 @@ class DockerSbxProvider(VMProvider):
     # healthy daemon.
     diagnose_timeout_seconds: ClassVar[float] = 15.0
 
-    def __init__(self, api: SbxCLI, settings: DockerSbxSettings) -> None:
+    def __init__(
+        self,
+        api: SbxCLI,
+        settings: DockerSbxSettings,
+        *,
+        docker: DockerAPI,
+    ) -> None:
         self.api = api
         self.settings = settings
+        self.docker = docker
 
     @classmethod
     def from_settings(cls) -> Self:
         return cls(
             SbxCLI(),
             DockerSbxSettings(),  # pyright: ignore[reportCallIssue]
+            docker=DockerAPI(),
         )
 
     @property
@@ -168,13 +179,29 @@ class DockerSbxProvider(VMProvider):
 
         self._remove_workspace(name)
 
+    async def build_template_image(
+        self,
+        *,
+        base_image: str,
+        setup_script: str,
+        label: str,
+    ) -> str:
+        return await build_derived_image(
+            self.docker,
+            base_image=base_image,
+            setup_script=setup_script,
+        )
+
+    async def delete_template_image(self, image: str) -> None:
+        await remove_derived_image(self.docker, image)
+
     async def diagnose(self) -> str:
         # The sandbox list is one fast check of the CLI, the daemon
         # connection, and the Docker login.
         return f"sandboxd reachable, {await self.api.sandbox_count()} sandbox(es)"
 
     async def aclose(self) -> None:
-        return
+        await self.docker.aclose()
 
     def _workspace(self, name: str) -> Path:
         return self.settings.workspace_root / name
