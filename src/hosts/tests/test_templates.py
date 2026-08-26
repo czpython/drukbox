@@ -13,7 +13,7 @@ from providers.exe.settings import ExeSettings
 from templates.models import Template, TemplateStatus
 
 AUTH_HEADERS = {"Authorization": "Bearer service-token"}
-REQUIREMENTS_HASH = "a" * 64
+SETUP_SCRIPT_HASH = "a" * 64
 SETUP_SCRIPT = "apt-get update && apt-get install -y nodejs"
 
 
@@ -21,7 +21,7 @@ async def create_template_record(
     *,
     provider: str = "exe",
     base_image: str = "base:image",
-    requirements_hash: str = REQUIREMENTS_HASH,
+    setup_script_hash: str = SETUP_SCRIPT_HASH,
     image: str = "",
     status: str = TemplateStatus.AVAILABLE.value,
     last_error: str = "",
@@ -32,7 +32,7 @@ async def create_template_record(
         id=uuid7(),
         provider=provider,
         base_image=base_image,
-        requirements_hash=requirements_hash,
+        setup_script_hash=setup_script_hash,
         setup_script=SETUP_SCRIPT,
         label="",
         image=image,
@@ -124,7 +124,7 @@ async def test_create_host_rejects_unknown_template_id(client):
     assert response.status_code == 400
     assert missing_id in response.json()["detail"]
     assert "not found" in response.json()["detail"]
-    assert response.json()["error_code"] == "TEMPLATE_REFERENCE"
+    assert response.json()["error_code"] == "UNKNOWN_TEMPLATE"
 
 
 async def test_create_host_explicit_image_wins_without_touching_template(client, monkeypatch):

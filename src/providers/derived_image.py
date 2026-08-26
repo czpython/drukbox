@@ -9,7 +9,7 @@ from providers.docker.exceptions import DockerImageNotFoundError, DockerProvider
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
 
 
-def derived_image_tag(
+def derive_image_tag(
     *,
     base_image: str,
     setup_script: str,
@@ -21,7 +21,7 @@ def derived_image_tag(
 
 
 @contextlib.contextmanager
-def derived_image_context(*, base_image: str, setup_script: str) -> Iterator[Path]:
+def create_build_context(*, base_image: str, setup_script: str) -> Iterator[Path]:
     with tempfile.TemporaryDirectory(prefix="drukbox-template-") as directory:
         context = Path(directory)
         context.joinpath("setup.sh").write_bytes(setup_script.encode("utf-8"))
@@ -41,13 +41,13 @@ async def build_derived_image(
     setup_script: str,
     repository: str = "drukbox-template",
 ) -> str:
-    tag = derived_image_tag(
+    tag = derive_image_tag(
         base_image=base_image,
         setup_script=setup_script,
         repository=repository,
     )
     try:
-        with derived_image_context(base_image=base_image, setup_script=setup_script) as context:
+        with create_build_context(base_image=base_image, setup_script=setup_script) as context:
             await docker_cli.build_image(tag, context)
     except DockerProviderError as exc:
         raise ProviderTransportError(str(exc)) from exc

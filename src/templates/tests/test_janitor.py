@@ -28,7 +28,7 @@ async def _create_template(
         id=uuid7(),
         provider=provider,
         base_image="stub:base",
-        requirements_hash=hashlib.sha256(setup_script.encode()).hexdigest(),
+        setup_script_hash=hashlib.sha256(setup_script.encode()).hexdigest(),
         setup_script=setup_script,
         label=name,
         image=image,
@@ -187,8 +187,8 @@ async def test_janitor_removes_row_when_provider_artifact_is_already_gone(templa
 
 async def test_janitor_keeps_transport_failure_and_continues(template_provider, monkeypatch):
     settings = get_settings()
-    delete_template = AsyncMock(side_effect=[ProviderTransportError("offline"), None])
-    monkeypatch.setattr(template_provider, "delete_template", delete_template)
+    delete_template_image = AsyncMock(side_effect=[ProviderTransportError("offline"), None])
+    monkeypatch.setattr(template_provider, "delete_template_image", delete_template_image)
     failed_delete = await _create_template(
         provider=template_provider.name,
         status=TemplateStatus.AVAILABLE,
@@ -206,8 +206,8 @@ async def test_janitor_keeps_transport_failure_and_continues(template_provider, 
 
     await reap_templates()
 
-    assert delete_template.await_args_list[0].args == ("stub-template:failed-delete",)
-    assert delete_template.await_args_list[1].args == ("stub-template:next-candidate",)
+    assert delete_template_image.await_args_list[0].args == ("stub-template:failed-delete",)
+    assert delete_template_image.await_args_list[1].args == ("stub-template:next-candidate",)
     async with async_session_factory() as session:
         assert await session.get(Template, failed_delete.id) is not None
         assert await session.get(Template, next_candidate.id) is None

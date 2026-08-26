@@ -108,7 +108,7 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
         except ExeVMNotFoundError as exc:
             raise ProviderNotFoundError(str(exc)) from exc
 
-    async def create_template(
+    async def build_template_image(
         self,
         *,
         base_image: str,
@@ -147,7 +147,7 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
             raise ProviderTransportError(str(exc)) from exc
         return tag
 
-    async def delete_template(self, image: str) -> None:
+    async def delete_template_image(self, image: str) -> None:
         # Registry deletion is registry-specific. This provider only removes
         # the local build tag.
         await remove_derived_image(self.docker_cli, image)

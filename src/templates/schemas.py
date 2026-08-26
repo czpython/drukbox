@@ -37,7 +37,7 @@ class TemplateOut(BaseModel):
     id: uuid.UUID
     provider: str
     base_image: str
-    requirements_hash: str
+    setup_script_hash: str
     label: str
     image: str
     status: str

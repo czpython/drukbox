@@ -30,7 +30,7 @@ from providers.exceptions import (
     UnsupportedSizingError,
 )
 from providers.registry import get_provider_names, get_vm_provider
-from templates.exceptions import TemplateNotAvailableError, TemplateReferenceError
+from templates.exceptions import TemplateNotAvailableError, UnknownTemplateError
 from templates.models import Template, TemplateStatus
 
 logger = logging.getLogger(__name__)
@@ -289,7 +289,7 @@ class HostService:
         template = result.scalar_one_or_none()
 
         if not template:
-            raise TemplateReferenceError(
+            raise UnknownTemplateError(
                 f"template {template_id} not found for provider {provider!r}"
             )
 

@@ -1,9 +1,9 @@
 from core.exceptions import AppException
 
 
-class TemplateReferenceError(AppException):
+class UnknownTemplateError(AppException):
     status_code = 400
-    error_code = "TEMPLATE_REFERENCE"
+    error_code = "UNKNOWN_TEMPLATE"
 
 
 class TemplateNotAvailableError(AppException):

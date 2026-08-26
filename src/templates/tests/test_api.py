@@ -12,7 +12,7 @@ from uuid6 import uuid7
 from core.database import async_session_factory
 from providers import registry as registry_module
 from providers.base import VMProvider
-from providers.derived_image import derived_image_tag
+from providers.derived_image import derive_image_tag
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
 from templates.exceptions import TemplateStateError
 from templates.models import Template, TemplateStatus
@@ -39,7 +39,7 @@ async def test_create_template_returns_building_then_becomes_available(client, t
     assert uuid.UUID(payload["id"]).version == 7
     assert payload["provider"] == template_provider.name
     assert payload["base_image"] == template_provider.default_image
-    assert payload["requirements_hash"] == hashlib.sha256(SETUP_SCRIPT.encode()).hexdigest()
+    assert payload["setup_script_hash"] == hashlib.sha256(SETUP_SCRIPT.encode()).hexdigest()
     assert payload["label"] == "Node tools"
     assert payload["image"] == ""
     assert payload["status"] == TemplateStatus.BUILDING.value
@@ -51,12 +51,12 @@ async def test_create_template_returns_building_then_becomes_available(client, t
 
     assert polled.status_code == 200
     assert polled.json()["status"] == TemplateStatus.AVAILABLE.value
-    assert polled.json()["image"] == derived_image_tag(
+    assert polled.json()["image"] == derive_image_tag(
         base_image=template_provider.default_image,
         setup_script=SETUP_SCRIPT,
     )
     assert "setup_script" not in polled.json()
-    assert template_provider.created == [
+    assert template_provider.built == [
         (template_provider.default_image, SETUP_SCRIPT, "Node tools")
     ]
 
@@ -126,7 +126,7 @@ async def test_duplicate_create_returns_existing_without_rebuilding(client, temp
     assert second.json()["id"] == first.json()["id"]
     assert second.json()["status"] == TemplateStatus.AVAILABLE.value
     assert second.json()["label"] == "first label"
-    assert template_provider.created == [("stub:custom", SETUP_SCRIPT, "first label")]
+    assert template_provider.built == [("stub:custom", SETUP_SCRIPT, "first label")]
 
 
 async def test_concurrent_creates_resolve_unique_index_race(template_provider):
@@ -314,7 +314,7 @@ async def test_create_template_rejects_blank_script(client, template_provider):
 
     assert response.status_code == 422
     assert response.json()["detail"][0]["loc"] == ["body", "setup_script"]
-    assert template_provider.created == []
+    assert template_provider.built == []
 
 
 async def create_template_record(
@@ -331,7 +331,7 @@ async def create_template_record(
         id=uuid7(),
         provider=provider,
         base_image=base_image,
-        requirements_hash=hashlib.sha256(SETUP_SCRIPT.encode()).hexdigest(),
+        setup_script_hash=hashlib.sha256(SETUP_SCRIPT.encode()).hexdigest(),
         setup_script=SETUP_SCRIPT,
         label=label,
         image=image,

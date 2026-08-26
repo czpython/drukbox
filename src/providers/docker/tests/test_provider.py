@@ -136,11 +136,11 @@ async def test_delete_vm_raises_not_found_when_container_missing():
 
 
 @pytest.mark.asyncio
-async def test_create_template_builds_and_returns_the_derived_tag():
+async def test_build_template_image_builds_and_returns_the_derived_tag():
     api = _api_mock()
     provider = DockerProvider(api, _settings())
 
-    image = await provider.create_template(
+    image = await provider.build_template_image(
         base_image="sandbox:base",
         setup_script="apt-get update",
         label="Node tools",
@@ -152,13 +152,13 @@ async def test_create_template_builds_and_returns_the_derived_tag():
 
 
 @pytest.mark.asyncio
-async def test_create_template_translates_build_failure():
+async def test_build_template_image_translates_build_failure():
     api = _api_mock()
     api.build_image.side_effect = DockerTransportError("build log tail")
     provider = DockerProvider(api, _settings())
 
     with pytest.raises(ProviderTransportError, match="build log tail"):
-        await provider.create_template(
+        await provider.build_template_image(
             base_image="sandbox:base",
             setup_script="apt-get update",
             label="Node tools",
@@ -166,23 +166,23 @@ async def test_create_template_translates_build_failure():
 
 
 @pytest.mark.asyncio
-async def test_delete_template_removes_the_local_image():
+async def test_delete_template_image_removes_the_local_image():
     api = _api_mock()
     provider = DockerProvider(api, _settings())
 
-    await provider.delete_template("drukbox-template:123456789abc")
+    await provider.delete_template_image("drukbox-template:123456789abc")
 
     api.remove_image.assert_awaited_once_with("drukbox-template:123456789abc")
 
 
 @pytest.mark.asyncio
-async def test_delete_template_translates_a_missing_image():
+async def test_delete_template_image_translates_a_missing_image():
     api = _api_mock()
     api.remove_image.side_effect = DockerImageNotFoundError("No such image")
     provider = DockerProvider(api, _settings())
 
     with pytest.raises(ProviderNotFoundError, match="was not found"):
-        await provider.delete_template("drukbox-template:missing")
+        await provider.delete_template_image("drukbox-template:missing")
 
 
 @pytest.mark.asyncio

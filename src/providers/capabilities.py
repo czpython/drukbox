@@ -44,14 +44,14 @@ class HttpProxyCapability(abc.ABC):
 
 
 class TemplateCapability(abc.ABC):
-    """Mix-in declaring a VMProvider can create and delete templates.
+    """Mix-in declaring a VMProvider can build and delete template images.
 
     Modeled as an ABC so resolve_capability checks the inheritance chain
     instead of accepting any object that has these method names.
     """
 
     @abc.abstractmethod
-    async def create_template(
+    async def build_template_image(
         self,
         *,
         base_image: str,
@@ -60,4 +60,4 @@ class TemplateCapability(abc.ABC):
     ) -> str: ...
 
     @abc.abstractmethod
-    async def delete_template(self, image: str) -> None: ...
+    async def delete_template_image(self, image: str) -> None: ...

@@ -129,7 +129,7 @@ class DockerProvider(VMProvider, TemplateCapability):
         except DockerProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
 
-    async def create_template(
+    async def build_template_image(
         self,
         *,
         base_image: str,
@@ -142,7 +142,7 @@ class DockerProvider(VMProvider, TemplateCapability):
             setup_script=setup_script,
         )
 
-    async def delete_template(self, image: str) -> None:
+    async def delete_template_image(self, image: str) -> None:
         await remove_derived_image(self.api, image)
 
     async def diagnose(self) -> str:

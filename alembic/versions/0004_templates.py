@@ -21,7 +21,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("provider", sa.String(length=20), nullable=False),
         sa.Column("base_image", sa.Text(), nullable=False),
-        sa.Column("requirements_hash", sa.String(length=64), nullable=False),
+        sa.Column("setup_script_hash", sa.String(length=64), nullable=False),
         sa.Column("setup_script", sa.Text(), nullable=False),
         sa.Column("label", sa.Text(), nullable=False),
         sa.Column("image", sa.Text(), nullable=False),
@@ -33,16 +33,16 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
-        "ix_templates_provider_base_image_requirements_hash",
+        "ix_templates_provider_base_image_setup_script_hash",
         "templates",
-        ["provider", "base_image", "requirements_hash"],
+        ["provider", "base_image", "setup_script_hash"],
         unique=True,
     )
 
 
 def downgrade() -> None:
     op.drop_index(
-        "ix_templates_provider_base_image_requirements_hash",
+        "ix_templates_provider_base_image_setup_script_hash",
         table_name="templates",
     )
     op.drop_table("templates")

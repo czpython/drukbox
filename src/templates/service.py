@@ -39,12 +39,12 @@ class TemplateService:
 
         vm = get_vm_provider(provider)
         resolved_base_image = base_image or vm.default_image
-        requirements_hash = hashlib.sha256(setup_script.encode("utf-8")).hexdigest()
+        setup_script_hash = hashlib.sha256(setup_script.encode("utf-8")).hexdigest()
         now = utc_now()
         template = Template(
             provider=vm.name,
             base_image=resolved_base_image,
-            requirements_hash=requirements_hash,
+            setup_script_hash=setup_script_hash,
             setup_script=setup_script,
             label=label,
             image="",
@@ -69,7 +69,7 @@ class TemplateService:
                 select(Template)
                 .where(Template.provider == vm.name)
                 .where(Template.base_image == resolved_base_image)
-                .where(Template.requirements_hash == requirements_hash)
+                .where(Template.setup_script_hash == setup_script_hash)
             )
         ).scalar_one_or_none()
         if not winner:
@@ -89,7 +89,7 @@ class TemplateService:
                     get_vm_provider(template.provider),
                     TemplateCapability,
                 )
-                image = await capability.create_template(
+                image = await capability.build_template_image(
                     base_image=template.base_image,
                     setup_script=template.setup_script,
                     label=template.label,
@@ -154,7 +154,7 @@ class TemplateService:
                 TemplateCapability,
             )
             try:
-                await capability.delete_template(template.image)
+                await capability.delete_template_image(template.image)
             except ProviderNotFoundError:
                 logger.warning(
                     "template already absent at provider during teardown: "

@@ -5,7 +5,7 @@ import pytest
 from providers import registry as registry_module
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import TemplateCapability
-from providers.derived_image import derived_image_tag
+from providers.derived_image import derive_image_tag
 from providers.exceptions import ProviderError
 
 
@@ -14,7 +14,7 @@ class StubTemplateProvider(TemplateCapability, VMProvider):
     diagnose_hint = "check_template_stub"
 
     def __init__(self) -> None:
-        self.created: list[tuple[str, str, str]] = []
+        self.built: list[tuple[str, str, str]] = []
         self.deleted: list[str] = []
         self.build_error: Exception | None = None
         self.delete_error: ProviderError | None = None
@@ -52,19 +52,19 @@ class StubTemplateProvider(TemplateCapability, VMProvider):
     async def aclose(self) -> None:
         return
 
-    async def create_template(
+    async def build_template_image(
         self,
         *,
         base_image: str,
         setup_script: str,
         label: str,
     ) -> str:
-        self.created.append((base_image, setup_script, label))
+        self.built.append((base_image, setup_script, label))
         if self.build_error:
             raise self.build_error
-        return derived_image_tag(base_image=base_image, setup_script=setup_script)
+        return derive_image_tag(base_image=base_image, setup_script=setup_script)
 
-    async def delete_template(self, image: str) -> None:
+    async def delete_template_image(self, image: str) -> None:
         self.deleted.append(image)
         if self.delete_error:
             raise self.delete_error

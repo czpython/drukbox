@@ -20,10 +20,10 @@ class Template(Base):
     __tablename__ = "templates"
     __table_args__ = (
         Index(
-            "ix_templates_provider_base_image_requirements_hash",
+            "ix_templates_provider_base_image_setup_script_hash",
             "provider",
             "base_image",
-            "requirements_hash",
+            "setup_script_hash",
             unique=True,
         ),
     )
@@ -31,7 +31,7 @@ class Template(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid7)
     provider: Mapped[str] = mapped_column(String(20))
     base_image: Mapped[str] = mapped_column(Text)
-    requirements_hash: Mapped[str] = mapped_column(String(64))
+    setup_script_hash: Mapped[str] = mapped_column(String(64))
     setup_script: Mapped[str] = mapped_column(Text)
     label: Mapped[str] = mapped_column(Text, default="")
     image: Mapped[str] = mapped_column(Text, default="")

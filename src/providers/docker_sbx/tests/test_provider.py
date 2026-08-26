@@ -213,12 +213,12 @@ async def test_delete_vm_keeps_the_workspace_when_teardown_fails(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_create_template_builds_and_returns_the_local_image_tag(tmp_path):
+async def test_build_template_image_builds_and_returns_the_local_image_tag(tmp_path):
     api = _api_mock()
     docker = _docker_mock()
     provider = _provider(api, _settings(tmp_path), docker_cli=docker)
 
-    image = await provider.create_template(
+    image = await provider.build_template_image(
         base_image="sandbox:base",
         setup_script="apt-get update",
         label="Node tools",
@@ -229,22 +229,22 @@ async def test_create_template_builds_and_returns_the_local_image_tag(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_delete_template_removes_the_local_image(tmp_path):
+async def test_delete_template_image_removes_the_local_image(tmp_path):
     api = _api_mock()
     docker = _docker_mock()
     provider = _provider(api, _settings(tmp_path), docker_cli=docker)
 
-    await provider.delete_template("drukbox-template:123456789abc")
+    await provider.delete_template_image("drukbox-template:123456789abc")
 
     docker.remove_image.assert_awaited_once_with("drukbox-template:123456789abc")
 
 
 @pytest.mark.asyncio
-async def test_delete_template_translates_a_missing_image(tmp_path):
+async def test_delete_template_image_translates_a_missing_image(tmp_path):
     api = _api_mock()
     docker = _docker_mock()
     docker.remove_image.side_effect = DockerImageNotFoundError("No such image")
     provider = _provider(api, _settings(tmp_path), docker_cli=docker)
 
     with pytest.raises(ProviderNotFoundError, match="was not found"):
-        await provider.delete_template("drukbox-template:missing")
+        await provider.delete_template_image("drukbox-template:missing")
