@@ -1,6 +1,4 @@
-import contextlib
 import io
-from collections.abc import Iterator
 
 import aiodocker
 import aiohttp
@@ -10,22 +8,9 @@ from .exceptions import DockerImageNotFoundError, DockerTransportError, DockerVM
 _MAX_ERROR_DETAIL_CHARS = 8_000
 
 
-@contextlib.contextmanager
-def _translated(not_found: type[Exception] | None = None) -> Iterator[None]:
-    # aiodocker and aiohttp types stop here; nothing outside this package
-    # sees them. A 404 becomes the caller-named not-found error; stream
-    # errors (a failing build step, a rejected push) and transport
-    # failures become DockerTransportError with the engine's message,
-    # capped so a long build log stays readable.
-    try:
-        yield
-    except aiodocker.DockerError as exc:
-        detail = str(exc)[-_MAX_ERROR_DETAIL_CHARS:]
-        if not_found and exc.status == 404:
-            raise not_found(detail) from exc
-        raise DockerTransportError(detail) from exc
-    except (aiohttp.ClientError, ValueError, OSError) as exc:
-        raise DockerTransportError(f"docker engine request failed: {exc}") from exc
+def _detail(exc: Exception) -> str:
+    # The engine's message, capped so a long build log stays readable.
+    return str(exc)[-_MAX_ERROR_DETAIL_CHARS:]
 
 
 class DockerAPI:
@@ -36,6 +21,9 @@ class DockerAPI:
     socket — aiodocker implements that chain. The session is created
     lazily on first use: providers are constructed by the registry in
     sync code, and an aiohttp session must be born on the running loop.
+
+    aiodocker and aiohttp exception types stop at this class; callers see
+    only the ``Docker*Error`` hierarchy.
     """
 
     def __init__(self, docker: aiodocker.Docker | None = None) -> None:
@@ -43,7 +31,12 @@ class DockerAPI:
 
     def _client(self) -> aiodocker.Docker:
         if not self._docker:
-            self._docker = aiodocker.Docker()
+            try:
+                self._docker = aiodocker.Docker()
+            except ValueError as exc:
+                # No resolvable daemon address: no DOCKER_HOST, no docker
+                # context, no socket at the default paths.
+                raise DockerTransportError(str(exc)) from exc
         return self._docker
 
     async def run_container(
@@ -66,13 +59,21 @@ class DockerAPI:
                 "PortBindings": {"22/tcp": [{"HostIp": "127.0.0.1", "HostPort": ""}]},
             },
         }
-        with _translated():
+        try:
             container = await self._client().containers.run(config, name=name)
+        except (aiodocker.DockerError, aiohttp.ClientError) as exc:
+            raise DockerTransportError(_detail(exc)) from exc
         return container.id
 
     async def published_ssh_port(self, name: str) -> int:
-        with _translated(not_found=DockerVMNotFoundError):
+        try:
             bindings = await self._client().containers.container(name).port(22)
+        except aiodocker.DockerError as exc:
+            if exc.status == 404:
+                raise DockerVMNotFoundError(str(exc)) from exc
+            raise DockerTransportError(_detail(exc)) from exc
+        except aiohttp.ClientError as exc:
+            raise DockerTransportError(str(exc)) from exc
         # An absent binding means sshd's port never bound — the container
         # exited before publishing.
         if not bindings or not bindings[0].get("HostPort"):
@@ -80,20 +81,34 @@ class DockerAPI:
         return int(bindings[0]["HostPort"])
 
     async def remove_container(self, name: str) -> None:
-        with _translated(not_found=DockerVMNotFoundError):
+        try:
             await self._client().containers.container(name).delete(force=True, v=True)
+        except aiodocker.DockerError as exc:
+            if exc.status == 404:
+                raise DockerVMNotFoundError(str(exc)) from exc
+            raise DockerTransportError(_detail(exc)) from exc
+        except aiohttp.ClientError as exc:
+            raise DockerTransportError(str(exc)) from exc
 
     async def build_image(self, tag: str, context_tar: bytes) -> None:
-        with _translated():
+        try:
             await self._client().images.build(
                 fileobj=io.BytesIO(context_tar),
                 encoding="gzip",
                 tag=tag,
             )
+        except (aiodocker.DockerError, aiohttp.ClientError) as exc:
+            raise DockerTransportError(_detail(exc)) from exc
 
     async def remove_image(self, tag: str) -> None:
-        with _translated(not_found=DockerImageNotFoundError):
+        try:
             await self._client().images.delete(tag)
+        except aiodocker.DockerError as exc:
+            if exc.status == 404:
+                raise DockerImageNotFoundError(str(exc)) from exc
+            raise DockerTransportError(_detail(exc)) from exc
+        except aiohttp.ClientError as exc:
+            raise DockerTransportError(str(exc)) from exc
 
     async def push_image(
         self,
@@ -105,12 +120,16 @@ class DockerAPI:
         # Credentials travel per call as an X-Registry-Auth header; the
         # global docker credential store is never touched.
         auth = {"username": username, "password": password} if username and password else None
-        with _translated():
+        try:
             await self._client().images.push(tag, auth=auth)
+        except (aiodocker.DockerError, aiohttp.ClientError) as exc:
+            raise DockerTransportError(_detail(exc)) from exc
 
     async def server_version(self) -> str:
-        with _translated():
+        try:
             version = await self._client().version()
+        except (aiodocker.DockerError, aiohttp.ClientError) as exc:
+            raise DockerTransportError(_detail(exc)) from exc
         return str(version["Version"])
 
     async def aclose(self) -> None:

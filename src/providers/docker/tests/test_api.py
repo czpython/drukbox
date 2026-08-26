@@ -3,6 +3,7 @@ import tarfile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import aiohttp
 import pytest
 from aiodocker import DockerError
 
@@ -162,7 +163,7 @@ async def test_server_version_reads_the_engine_version() -> None:
 
 async def test_unreachable_daemon_maps_to_transport_error() -> None:
     fake = _fake_docker()
-    fake.version.side_effect = OSError("connection refused")
+    fake.version.side_effect = aiohttp.ClientError("connection refused")
 
     with pytest.raises(DockerTransportError, match="connection refused"):
         await _api(fake).server_version()
