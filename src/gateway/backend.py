@@ -1,10 +1,12 @@
+# The SFTP client handler wants asyncssh's own reader and writer; the exec
+# adapters here duck-type the small surface it uses, so the argument-type
+# check does not apply.
+# pyright: reportArgumentType=false
 import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator
-from typing import cast
 
-from asyncssh import SSHReader, SSHWriter
 from asyncssh.sftp import SFTPClientHandler
 
 from providers.base import SandboxProcess
@@ -140,8 +142,8 @@ class SandboxSftpBackend:
         handler = SFTPClientHandler(
             asyncio.get_running_loop(),
             "strict",
-            cast(SSHReader, _ExecReader(self._process)),
-            cast(SSHWriter, _ExecWriter(self._process)),
+            _ExecReader(self._process),
+            _ExecWriter(self._process),
             _SFTP_VERSION,
         )
         try:

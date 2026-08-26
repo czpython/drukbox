@@ -1,5 +1,8 @@
-from typing import cast
-
+# asyncssh types SFTP file handles as bytes on the client side and as an
+# opaque object on the server side. This module bridges the two by handing
+# each server handle straight to the client, so the handle-argument and
+# override checks do not apply here.
+# pyright: reportArgumentType=false, reportIncompatibleMethodOverride=false
 import asyncssh
 
 from gateway.backend import SandboxSftpBackend
@@ -19,55 +22,55 @@ class GatewaySFTPServer(asyncssh.SFTPServer):
     process.
     """
 
-    def __init__(self, chan: asyncssh.SSHServerChannel, backend: SandboxSftpBackend) -> None:
+    def __init__(self, chan, backend: SandboxSftpBackend):
         super().__init__(chan)
         self._backend = backend
 
-    async def open(self, path: bytes, pflags: int, attrs: asyncssh.SFTPAttrs) -> bytes:
+    async def open(self, path, pflags, attrs):
         async with self._backend.session() as handler:
             return await handler.open(path, pflags, attrs)
 
-    async def close(self, file_obj: object) -> None:
+    async def close(self, file_obj):
         async with self._backend.session() as handler:
-            await handler.close(cast(bytes, file_obj))
+            await handler.close(file_obj)
 
-    async def read(self, file_obj: object, offset: int, size: int) -> bytes:
+    async def read(self, file_obj, offset, size):
         async with self._backend.session() as handler:
-            data, _ = await handler.read(cast(bytes, file_obj), offset, size)
+            data, _ = await handler.read(file_obj, offset, size)
             return data
 
-    async def write(self, file_obj: object, offset: int, data: bytes) -> int:
+    async def write(self, file_obj, offset, data):
         async with self._backend.session() as handler:
-            return await handler.write(cast(bytes, file_obj), offset, data)
+            return await handler.write(file_obj, offset, data)
 
-    async def fstat(self, file_obj: object) -> asyncssh.SFTPAttrs:
+    async def fstat(self, file_obj):
         async with self._backend.session() as handler:
-            return await handler.fstat(cast(bytes, file_obj), _STAT_ALL)
+            return await handler.fstat(file_obj, _STAT_ALL)
 
-    async def stat(self, path: bytes) -> asyncssh.SFTPAttrs:
+    async def stat(self, path):
         async with self._backend.session() as handler:
             return await handler.stat(path, _STAT_ALL)
 
-    async def lstat(self, path: bytes) -> asyncssh.SFTPAttrs:
+    async def lstat(self, path):
         async with self._backend.session() as handler:
             return await handler.lstat(path, _STAT_ALL)
 
-    async def setstat(self, path: bytes, attrs: asyncssh.SFTPAttrs) -> None:
+    async def setstat(self, path, attrs):
         async with self._backend.session() as handler:
             await handler.setstat(path, attrs)
 
-    async def mkdir(self, path: bytes, attrs: asyncssh.SFTPAttrs) -> None:
+    async def mkdir(self, path, attrs):
         async with self._backend.session() as handler:
             await handler.mkdir(path, attrs)
 
-    async def remove(self, path: bytes) -> None:
+    async def remove(self, path):
         async with self._backend.session() as handler:
             await handler.remove(path)
 
-    async def realpath(self, path: bytes) -> bytes:
+    async def realpath(self, path):
         async with self._backend.session() as handler:
             names, _ = await handler.realpath(path)
-            return cast(bytes, names[0].filename)
+            return names[0].filename
 
     def _unsupported(self, *args, **kwargs):
         raise asyncssh.SFTPOpUnsupported("not served by this gateway")

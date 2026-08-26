@@ -23,16 +23,22 @@ _RECEIVE_CHUNK_BYTES = 32768
 # handle. Two SFTP extensions ask the server to seek inside an open file:
 # server-side copy and sparse-range detection. The gateway cannot serve
 # them on an opaque handle. asyncssh advertises them from this class list
-# and gives no per-server control, so the gateway removes them here.
+# and gives no per-server control, so the gateway removes them once, before
+# it serves the first SFTP session.
 _UNSUPPORTED_SFTP_EXTENSIONS = (b"copy-data", b"ranges@asyncssh.com")
+_extensions_disabled = False
 
 
 def _disable_unsupported_sftp_extensions() -> None:
+    global _extensions_disabled
+    if _extensions_disabled:
+        return
     asyncssh.sftp.SFTPServerHandler._extensions = [
         extension
         for extension in asyncssh.sftp.SFTPServerHandler._extensions
         if extension[0] not in _UNSUPPORTED_SFTP_EXTENSIONS
     ]
+    _extensions_disabled = True
 
 
 class GatewayConnection(asyncssh.SSHServer):
@@ -182,13 +188,13 @@ def _load_host_key(settings: GatewaySettings) -> asyncssh.SSHKey:
 
 
 def _open_sftp(channel: asyncssh.SSHServerChannel) -> GatewaySFTPServer:
+    _disable_unsupported_sftp_extensions()
     server = channel.get_connection().get_owner()
     assert isinstance(server, GatewayConnection)
     return GatewaySFTPServer(channel, server.sftp_backend())
 
 
 async def start(settings: GatewaySettings) -> asyncssh.SSHAcceptor:
-    _disable_unsupported_sftp_extensions()
     server = await asyncssh.listen(
         host=settings.bind_host,
         port=settings.ssh_port,

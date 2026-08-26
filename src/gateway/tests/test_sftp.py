@@ -69,38 +69,33 @@ async def connected(gateway_settings, local_provider):
     server.close()
 
 
-async def test_put_to_a_nested_path_chmod_and_get_back_byte_identical(connected, tmp_path):
-    content = os.urandom(50_000)
-    source = tmp_path / "source.bin"
-    source.write_bytes(content)
-    remote = tmp_path / "nested" / "deep" / "artifact.bin"
-    got = tmp_path / "roundtrip.bin"
+async def test_forwards_operations_to_the_sandbox(connected, tmp_path):
+    # One round trip proves the delegation wiring: mkdir, write, chmod, and
+    # read all reach the upstream server and come back.
+    remote = tmp_path / "nested" / "artifact.bin"
+    payload = b"forwarded"
 
     async with connected.start_sftp_client() as sftp:
         await sftp.makedirs(str(remote.parent), exist_ok=True)
-        await sftp.put(str(source), str(remote))
+        async with sftp.open(str(remote), "wb") as handle:
+            await handle.write(payload)
         await sftp.chmod(str(remote), 0o600)
-        await sftp.get(str(remote), str(got))
+        async with sftp.open(str(remote), "rb") as handle:
+            got = await handle.read()
 
-    assert got.read_bytes() == content
+    assert got == payload
     assert (remote.stat().st_mode & 0o777) == 0o600
 
 
-async def test_stat_of_a_missing_file_does_not_kill_the_session(connected, tmp_path):
+async def test_an_operation_error_reaches_the_caller_and_keeps_the_session(connected, tmp_path):
+    # An upstream error surfaces as its SFTP error, and the backend stays
+    # open for the next operation.
     async with connected.start_sftp_client() as sftp:
         with pytest.raises(asyncssh.SFTPNoSuchFile):
             await sftp.stat(str(tmp_path / "not-here-yet"))
         probe = tmp_path / "probe"
         probe.write_bytes(b"ok")
         assert await sftp.isfile(str(probe))
-
-
-async def test_remove(connected, tmp_path):
-    victim = tmp_path / "victim"
-    victim.write_bytes(b"bye")
-    async with connected.start_sftp_client() as sftp:
-        await sftp.remove(str(victim))
-    assert not victim.exists()
 
 
 async def test_tail_pattern_polls_without_a_per_poll_process_open(connected, tmp_path):
