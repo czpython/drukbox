@@ -6,8 +6,8 @@ from typing import ClassVar, Self
 
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import TemplateCapability
-from providers.derived_image import build_derived_image, remove_derived_image
 from providers.docker.api import DockerCLI
+from providers.docker.derived_image import build_derived_image, remove_derived_image
 from providers.exceptions import (
     ProviderCommandError,
     ProviderNotFoundError,

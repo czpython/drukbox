@@ -4,9 +4,10 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
-from providers.docker.api import DockerCLI
-from providers.docker.exceptions import DockerImageNotFoundError, DockerProviderError
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
+
+from .api import DockerCLI
+from .exceptions import DockerImageNotFoundError, DockerProviderError
 
 
 def derive_image_tag(

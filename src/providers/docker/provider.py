@@ -4,7 +4,6 @@ from typing import ClassVar, Self
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import TemplateCapability
-from providers.derived_image import build_derived_image, remove_derived_image
 from providers.exceptions import (
     ProviderCommandError,
     ProviderNotFoundError,
@@ -13,6 +12,7 @@ from providers.exceptions import (
 from providers.ssh_keys import generate_ed25519_keypair
 
 from .api import DockerCLI
+from .derived_image import build_derived_image, remove_derived_image
 from .exceptions import DockerProviderError, DockerVMNotFoundError
 from .settings import DockerSettings
 

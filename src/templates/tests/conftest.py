@@ -5,7 +5,7 @@ import pytest
 from providers import registry as registry_module
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import TemplateCapability
-from providers.derived_image import derive_image_tag
+from providers.docker.derived_image import derive_image_tag
 from providers.exceptions import ProviderError
 
 
