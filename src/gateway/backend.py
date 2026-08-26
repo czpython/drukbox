@@ -11,11 +11,6 @@ from providers.base import SandboxProcess
 
 logger = logging.getLogger(__name__)
 
-# The sandbox's own OpenSSH SFTP server. The daemon owns the data plane.
-# Thus drukbox runs this real server in the sandbox and speaks SFTP to it.
-# drukbox does not reimplement the file operations.
-SFTP_SERVER_COMMAND = "exec /usr/lib/openssh/sftp-server"
-
 _SFTP_VERSION = 3
 
 # One `sbx exec` costs seconds of CLI startup. Thus the server stays open
@@ -136,7 +131,9 @@ class SandboxSftpBackend:
         # closes the process, and does not leak a live exec that would keep
         # the sandbox awake.
         self._process = await self._process_class.open(
-            self._host_name, command=SFTP_SERVER_COMMAND, terminal=None
+            self._host_name,
+            command=self._process_class.sftp_server_command,
+            terminal=None,
         )
         # The client handler reads exact byte counts and writes framed
         # packets. The exec adapters give that surface.

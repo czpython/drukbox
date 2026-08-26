@@ -1,4 +1,5 @@
 import asyncio
+from typing import ClassVar
 
 from providers.base import SandboxProcess, TerminalSize
 
@@ -7,6 +8,7 @@ SFTP_SERVER = "/usr/libexec/sftp-server"
 
 class LocalProcess(SandboxProcess):
     open_count = 0
+    sftp_server_command: ClassVar[str] = f"exec {SFTP_SERVER}"
 
     def __init__(self, process: asyncio.subprocess.Process) -> None:
         self._process = process
@@ -14,11 +16,7 @@ class LocalProcess(SandboxProcess):
     @classmethod
     async def open(cls, name, *, command, terminal):
         cls.open_count += 1
-        # The backend runs the sandbox's sftp-server; locally the same
-        # server lives at a different path, so that one command is remapped.
         argv = ["bash", "-c", command] if command else ["bash"]
-        if command == "exec /usr/lib/openssh/sftp-server":
-            argv = [SFTP_SERVER]
         process = await asyncio.create_subprocess_exec(
             *argv,
             stdin=asyncio.subprocess.PIPE,

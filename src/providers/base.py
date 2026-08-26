@@ -29,6 +29,11 @@ class SandboxProcess(abc.ABC):
     """One live process inside a sandbox. The gateway pumps bytes between an
     SSH channel and this object; the receive methods return b"" at the end."""
 
+    # The command that starts the sandbox image's own SFTP server. The
+    # gateway runs it to serve SFTP, so it belongs with the process that
+    # knows the image, not with the gateway.
+    sftp_server_command: ClassVar[str]
+
     @classmethod
     @abc.abstractmethod
     async def open(
