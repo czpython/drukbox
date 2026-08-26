@@ -16,12 +16,6 @@ def _set_terminal_size(descriptor: int, size: TerminalSize) -> None:
 
 
 def _session_script(name: str, command: str | None) -> str:
-    # A caller treats the host name as a unix user and writes a .gitconfig
-    # and credential files under /home/<name>, but a session runs as root
-    # with HOME=/root. So the session makes that home, enters it, and
-    # exports HOME first; a command then finds $HOME, SFTP relative paths
-    # resolve there, and detached children inherit it. The name is
-    # server-generated, thus the path is a safe shell token.
     home = f"/home/{name}"
     payload = command if command is not None else "exec bash -l"
     return f"mkdir -p {home} && cd {home} && export HOME={home}\n{payload}"
