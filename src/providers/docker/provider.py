@@ -142,8 +142,8 @@ class DockerProvider(VMProvider, TemplateCapability):
             setup_script=setup_script,
         )
 
-    async def delete_template(self, handle: str) -> None:
-        await remove_derived_image(self.api, handle)
+    async def delete_template(self, image: str) -> None:
+        await remove_derived_image(self.api, image)
 
     async def diagnose(self) -> str:
         return f"docker server {await self.api.server_version()}"

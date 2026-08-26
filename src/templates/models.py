@@ -34,7 +34,7 @@ class Template(Base):
     requirements_hash: Mapped[str] = mapped_column(String(64))
     setup_script: Mapped[str] = mapped_column(Text)
     label: Mapped[str] = mapped_column(Text, default="")
-    handle: Mapped[str] = mapped_column(Text, default="")
+    image: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), default=TemplateStatus.BUILDING.value)
     last_error: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)

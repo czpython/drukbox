@@ -218,14 +218,14 @@ async def test_create_template_builds_and_returns_the_local_image_tag(tmp_path):
     docker = _docker_mock()
     provider = _provider(api, _settings(tmp_path), docker_cli=docker)
 
-    handle = await provider.create_template(
+    image = await provider.create_template(
         base_image="sandbox:base",
         setup_script="apt-get update",
         label="Node tools",
     )
 
-    assert handle.startswith("drukbox-template:")
-    assert docker.build_image.await_args.args[0] == handle
+    assert image.startswith("drukbox-template:")
+    assert docker.build_image.await_args.args[0] == image
 
 
 @pytest.mark.asyncio

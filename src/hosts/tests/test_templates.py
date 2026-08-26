@@ -22,7 +22,7 @@ async def create_template_record(
     provider: str = "exe",
     base_image: str = "base:image",
     requirements_hash: str = REQUIREMENTS_HASH,
-    handle: str = "",
+    image: str = "",
     status: str = TemplateStatus.AVAILABLE.value,
     last_error: str = "",
     created_at: datetime | None = None,
@@ -35,7 +35,7 @@ async def create_template_record(
         requirements_hash=requirements_hash,
         setup_script=SETUP_SCRIPT,
         label="",
-        handle=handle,
+        image=image,
         status=status,
         last_error=last_error,
         created_at=now,
@@ -50,7 +50,7 @@ async def create_template_record(
 
 async def test_create_host_resolves_template_id(client, monkeypatch):
     """An available template ID becomes the stored image and records its use."""
-    template = await create_template_record(handle="derived:image-by-id")
+    template = await create_template_record(image="derived:image-by-id")
     monkeypatch.setattr("hosts.service.HostService.provision", AsyncMock())
 
     before = utc_now()
@@ -129,7 +129,7 @@ async def test_create_host_rejects_unknown_template_id(client):
 
 async def test_create_host_explicit_image_wins_without_touching_template(client, monkeypatch):
     """An explicit image bypasses template resolution and leaves usage unstamped."""
-    template = await create_template_record(handle="derived:ignored")
+    template = await create_template_record(image="derived:ignored")
     monkeypatch.setattr("hosts.service.HostService.provision", AsyncMock())
 
     response = await client.post(
@@ -169,7 +169,7 @@ async def test_create_host_template_request_bypasses_pool(client, monkeypatch):
         pool_member=True,
         last_error="",
     )
-    template = await create_template_record(handle="derived:fresh")
+    template = await create_template_record(image="derived:fresh")
     async with async_session_factory() as session:
         session.add(pool_host)
         await session.commit()
@@ -195,7 +195,7 @@ async def test_create_host_cannot_resolve_another_providers_template(client):
     """A template belonging to another provider is invisible to host creation."""
     template = await create_template_record(
         provider="other-provider",
-        handle="derived:other-provider",
+        image="derived:other-provider",
     )
 
     response = await client.post(

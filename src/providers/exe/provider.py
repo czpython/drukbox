@@ -147,10 +147,10 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
             raise ProviderTransportError(str(exc)) from exc
         return tag
 
-    async def delete_template(self, handle: str) -> None:
+    async def delete_template(self, image: str) -> None:
         # Registry deletion is registry-specific. This provider only removes
         # the local build tag.
-        await remove_derived_image(self.docker_cli, handle)
+        await remove_derived_image(self.docker_cli, image)
 
     async def aclose(self) -> None:
         await self.api.aclose()

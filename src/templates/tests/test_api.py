@@ -41,7 +41,7 @@ async def test_create_template_returns_building_then_becomes_available(client, t
     assert payload["base_image"] == template_provider.default_image
     assert payload["requirements_hash"] == hashlib.sha256(SETUP_SCRIPT.encode()).hexdigest()
     assert payload["label"] == "Node tools"
-    assert payload["handle"] == ""
+    assert payload["image"] == ""
     assert payload["status"] == TemplateStatus.BUILDING.value
     assert payload["last_error"] == ""
     assert payload["last_used_at"] is None
@@ -51,7 +51,7 @@ async def test_create_template_returns_building_then_becomes_available(client, t
 
     assert polled.status_code == 200
     assert polled.json()["status"] == TemplateStatus.AVAILABLE.value
-    assert polled.json()["handle"] == derived_image_tag(
+    assert polled.json()["image"] == derived_image_tag(
         base_image=template_provider.default_image,
         setup_script=SETUP_SCRIPT,
     )
@@ -214,7 +214,7 @@ async def test_list_templates_returns_newest_first(client, template_provider):
         created_at=now + timedelta(seconds=1),
         base_image="stub:newer",
         label="newer",
-        handle="stub-template:newer",
+        image="stub-template:newer",
     )
 
     response = await client.get("/templates", headers=AUTH_HEADERS)
@@ -246,7 +246,7 @@ async def test_delete_available_template_removes_provider_artifact(client, templ
     template = await create_template_record(
         provider=template_provider.name,
         status=TemplateStatus.AVAILABLE.value,
-        handle="stub-template:available",
+        image="stub-template:available",
     )
 
     response = await client.delete(f"/templates/{template.id}", headers=AUTH_HEADERS)
@@ -264,7 +264,7 @@ async def test_delete_tolerates_missing_provider_artifact(client, template_provi
     template = await create_template_record(
         provider=template_provider.name,
         status=TemplateStatus.AVAILABLE.value,
-        handle="stub-template:missing",
+        image="stub-template:missing",
     )
 
     response = await client.delete(f"/templates/{template.id}", headers=AUTH_HEADERS)
@@ -280,7 +280,7 @@ async def test_delete_provider_failure_preserves_record(client, template_provide
     template = await create_template_record(
         provider=template_provider.name,
         status=TemplateStatus.AVAILABLE.value,
-        handle="stub-template:retry",
+        image="stub-template:retry",
     )
 
     response = await client.delete(f"/templates/{template.id}", headers=AUTH_HEADERS)
@@ -324,7 +324,7 @@ async def create_template_record(
     created_at: datetime | None = None,
     base_image: str = "stub:base",
     label: str = "",
-    handle: str = "",
+    image: str = "",
 ) -> Template:
     now = created_at or datetime.now(UTC)
     template = Template(
@@ -334,7 +334,7 @@ async def create_template_record(
         requirements_hash=hashlib.sha256(SETUP_SCRIPT.encode()).hexdigest(),
         setup_script=SETUP_SCRIPT,
         label=label,
-        handle=handle,
+        image=image,
         status=status,
         last_error="",
         created_at=now,

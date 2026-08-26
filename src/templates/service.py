@@ -47,7 +47,7 @@ class TemplateService:
             requirements_hash=requirements_hash,
             setup_script=setup_script,
             label=label,
-            handle="",
+            image="",
             status=TemplateStatus.BUILDING.value,
             last_error="",
             created_at=now,
@@ -89,7 +89,7 @@ class TemplateService:
                     get_vm_provider(template.provider),
                     TemplateCapability,
                 )
-                handle = await capability.create_template(
+                image = await capability.create_template(
                     base_image=template.base_image,
                     setup_script=template.setup_script,
                     label=template.label,
@@ -103,7 +103,7 @@ class TemplateService:
                 template.status = TemplateStatus.FAILED.value
                 template.last_error = f"{type(exc).__name__}: {exc}"
             else:
-                template.handle = handle
+                template.image = image
                 template.status = TemplateStatus.AVAILABLE.value
                 template.last_error = ""
 
@@ -148,19 +148,19 @@ class TemplateService:
         if template.status == TemplateStatus.BUILDING.value:
             raise TemplateStateError("template is still building")
 
-        if template.handle:
+        if template.image:
             capability = resolve_capability(
                 get_vm_provider(template.provider),
                 TemplateCapability,
             )
             try:
-                await capability.delete_template(template.handle)
+                await capability.delete_template(template.image)
             except ProviderNotFoundError:
                 logger.warning(
                     "template already absent at provider during teardown: "
-                    "template_id=%s handle=%s provider=%s",
+                    "template_id=%s image=%s provider=%s",
                     template.id,
-                    template.handle,
+                    template.image,
                     template.provider,
                 )
 

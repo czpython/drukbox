@@ -37,7 +37,7 @@ core/              settings, database, exception base
 diagnostics/       /doctor orchestration
 ```
 
-Provider-specific logic never lives in route handlers; HTTP decisions
+Provider-specific logic never lives in route imagers; HTTP decisions
 never live in service methods. Provider exceptions (`Exe*Error`,
 `Aws*Error`, `Hetzner*Error`, `Tailscale*Error`) are translated at the
 package boundary into neutral exceptions from `providers.exceptions` and
@@ -106,7 +106,7 @@ returns `202 Accepted`. Callers poll until the template becomes
 and deletes its own templates behind `TemplateCapability`.
 
 A host request can name an available template by its ID — the ID that
-the create returned. The template's handle becomes the host image. An
+the create returned. The template's image becomes the host image. An
 explicit `image`
 wins over the template, and the template wins over the provider default.
 Host creation never builds a missing or unavailable template. It returns

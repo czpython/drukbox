@@ -19,7 +19,7 @@ async def _create_template(
     status: TemplateStatus,
     age: timedelta,
     name: str,
-    handle: str = "",
+    image: str = "",
     last_used_age: timedelta | None = None,
 ) -> Template:
     now = utc_now()
@@ -31,7 +31,7 @@ async def _create_template(
         requirements_hash=hashlib.sha256(setup_script.encode()).hexdigest(),
         setup_script=setup_script,
         label=name,
-        handle=handle,
+        image=image,
         status=status.value,
         last_error="",
         created_at=now - age,
@@ -107,14 +107,14 @@ async def test_janitor_reaps_unused_templates_by_last_use(template_provider):
         status=TemplateStatus.AVAILABLE,
         age=expired_age,
         name="never-used",
-        handle="stub-template:never-used",
+        image="stub-template:never-used",
     )
     used_long_ago = await _create_template(
         provider=template_provider.name,
         status=TemplateStatus.AVAILABLE,
         age=expired_age + timedelta(days=1),
         name="used-long-ago",
-        handle="stub-template:used-long-ago",
+        image="stub-template:used-long-ago",
         last_used_age=expired_age,
     )
     recently_used = await _create_template(
@@ -122,7 +122,7 @@ async def test_janitor_reaps_unused_templates_by_last_use(template_provider):
         status=TemplateStatus.AVAILABLE,
         age=expired_age + timedelta(days=1),
         name="recently-used",
-        handle="stub-template:recently-used",
+        image="stub-template:recently-used",
         last_used_age=fresh_age,
     )
 
@@ -146,7 +146,7 @@ async def test_delete_spares_template_used_after_candidate_selection(template_pr
         status=TemplateStatus.AVAILABLE,
         age=timedelta(seconds=settings.template_unused_ttl + 1),
         name="leased-in-race",
-        handle="stub-template:leased-in-race",
+        image="stub-template:leased-in-race",
     )
 
     async with async_session_factory() as session:
@@ -176,7 +176,7 @@ async def test_janitor_removes_row_when_provider_artifact_is_already_gone(templa
         status=TemplateStatus.AVAILABLE,
         age=timedelta(seconds=settings.template_unused_ttl + 1),
         name="missing-artifact",
-        handle="stub-template:missing-artifact",
+        image="stub-template:missing-artifact",
     )
 
     await reap_templates()
@@ -194,14 +194,14 @@ async def test_janitor_keeps_transport_failure_and_continues(template_provider, 
         status=TemplateStatus.AVAILABLE,
         age=timedelta(seconds=settings.template_unused_ttl + 2),
         name="failed-delete",
-        handle="stub-template:failed-delete",
+        image="stub-template:failed-delete",
     )
     next_candidate = await _create_template(
         provider=template_provider.name,
         status=TemplateStatus.AVAILABLE,
         age=timedelta(seconds=settings.template_unused_ttl + 1),
         name="next-candidate",
-        handle="stub-template:next-candidate",
+        image="stub-template:next-candidate",
     )
 
     await reap_templates()

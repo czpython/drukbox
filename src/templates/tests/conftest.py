@@ -64,8 +64,8 @@ class StubTemplateProvider(TemplateCapability, VMProvider):
             raise self.build_error
         return derived_image_tag(base_image=base_image, setup_script=setup_script)
 
-    async def delete_template(self, handle: str) -> None:
-        self.deleted.append(handle)
+    async def delete_template(self, image: str) -> None:
+        self.deleted.append(image)
         if self.delete_error:
             raise self.delete_error
 

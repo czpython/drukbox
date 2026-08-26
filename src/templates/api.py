@@ -4,10 +4,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.database import get_session
 from hosts.auth import require_service_auth
 from providers.exceptions import ProviderError, UnknownProviderError
-from templates.deps import get_template_service
 from templates.exceptions import TemplateTeardownError
 from templates.models import Template
 from templates.schemas import TemplateCreate, TemplateOut
@@ -16,6 +17,13 @@ from templates.service import TemplateService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/templates", tags=["templates"])
+
+
+async def get_template_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> TemplateService:
+    return TemplateService(session)
+
 
 TemplateServiceDep = Annotated[TemplateService, Depends(get_template_service)]
 

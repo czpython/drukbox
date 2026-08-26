@@ -175,17 +175,17 @@ async def test_create_template_builds_logs_in_and_pushes() -> None:
         docker_cli=docker,  # type: ignore[arg-type]
     )
 
-    handle = await provider.create_template(
+    image = await provider.create_template(
         base_image="exe/base:latest",
         setup_script="apt-get update",
         label="Node tools",
     )
 
-    assert handle.startswith("ghcr.io/acme/drukbox-templates:")
-    assert len(handle.rpartition(":")[2]) == 12
-    assert docker.build_image.await_args.args[0] == handle
+    assert image.startswith("ghcr.io/acme/drukbox-templates:")
+    assert len(image.rpartition(":")[2]) == 12
+    assert docker.build_image.await_args.args[0] == image
     docker.login.assert_awaited_once_with("ghcr.io", "builder", "registry-secret")
-    docker.push_image.assert_awaited_once_with(handle)
+    docker.push_image.assert_awaited_once_with(image)
 
 
 async def test_create_template_names_each_missing_registry_setting() -> None:

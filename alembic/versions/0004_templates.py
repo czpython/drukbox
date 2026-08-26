@@ -24,7 +24,7 @@ def upgrade() -> None:
         sa.Column("requirements_hash", sa.String(length=64), nullable=False),
         sa.Column("setup_script", sa.Text(), nullable=False),
         sa.Column("label", sa.Text(), nullable=False),
-        sa.Column("handle", sa.Text(), nullable=False),
+        sa.Column("image", sa.Text(), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("last_error", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),

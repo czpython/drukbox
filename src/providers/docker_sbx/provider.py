@@ -192,8 +192,8 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
             setup_script=setup_script,
         )
 
-    async def delete_template(self, handle: str) -> None:
-        await remove_derived_image(self.docker_cli, handle)
+    async def delete_template(self, image: str) -> None:
+        await remove_derived_image(self.docker_cli, image)
 
     async def diagnose(self) -> str:
         # The sandbox list is one fast check of the CLI, the daemon

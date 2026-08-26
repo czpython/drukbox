@@ -140,15 +140,15 @@ async def test_create_template_builds_and_returns_the_derived_tag():
     api = _api_mock()
     provider = DockerProvider(api, _settings())
 
-    handle = await provider.create_template(
+    image = await provider.create_template(
         base_image="sandbox:base",
         setup_script="apt-get update",
         label="Node tools",
     )
 
-    assert handle.startswith("drukbox-template:")
-    assert len(handle.removeprefix("drukbox-template:")) == 12
-    assert api.build_image.await_args.args[0] == handle
+    assert image.startswith("drukbox-template:")
+    assert len(image.removeprefix("drukbox-template:")) == 12
+    assert api.build_image.await_args.args[0] == image
 
 
 @pytest.mark.asyncio

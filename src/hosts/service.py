@@ -300,7 +300,7 @@ class HostService:
             raise TemplateNotAvailableError(detail)
 
         template.last_used_at = utc_now()
-        return template.handle
+        return template.image
 
     async def _lookup_idempotency_key(self, key: str) -> Host | None:
         record = (

@@ -54,10 +54,10 @@ async def build_derived_image(
     return tag
 
 
-async def remove_derived_image(docker_cli: DockerCLI, handle: str) -> None:
+async def remove_derived_image(docker_cli: DockerCLI, image: str) -> None:
     try:
-        await docker_cli.remove_image(handle)
+        await docker_cli.remove_image(image)
     except DockerImageNotFoundError as exc:
-        raise ProviderNotFoundError(f"docker image '{handle}' was not found") from exc
+        raise ProviderNotFoundError(f"docker image '{image}' was not found") from exc
     except DockerProviderError as exc:
         raise ProviderTransportError(str(exc)) from exc

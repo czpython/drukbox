@@ -39,7 +39,7 @@ class TemplateOut(BaseModel):
     base_image: str
     requirements_hash: str
     label: str
-    handle: str
+    image: str
     status: str
     last_error: str
     created_at: datetime
