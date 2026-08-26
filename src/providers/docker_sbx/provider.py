@@ -71,7 +71,8 @@ class DockerSbxProvider(VMProvider):
 
     @property
     def sftp_server_command(self) -> str:
-        return self.settings.sftp_server_command
+        # The sbx image installs OpenSSH at the standard Debian path.
+        return "exec /usr/lib/openssh/sftp-server"
 
     @property
     def bootstrap_ssh_timeout_seconds(self) -> float:
