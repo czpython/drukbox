@@ -140,7 +140,6 @@ async def test_janitor_reaps_unused_templates_by_last_use(template_provider):
 
 async def test_delete_spares_template_used_after_candidate_selection(template_provider):
     settings = get_settings()
-    reap_before = utc_now() - timedelta(seconds=settings.template_unused_ttl)
     template = await _create_template(
         provider=template_provider.name,
         status=TemplateStatus.AVAILABLE,
@@ -156,11 +155,7 @@ async def test_delete_spares_template_used_after_candidate_selection(template_pr
         await session.commit()
 
     async with async_session_factory() as session:
-        deleted = await TemplateService(session).delete(
-            template.id,
-            reap_status=TemplateStatus.AVAILABLE,
-            reap_before=reap_before,
-        )
+        deleted = await TemplateService(session).delete(template.id, expired_only=True)
 
     assert not deleted
     assert template_provider.deleted == []

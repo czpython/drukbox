@@ -1,14 +1,15 @@
 import hashlib
 import logging
 import uuid
-from datetime import datetime
+from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import async_session_factory
 from core.exceptions import ResourceNotFoundError
+from core.settings import Settings, get_settings
 from hosts.service import utc_now
 from providers.capabilities import TemplateCapability, resolve_capability
 from providers.exceptions import ProviderNotFoundError, UnknownProviderError
@@ -17,6 +18,23 @@ from templates.exceptions import TemplateStateError
 from templates.models import Template, TemplateStatus
 
 logger = logging.getLogger(__name__)
+
+
+def reapable(settings: Settings) -> ColumnElement[bool]:
+    """Templates the janitor may delete: failed past the retention window,
+    or available and unleased past the unused TTL."""
+    now = utc_now()
+    last_active_at = func.coalesce(Template.last_used_at, Template.created_at)
+    return or_(
+        and_(
+            Template.status == TemplateStatus.FAILED.value,
+            Template.updated_at < now - timedelta(seconds=settings.template_failed_retention),
+        ),
+        and_(
+            Template.status == TemplateStatus.AVAILABLE.value,
+            last_active_at < now - timedelta(seconds=settings.template_unused_ttl),
+        ),
+    )
 
 
 class TemplateService:
@@ -117,14 +135,8 @@ class TemplateService:
         result = await self.session.execute(select(Template).order_by(Template.created_at.desc()))
         return list(result.scalars())
 
-    async def delete(
-        self,
-        template_id: uuid.UUID,
-        *,
-        reap_status: TemplateStatus | None = None,
-        reap_before: datetime | None = None,
-    ) -> bool:
-        """Delete the template. Return False when the maintenance guard spares it."""
+    async def delete(self, template_id: uuid.UUID, *, expired_only: bool = False) -> bool:
+        """Delete the template. Return False when the expired_only guard spares it."""
         result = await self.session.execute(
             select(Template).where(Template.id == template_id).with_for_update()
         )
@@ -133,16 +145,17 @@ class TemplateService:
         if not template:
             raise ResourceNotFoundError("template not found")
 
-        if reap_status and reap_before:
-            if template.status != reap_status:
-                return False
-
-            last_active_at = (
-                template.updated_at
-                if reap_status == TemplateStatus.FAILED
-                else template.last_used_at or template.created_at
-            )
-            if last_active_at >= reap_before:
+        if expired_only:
+            still_reapable = (
+                await self.session.execute(
+                    select(Template.id)
+                    .where(Template.id == template_id)
+                    .where(reapable(get_settings()))
+                )
+            ).scalar_one_or_none()
+            # A lease or status change since the janitor selected this row
+            # revived it — spare it.
+            if not still_reapable:
                 return False
 
         if template.status == TemplateStatus.BUILDING.value:
