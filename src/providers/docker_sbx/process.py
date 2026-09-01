@@ -3,11 +3,14 @@ import contextlib
 import fcntl
 import os
 import pty
+import shlex
 import struct
 import termios
 
 from providers.base import SandboxProcess, TerminalSize
 from providers.exceptions import ProviderTransportError
+
+from .settings import DockerSbxSettings
 
 
 def _set_terminal_size(descriptor: int, size: TerminalSize) -> None:
@@ -15,10 +18,28 @@ def _set_terminal_size(descriptor: int, size: TerminalSize) -> None:
     fcntl.ioctl(descriptor, termios.TIOCSWINSZ, winsize)
 
 
-def _session_script(name: str, command: str | None) -> str:
+def _session_script(name: str, command: str | None, user: str) -> str:
+    """Build the shell for one gateway session.
+
+    The exec enters as root. The script makes the per-host home
+    /home/<name>, moves into it, and exports HOME. For the root user it
+    stops there, thus the default install keeps today's session exactly.
+
+    For any other user it also gives that user the home and drops to the
+    user with `su -m`. `-m` keeps the caller environment, thus the exported
+    HOME stays the per-host home. `su` runs a PAM session, thus
+    /etc/environment — the sandbox env the bootstrap writes — still reaches
+    the session. The name is server-generated, thus the home path is a safe
+    shell token; the user and the payload are quoted.
+    """
     home = f"/home/{name}"
     payload = command if command is not None else "exec bash -l"
-    return f"mkdir -p {home} && cd {home} && export HOME={home}\n{payload}"
+    prepare = f"mkdir -p {home} && cd {home} && export HOME={home}"
+    if user == "root":
+        return f"{prepare}\n{payload}"
+    owner = shlex.quote(user)
+    drop = f"exec su -m {owner} -s /bin/bash -c {shlex.quote(payload)}"
+    return f"{prepare} && chown {owner} {home}\n{drop}"
 
 
 class SbxExecProcess(SandboxProcess):
@@ -48,10 +69,11 @@ class SbxExecProcess(SandboxProcess):
         command: str | None,
         terminal: TerminalSize | None,
     ) -> "SbxExecProcess":
+        user = DockerSbxSettings().ssh_username
         argv = ["sbx", "exec", "--interactive"]
         if terminal:
             argv.append("--tty")
-        argv.extend([name, "bash", "-l", "-c", _session_script(name, command)])
+        argv.extend([name, "bash", "-l", "-c", _session_script(name, command, user)])
         environment = {**os.environ, "SBX_NO_TELEMETRY": "1"}
 
         try:

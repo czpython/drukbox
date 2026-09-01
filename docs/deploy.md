@@ -217,6 +217,12 @@ first. Thus a caller writes files there — for example a `.gitconfig` or
 credential files — and a later command finds them by `$HOME`. SFTP
 relative paths also resolve against this home.
 
+A session runs as the sandbox user `DOCKER_SBX_SSH_USERNAME` (default
+`root`). The gateway prepares the home as root, then drops to this user.
+Some agent CLIs refuse to run as root. Such a deployment sets
+`DOCKER_SBX_SSH_USERNAME` to a non-root user that the template image
+contains.
+
 The gateway is a requirement for gateway providers: `POST /hosts` for
 `docker-sbx` fails without `GATEWAY_SSH_HOST`. Set it to the address
 callers use. The response then carries the gateway coordinates:
