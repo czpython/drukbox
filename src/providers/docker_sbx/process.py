@@ -19,19 +19,9 @@ def _set_terminal_size(descriptor: int, size: TerminalSize) -> None:
 
 
 def _session_script(name: str, command: str | None, user: str) -> str:
-    """Build the shell for one gateway session.
-
-    The exec enters as root. The script makes the per-host home
-    /home/<name>, moves into it, and exports HOME. For the root user it
-    stops there, thus the default install keeps today's session exactly.
-
-    For any other user it also gives that user the home and drops to the
-    user with `su -m`. `-m` keeps the caller environment, thus the exported
-    HOME stays the per-host home. `su` runs a PAM session, thus
-    /etc/environment — the sandbox env the bootstrap writes — still reaches
-    the session. The name is server-generated, thus the home path is a safe
-    shell token; the user and the payload are quoted.
-    """
+    # The exec enters as root and prepares the per-host home. For a non-root
+    # user it then drops with `su -m`, which keeps the exported HOME and,
+    # through PAM, still applies /etc/environment.
     home = f"/home/{name}"
     payload = command if command is not None else "exec bash -l"
     prepare = f"mkdir -p {home} && cd {home} && export HOME={home}"
