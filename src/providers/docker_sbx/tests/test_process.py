@@ -1,5 +1,6 @@
 import asyncio
 import os
+import shlex
 
 import pytest
 
@@ -48,7 +49,7 @@ async def test_exec_session_bridges_pipes_in_both_directions(monkeypatch):
         "-l",
         "-c",
     )
-    assert captured["argv"][7] == _session_script("sb-test", "true")
+    assert captured["argv"][7] == _session_script("sb-test", "true", "root")
     assert output == b"round-trip"
     assert status == 5
 
@@ -85,7 +86,7 @@ async def test_terminal_request_allocates_a_real_pty_at_the_requested_size(monke
 
     assert "--tty" in captured["argv"]
     assert captured["argv"][-4:-1] == ("bash", "-l", "-c")
-    assert captured["argv"][-1] == _session_script("sb-test", None)
+    assert captured["argv"][-1] == _session_script("sb-test", None, "root")
     assert b"ISTTY" in output
     assert b"42 101" in output
     assert status == 3
@@ -109,7 +110,7 @@ async def test_aclose_releases_the_terminal_descriptor(monkeypatch):
 
 
 def test_session_prepares_the_per_host_home_before_the_command():
-    script = _session_script("sb-abc", "git status")
+    script = _session_script("sb-abc", "git status", "root")
     assert "mkdir -p /home/sb-abc" in script
     assert "export HOME=/home/sb-abc" in script
     # The home exists and HOME is set before the command runs.
@@ -118,9 +119,56 @@ def test_session_prepares_the_per_host_home_before_the_command():
 
 
 def test_session_without_a_command_runs_a_login_shell_in_the_home():
-    script = _session_script("sb-abc", None)
+    script = _session_script("sb-abc", None, "root")
     assert "mkdir -p /home/sb-abc" in script
     assert script.endswith("exec bash -l")
+
+
+def test_root_session_is_byte_identical_to_the_plain_home_setup():
+    # The default install must not change: no chown, no su.
+    assert _session_script("sb-abc", "git status", "root") == (
+        "mkdir -p /home/sb-abc && cd /home/sb-abc && export HOME=/home/sb-abc\ngit status"
+    )
+    assert "su" not in _session_script("sb-abc", None, "root")
+
+
+def test_non_root_session_chowns_the_home_and_drops_to_the_user():
+    script = _session_script("sb-abc", "agent run --flag", "druks")
+    # Root prepares and gives the user the home before it drops.
+    assert "chown druks /home/sb-abc" in script
+    assert script.index("mkdir -p /home/sb-abc") < script.index("su -m druks")
+    assert script.index("chown druks") < script.index("su -m druks")
+    # su -m keeps the exported HOME; the payload is quoted for /bin/bash -c.
+    assert f"exec su -m druks -s /bin/bash -c {shlex.quote('agent run --flag')}" in script
+
+
+def test_non_root_interactive_session_drops_to_a_login_shell():
+    script = _session_script("sb-abc", None, "druks")
+    assert f"exec su -m druks -s /bin/bash -c {shlex.quote('exec bash -l')}" in script
+
+
+def test_non_root_sftp_backing_shell_runs_as_the_user():
+    # The SFTP backend passes its server command through the same open();
+    # thus its backing shell drops to the user too.
+    script = _session_script("sb-abc", "exec /usr/lib/openssh/sftp-server", "druks")
+    assert "exec su -m druks -s /bin/bash -c" in script
+    assert shlex.quote("exec /usr/lib/openssh/sftp-server") in script
+
+
+async def test_open_runs_the_session_as_the_configured_user(monkeypatch):
+    monkeypatch.setenv("DOCKER_SBX_SSH_USERNAME", "druks")
+    captured: dict = {}
+    monkeypatch.setattr(
+        "providers.docker_sbx.process.asyncio.create_subprocess_exec",
+        _stub_sbx_with("exit 0", captured),
+    )
+
+    session = await SbxExecProcess.open("sb-test", command="id -un", terminal=None)
+    await session.wait()
+    await session.aclose()
+
+    assert captured["argv"][7] == _session_script("sb-test", "id -un", "druks")
+    assert "exec su -m druks" in captured["argv"][7]
 
 
 async def test_missing_sbx_binary_maps_to_transport_error(monkeypatch):
