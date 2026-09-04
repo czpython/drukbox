@@ -29,6 +29,8 @@ that true:
 ```text
 hosts.api          HTTP request/response concerns only
 hosts.service      host lifecycle behavior (HostService)
+host_secrets.api   host secret registration concerns only
+host_secrets       built-in catalog and encrypted recipe persistence
 templates.api      template request/response concerns only
 templates.service  template build and delete behavior (TemplateService)
 providers/<name>   one package per VM provider
@@ -103,6 +105,13 @@ Retry safety is the caller's `Idempotency-Key` header — a repeated
 successful key returns the original host instead of a duplicate.
 Caller `env` is stored for provisioning and never returned by the API;
 keys in `hosts.schemas.RESERVED_HOST_ENV_KEYS` are rejected.
+
+`PUT /hosts/{id}/secrets/{name}` registers or replaces one encrypted secret
+recipe. Built-in service handles resolve through the catalog. A custom entry
+names its own target host, auth variable, and placeholder, so the catalog is
+not consulted. Static entries store `value`. Refreshable entries store the
+source URL, request headers, and refresh interval, but never store a fetched
+token.
 
 A template is a persistent provider image keyed by provider, base image,
 and setup-script hash. `POST /templates` creates a `building` record and

@@ -90,6 +90,12 @@ delivered to the VM, but it is never echoed in any
 response, and reserved keys (`TAILSCALE_AUTHKEY`) are rejected at the
 schema.
 
+Secret registration has no secret-bearing response. Validation responses omit
+the rejected input, so a bad static value or source header is not reflected to
+the caller. Refresh source URLs must use HTTPS and cannot contain user
+credentials or fragments. Their paths and query strings are stored as readable
+addresses; put credentials only in the encrypted source headers.
+
 Two pieces of material reach the VM through its provider's user-data /
 setup-script mechanism, and that channel is the relevant exposure:
 
