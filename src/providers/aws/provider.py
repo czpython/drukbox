@@ -6,8 +6,9 @@ import httpx
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
+from providers.capabilities import ReverseTunnelCapability
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
-from providers.setup_script import inject_env_exports
+from providers.setup_script import inject_authorized_keys, inject_env_exports
 from providers.ssh_keys import generate_ed25519_keypair
 
 from .api import AwsAPI
@@ -20,7 +21,7 @@ _MANAGED_SG_NAME = "drukbox-managed"
 _MANAGED_SG_DESCRIPTION = "SSH ingress for drukbox-managed sandbox VMs."
 
 
-class AWSProvider(VMProvider):
+class AWSProvider(VMProvider, ReverseTunnelCapability):
     name: ClassVar[str] = "aws"
     diagnose_hint: ClassVar[str] = "check_aws_credentials_and_region"
     supports_instance_type = True
@@ -66,6 +67,7 @@ class AWSProvider(VMProvider):
         image: str,
         env: dict[str, str] | None = None,
         setup_script: str | None = None,
+        authorized_keys: tuple[str, ...] = (),
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
@@ -107,7 +109,12 @@ class AWSProvider(VMProvider):
                 await self.api.delete_key_pair(key_name)
                 raise ProviderTransportError(str(exc)) from exc
 
-        user_data = inject_env_exports(setup_script or "", env)
+        user_data = inject_authorized_keys(
+            setup_script or "",
+            username=self.settings.ssh_username,
+            authorized_keys=authorized_keys,
+        )
+        user_data = inject_env_exports(user_data, env)
         try:
             instance_id = await self.api.run_instance(
                 client_token=name,
@@ -123,7 +130,7 @@ class AWSProvider(VMProvider):
                 instance_profile=self.settings.instance_profile,
             )
         except AwsProviderError as exc:
-            if key_name is not None:
+            if key_name:
                 await self.api.delete_key_pair(key_name)
             raise ProviderTransportError(str(exc)) from exc
 
@@ -159,7 +166,7 @@ class AWSProvider(VMProvider):
             instance_id = await self.api.find_instance_id_by_tag_name(
                 name, managed_by=self._service_label
             )
-            if instance_id is None:
+            if not instance_id:
                 raise ProviderNotFoundError(f"aws VM '{name}' was not found")
             await self.api.terminate_instance(instance_id)
             await self.api.delete_key_pair(f"drukbox-{name}")
@@ -169,7 +176,7 @@ class AWSProvider(VMProvider):
             raise ProviderTransportError(str(exc)) from exc
 
     async def aclose(self) -> None:
-        return None
+        return
 
     async def diagnose(self) -> str:
         identity = await self.api.get_caller_identity()

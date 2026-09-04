@@ -45,6 +45,7 @@ Thumbs.db
 db.sqlite3
 *.db
 *.db-journal
+.drukbox-test-tunnel-key*
 
 # Subproject artifacts
 api-tests/node_modules/

@@ -7,6 +7,7 @@ from core.database import get_session
 from core.settings import get_settings
 from hosts.service import HostService
 from networking.tailscale import Tailscale
+from secret_proxy.tunnels import ReverseTunnelManager
 
 
 async def get_host_service(
@@ -23,4 +24,11 @@ async def get_host_service(
     if not tailscale and get_settings().tailscale_enabled:
         tailscale = Tailscale.from_settings()
         request.app.state.tailscale = tailscale
-    return HostService(session, tailscale=tailscale)
+    reverse_tunnels: ReverseTunnelManager | None = getattr(
+        request.app.state, "reverse_tunnels", None
+    )
+    return HostService(
+        session,
+        tailscale=tailscale,
+        reverse_tunnels=reverse_tunnels,
+    )

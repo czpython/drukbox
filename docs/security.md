@@ -14,11 +14,12 @@ ownership check between token holders. Treat every token as an
 operator-level credential.
 
 The asymmetry that *is* part of the model: **callers are trusted, the
-sandboxes they provision are not.** Drukbox hands back SSH coordinates
-and stops — it never runs a sandbox's code and owns no runtime inside
-the VM. The hardening below is about keeping an untrusted workload on a
-sandbox from reaching back into drukbox's credentials or its cloud
-account, not about isolating one token holder from another.
+sandboxes they provision are not.** Drukbox hands back SSH coordinates and
+owns the supervised reverse forward to the injecting proxy. It never runs a
+sandbox's code or owns a runtime inside the VM. The hardening below is about
+keeping an untrusted workload on a sandbox from reaching back into drukbox's
+credentials or its cloud account, not about isolating one token holder from
+another.
 
 This is the right model for a single team standing up sandboxes behind
 their own API. It is **not** a multi-tenant boundary: do not hand
@@ -73,6 +74,17 @@ covered in [Networking](networking.md). The security-relevant summary:
   material is scanned over the public network and carries the usual
   trust-on-first-use window. Enable Tailscale to run the scan over the
   authenticated overlay.
+- **Reverse-tunnel service key.** Public-path hosts that need the injecting
+  proxy also trust one persistent Drukbox public key. The private key stays at
+  `SECRET_PROXY_TUNNEL_KEY_PATH` with mode `0600`. It is not stored in Postgres
+  or returned by the API. Rotate it by draining or replacing all affected hosts;
+  existing hosts trust only the key installed when they were provisioned.
+- **Per-host proxy route.** Each reverse forward listens only on that host's
+  loopback and has one dedicated SSH connection. Traffic arriving through the
+  forward gets a host-ID preamble from the Drukbox end of that connection. The
+  proxy does not accept a box identity from a box-controlled header or request
+  body. Keep the proxy bind path private because this preamble is a trusted
+  local transport contract, not a public authentication protocol.
 
 ## Secrets and in-VM metadata
 
@@ -138,9 +150,9 @@ quotas and rate limiting in the layer that issues and fronts tokens.
 
 - A service token can delete any host. There is no second factor for
   destructive calls — the token is the boundary.
-- Drukbox never opens an SSH session, runs sandbox code, or creates
-  Linux users. Everything past the returned SSH coordinates is the
-  caller's responsibility.
+- Drukbox opens only the supervised reverse-forward connection. It does not run
+  sandbox code or create Linux users. Caller SSH sessions stay the caller's
+  responsibility.
 - `private_key` appearing once in the create response is intentional;
   callers must capture it then, because it is never recoverable later.
 

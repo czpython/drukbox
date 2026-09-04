@@ -93,6 +93,12 @@ instead.
 `providers/capabilities.py` documents its keys. Read the keys that your
 mechanism needs. Ignore the others.
 
+If a host has no direct route to the injecting proxy, inherit
+`ReverseTunnelCapability`. Its extended `create_vm` contract accepts
+`authorized_keys`. Install every supplied key for the returned SSH user before
+sshd becomes ready. The host lifecycle then opens and supervises the dedicated
+reverse tunnel.
+
 ## 7. Tests
 
 - Unit-test the provider with a mocked api object

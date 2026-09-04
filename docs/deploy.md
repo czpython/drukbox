@@ -37,6 +37,17 @@ Use Postgres in production (`postgresql+psycopg://...`). SQLite
 local development; the pool maintainer is safe under SQLite only with
 a single runner.
 
+Run one API process for each deployment. Reverse tunnels are process-owned. An
+API process holds an exclusive lock next to the shared tunnel key, so a second
+process that uses the same key path fails at startup. Use the normal async
+concurrency of one Uvicorn process.
+
+The API and every pool process that provisions Docker, AWS, Hetzner, or Exoscale
+hosts must use the same persistent `SECRET_PROXY_TUNNEL_KEY_PATH`. When these
+processes run in separate containers, mount one durable volume at that path in
+both containers. The file is created with mode `0600`. Do not replace it while
+hosts are active. A replacement key requires replacement hosts.
+
 The API binds all interfaces by default. When only loopback callers
 reach it (host-networked, co-located client), set `UVICORN_HOST=127.0.0.1`
 to keep the credential-holding control plane off other interfaces.
@@ -315,6 +326,20 @@ Core, optional:
 | `POOL_SIZE` | `0` | Warm hosts to keep ready for the default provider. `0` disables its pool. |
 | `POOL_HOST_MAX_AGE_HOURS` | `4` | Max age before the janitor reaps an unclaimed pool host. |
 | `POOL_MAX_CREATES_PER_TICK` | `2` | Upper bound on pool provisions per tick, across all providers; caps over-provision blast radius when ticks overlap. |
+
+Injecting proxy and reverse tunnel:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SECRET_PROXY_BIND_HOST` | `127.0.0.1` | Injecting proxy bind address. Keep it private. |
+| `SECRET_PROXY_BIND_PORT` | `8781` | Proxy port and default tunnel target port. |
+| `SECRET_PROXY_TUNNEL_TARGET_HOST` | `127.0.0.1` | Address that the Drukbox side of a reverse tunnel connects to. Use a private service address when the proxy runs in another container. |
+| `SECRET_PROXY_TUNNEL_BOX_PORT` | `8781` | Port where each host reaches the proxy. |
+| `SECRET_PROXY_TUNNEL_KEY_PATH` | `~/.drukbox/secret-proxy/tunnel_key` | Persistent private key for public-path reverse tunnels. Share it with pool processes. |
+| `SECRET_PROXY_TUNNEL_CONNECT_TIMEOUT_SECONDS` | `30.0` | Retry budget when the API restores an active-host tunnel. Fresh provisioning uses the provider bootstrap timeout. |
+| `SECRET_PROXY_TUNNEL_RECONCILE_INTERVAL_SECONDS` | `5.0` | Delay between active-host tunnel checks. |
+| `SECRET_PROXY_TUNNEL_KEEPALIVE_INTERVAL_SECONDS` | `15.0` | SSH keepalive interval. |
+| `SECRET_PROXY_TUNNEL_KEEPALIVE_COUNT_MAX` | `3` | Missed keepalives before the SSH connection closes. |
 
 Tailscale (required when `TAILSCALE_ENABLED=true`):
 

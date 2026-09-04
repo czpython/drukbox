@@ -16,9 +16,10 @@ configuration and one adapter package, nothing else. Two rules keep
 that true:
 
 - **The contract stays thin.** The API hands back SSH coordinates and
-  `known_hosts` material, then stops. Drukbox does not speak SSH, does
-  not own a runtime inside the VM, and does not create Linux users.
-  Everything past the SSH handshake is the caller's job.
+  `known_hosts` material. Drukbox opens only the lifecycle connection that
+  carries a reverse tunnel for providers that need it. It does not open caller
+  sessions, own a runtime inside the VM, or create Linux users. Caller work past
+  the SSH handshake stays the caller's job.
 - **Provider knowledge stays in the provider package.** Each package
   carries the fixes for that provider's sharp edges (EC2's
   split-horizon DNS, exe.dev's command escaping, Tailscale's
@@ -35,6 +36,7 @@ templates.api      template request/response concerns only
 templates.service  template build and delete behavior (TemplateService)
 providers/<name>   one package per VM provider
 networking/        network provider framework + Tailscale adapter
+secret_proxy/      per-host reverse tunnels and injecting proxy settings
 core/              settings, database, exception base
 diagnostics/       /doctor orchestration
 ```
@@ -54,6 +56,7 @@ its exception types.
 - `supports_instance_type` / `supports_disk_gb` class vars — which
   per-request sizing fields `create_vm` honors; the host service
   refuses unsupported sizing with a 400 before any row or VM exists
+- `supports_tailnet` class var — whether the host can use the internal SSH path
 - `default_image` / `bootstrap_ssh_timeout_seconds` properties
 - `create_vm(...) -> VMCreateResult`
 - `delete_vm(name)`
@@ -77,6 +80,8 @@ Not every provider supports every feature. The host contract must not grow
 fields that only one provider uses. Optional features are capability mix-ins.
 `SecretInjectionCapability` declares the box-scoped secret lifecycle.
 `TemplateCapability` declares the template create and delete surface.
+`ReverseTunnelCapability` declares that `create_vm` accepts additional SSH
+authorized keys for the service connection.
 
 `resolve_capability` narrows a provider instance to a capability. It raises
 `CapabilityUnsupportedError` when the provider does not implement that
@@ -103,6 +108,16 @@ a provider into the contract?*
 left in `error` state. States live in `hosts.models.HostStatus`:
 `provisioning → creating_network → creating_vm → bootstrapping →
 active`, with `error` as the terminal failure.
+
+Docker, AWS, Hetzner, and Exoscale need a reverse SSH forward because they have
+no direct route to the injecting proxy. Provisioning installs the service's
+public tunnel key when the public SSH path is used, scans the host key, and then
+opens one dedicated tunnel connection before the host becomes `active`. A
+tailnet host uses Tailscale SSH on its internal path instead of the service key.
+Each forwarded connection carries a host-ID preamble produced by the tunnel, so
+the proxy does not trust box-controlled identity data.
+The tunnel manager restores active-host tunnels after a service restart. A
+dropped tunnel marks the host `error` and expires it for janitor cleanup.
 
 Retry safety is the caller's `Idempotency-Key` header — a repeated
 successful key returns the original host instead of a duplicate.
@@ -149,6 +164,11 @@ Two maintenance commands run as cron jobs from the same image:
 - `hosts.pool` keeps a warm pool of pre-provisioned hosts per provider
   (`POOL_SIZES`, with `POOL_SIZE` as the default provider's target) to
   hide provider cold starts.
+
+The API process owns reverse tunnels. A pool process can prepare a bare host
+without keeping a connection after the one-off process exits. The API restores
+that tunnel from the database, and a pool claim confirms that the tunnel is open
+before it returns the host.
 
 When you edit a template setup script, the hash changes. The old
 template ages out after its last lease. Pool members

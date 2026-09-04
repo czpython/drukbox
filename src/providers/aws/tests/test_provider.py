@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from providers.aws.exceptions import AwsTransportError
 from providers.aws.provider import AWSProvider
 from providers.aws.settings import AwsSettings
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
@@ -41,20 +42,22 @@ async def test_create_vm_with_tailscale_on_skips_keypair_sg_and_public_ip():
         image="ami-deadbeef",
         env={"TAILSCALE_AUTHKEY": "tskey-x"},
         setup_script="#!/usr/bin/env bash\necho hi\n",
+        authorized_keys=("ssh-ed25519 AAAATUNNEL",),
     )
 
     api.import_key_pair.assert_not_called()
     api.ensure_managed_security_group.assert_not_called()
     api.wait_for_running_with_ip.assert_not_called()
     kwargs = api.run_instance.await_args.kwargs
-    assert kwargs["key_name"] is None
+    assert not kwargs["key_name"]
     assert kwargs["associate_public_ip"] is False
-    assert kwargs["security_group_id"] is None
+    assert not kwargs["security_group_id"]
     assert kwargs["tags"]["managed-by"] == "drukbox"
     assert kwargs["client_token"] == "sb-test"
     assert kwargs["instance_type"] == "t3.medium"
     assert kwargs["root_gb"] == 100
-    assert result.private_key is None
+    assert "ssh-ed25519 AAAATUNNEL" in kwargs["user_data"]
+    assert not result.private_key
     assert result.ssh_host == ""
 
 
@@ -84,7 +87,7 @@ async def test_create_vm_with_tailscale_off_provisions_keypair_and_security_grou
     # The IP literal, never the public DNS name — EC2 public DNS resolves to
     # the private IP inside the VPC, which the /32 above never matches.
     assert result.ssh_host == "203.0.113.5"
-    assert result.private_key is not None
+    assert result.private_key
     assert "-----BEGIN OPENSSH PRIVATE KEY-----" in result.private_key
 
 
@@ -163,8 +166,6 @@ async def test_create_vm_resolves_ssm_path_to_ami_id():
 
 @pytest.mark.asyncio
 async def test_create_vm_cleans_up_keypair_when_run_instance_fails(monkeypatch):
-    from providers.aws.exceptions import AwsTransportError
-
     api = _api_mock()
     api.run_instance.side_effect = AwsTransportError("boom")
     provider = AWSProvider(api, _settings(), tailscale_enabled=False)

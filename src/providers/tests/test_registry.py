@@ -1,5 +1,6 @@
 import pytest
 
+from core import settings as settings_module
 from providers import registry as registry_module
 from providers.base import VMCreateResult, VMProvider
 from providers.exceptions import UnknownProviderError
@@ -39,13 +40,13 @@ class StubVMProvider(VMProvider):
         return VMCreateResult(provider_id=name, name=name, ssh_port=22, ssh_username="stub")
 
     async def delete_vm(self, name: str) -> None:
-        return None
+        return
 
     async def diagnose(self) -> str:
         return "stub ok"
 
     async def aclose(self) -> None:
-        return None
+        return
 
 
 @pytest.fixture(autouse=True)
@@ -80,8 +81,6 @@ def test_get_vm_provider_unknown_name_raises() -> None:
 
 
 def test_get_default_vm_provider_uses_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    from core import settings as settings_module
-
     settings_module.get_settings.cache_clear()
     monkeypatch.setenv("DEFAULT_HOST_PROVIDER", "stub")
     register_vm_provider(StubVMProvider)

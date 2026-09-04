@@ -1,7 +1,7 @@
 import abc
 from typing import TypeVar
 
-from providers.base import VMProvider
+from providers.base import VMCreateResult, VMProvider
 from providers.exceptions import CapabilityUnsupportedError
 
 CapabilityT = TypeVar("CapabilityT")
@@ -52,6 +52,23 @@ class SecretInjectionCapability(abc.ABC):
 
     @abc.abstractmethod
     async def list_secrets(self, *, vm: str) -> list[str]: ...
+
+
+class ReverseTunnelCapability(abc.ABC):
+    """Mix-in declaring that create_vm can install extra SSH authorized keys."""
+
+    @abc.abstractmethod
+    async def create_vm(
+        self,
+        *,
+        name: str,
+        image: str,
+        env: dict[str, str] | None = None,
+        setup_script: str | None = None,
+        authorized_keys: tuple[str, ...] = (),
+        instance_type: str | None = None,
+        disk_gb: int | None = None,
+    ) -> VMCreateResult: ...
 
 
 class TemplateCapability(abc.ABC):

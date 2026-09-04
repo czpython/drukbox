@@ -3,7 +3,7 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import TemplateCapability
+from providers.capabilities import ReverseTunnelCapability, TemplateCapability
 from providers.exceptions import (
     ProviderCommandError,
     ProviderNotFoundError,
@@ -21,7 +21,7 @@ _ENV_KEYS_ENV = "DRUKBOX_ENV_KEYS"
 _RESERVED_ENV_KEYS = frozenset({_AUTHORIZED_KEY_ENV, _ENV_KEYS_ENV})
 
 
-class DockerProvider(VMProvider, TemplateCapability):
+class DockerProvider(VMProvider, TemplateCapability, ReverseTunnelCapability):
     name: ClassVar[str] = "docker"
     diagnose_hint: ClassVar[str] = "check_docker_daemon_is_running"
     # A local container has no path onto the tailnet; its hosts keep the
@@ -63,6 +63,7 @@ class DockerProvider(VMProvider, TemplateCapability):
         image: str,
         env: dict[str, str] | None = None,
         setup_script: str | None = None,
+        authorized_keys: tuple[str, ...] = (),
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
@@ -90,7 +91,7 @@ class DockerProvider(VMProvider, TemplateCapability):
         # The sandbox entrypoint seeds authorized_keys from the public key and
         # persists the named caller vars into the container's session env.
         container_env = {
-            _AUTHORIZED_KEY_ENV: public_key,
+            _AUTHORIZED_KEY_ENV: "\n".join((public_key, *authorized_keys)),
             _ENV_KEYS_ENV: " ".join(caller_env),
             **caller_env,
         }

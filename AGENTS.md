@@ -53,6 +53,7 @@ src/
   janitor/           # Cron entry point that runs the host and template reapers
   providers/         # VM provider ABC, capabilities, registry, adapters
   networking/        # Network provider framework and Tailscale adapter
+  secret_proxy/      # Per-host reverse tunnels and injecting proxy settings
   templates/         # Template API, models, service, and janitor
   conftest.py        # Test env defaults and database reset fixture
 alembic/             # Database migrations
@@ -134,9 +135,15 @@ Lifecycle states are defined in `hosts.models.HostStatus`:
 
 `POST /hosts` runs the full provision inline: ask the network provider for join
 credentials, ask the VM provider to create the VM, poll the Tailscale API for
-the new device by hostname, capture its device ID, ssh-keyscan the host,
-mark it `active`, and return `201 Created`. If any step errors, the host row
+the new device by hostname, capture its device ID, ssh-keyscan the host, open
+its reverse tunnel when the provider requires one, mark it `active`, and return
+`201 Created`. If any step errors, the host row
 is left in `error` state and the response is `502 Bad Gateway`.
+
+Docker, AWS, Hetzner, and Exoscale hosts use one dedicated reverse-tunnel SSH
+connection per host. The tunnel binds the proxy port only on the host loopback.
+If the tunnel drops, mark the host `error` and expire it so the caller can create
+a replacement.
 
 The effective host image is captured on the host record at creation time. If
 `POST /hosts` omits `image`, store `EXE_DEFAULT_IMAGE`; provisioning must use the
@@ -157,6 +164,7 @@ refuse with `409` (pool maintenance owns them). The janitor reaps hosts whose
 Deletion blocks early provisioning states where deletion can race VM creation.
 For VM-backed states, if `host.tailscale_device_id` is present, release that
 Tailscale device and clear the column before deleting the VM and DB row.
+Close a process-owned reverse tunnel before network and VM teardown.
 
 If provider teardown fails, keep the DB row so deletion can be retried. Because
 `tailscale_device_id` is cleared as soon as Tailscale release succeeds, retrying

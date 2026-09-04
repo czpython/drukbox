@@ -36,7 +36,10 @@ async def test_create_vm_mints_key_and_returns_public_ip_and_private_key():
     provider = ExoscaleProvider(api, _settings())
 
     result = await provider.create_vm(
-        name="sb-test", image="Linux Ubuntu 24.04 LTS 64-bit", env={"FOO": "bar"}
+        name="sb-test",
+        image="Linux Ubuntu 24.04 LTS 64-bit",
+        env={"FOO": "bar"},
+        authorized_keys=("ssh-ed25519 AAAATUNNEL",),
     )
 
     api.ensure_ssh_key.assert_awaited_once()
@@ -49,12 +52,14 @@ async def test_create_vm_mints_key_and_returns_public_ip_and_private_key():
     assert instance_kwargs["image"] == "Linux Ubuntu 24.04 LTS 64-bit"
     assert instance_kwargs["ssh_key_name"] == "drukbox-sb-test"
     assert instance_kwargs["labels"] == {"managed-by": "drukbox", "drukbox-host-name": "sb-test"}
+    assert instance_kwargs["user_data"].startswith("#!/bin/sh\n")
     assert "export FOO=bar" in instance_kwargs["user_data"]
+    assert "ssh-ed25519 AAAATUNNEL" in instance_kwargs["user_data"]
 
     assert result.ssh_host == "198.51.100.7"
     assert result.ssh_port == 22
     assert result.ssh_username == "ubuntu"
-    assert result.private_key is not None
+    assert result.private_key
     assert "-----BEGIN OPENSSH PRIVATE KEY-----" in result.private_key
 
 

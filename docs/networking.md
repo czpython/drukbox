@@ -22,6 +22,33 @@ provider:
 
 Callers pick whichever path they can reach and dial it themselves.
 
+## Reverse tunnel to the injecting proxy
+
+Docker, AWS, Hetzner, and Exoscale hosts cannot dial the injecting proxy
+directly. Drukbox opens one reverse SSH forward for each such host. The forward
+listens on `127.0.0.1:8781` inside the host and sends traffic to the proxy bind
+port. The proxy and the remote listener both stay on loopback by default.
+
+The forward has its own supervised SSH connection. It is not attached to a
+caller connection or any other SSH work. Closing an unrelated SSH connection
+does not affect it. Drukbox closes the forward before an API-owned teardown and
+closes all forwards during graceful shutdown. The SSH transport also closes when
+an out-of-process janitor removes the VM.
+
+The connection uses the host's stored `known_hosts` material. On a public path,
+the host trusts a persistent Drukbox service key installed during provisioning.
+On a tailnet path, Tailscale SSH authenticates the connection and AsyncSSH sends
+no client key. The public service key is not installed on that path. For each
+forwarded TCP connection, the tunnel writes a versioned host-ID preamble before
+the box's bytes. The proxy accepts that identity from the tunnel transport, not
+from box-controlled HTTP headers.
+
+The API restores missing tunnels for active hosts after startup and after a pool
+process creates a host. A pool claim also waits for the tunnel before it returns
+the host. If an established tunnel drops, Drukbox marks the host `error`, expires
+it, and tells the caller to create a replacement. It does not leave an active host
+with a dead proxy route.
+
 ## Tailscale on: the overlay is the security model
 
 Per sandbox, drukbox mints an ephemeral, tag-scoped Tailscale auth key
@@ -89,10 +116,10 @@ CIDR, not just a public `/32`.
 
 ## known_hosts
 
-The response's `known_hosts` field carries `ssh-keyscan`-style host
-key material, scanned against the preferred path (`internal_ssh_host`
-when present, else `external_ssh_host`) and keyed to whichever address
-was scanned.
+The response's `known_hosts` field carries `ssh-keyscan`-style host key
+material. Drukbox scans every available SSH path because Tailscale SSH and the
+provider's SSH service present different host keys. Each entry is keyed to the
+address and port that were scanned.
 
 With Tailscale off, the first-time keyscan runs over the public
 network and carries the same TCP-session MITM window any first-time
