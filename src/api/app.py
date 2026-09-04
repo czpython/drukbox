@@ -10,7 +10,6 @@ from core.exceptions import AppException
 from core.settings import get_settings
 from diagnostics.api import router as diagnostics_router
 from hosts.api import router as hosts_router
-from http_proxies.api import router as http_proxies_router
 from networking.tailscale import Tailscale
 from providers.registry import iter_initialized_vm_providers
 from templates.api import router as templates_router
@@ -71,6 +70,5 @@ async def healthz() -> dict[str, str]:
 
 
 app.include_router(hosts_router)
-app.include_router(http_proxies_router)
 app.include_router(templates_router)
 app.include_router(diagnostics_router)

@@ -15,7 +15,5 @@ Every endpoint except `GET /healthz` requires
 - `POST /hosts` · `GET /hosts` · `GET /hosts/{id}` · `DELETE /hosts/{id}`
 - `POST /templates` · `GET /templates` · `GET /templates/{id}` ·
   `DELETE /templates/{id}`
-- `POST /http-proxies` · `DELETE /http-proxies/{name}` ·
-  `POST|DELETE /http-proxies/{name}/hosts/{host_id}`
 - `GET /doctor` — read-only dependency diagnostics
 - `GET /healthz` — unauthenticated liveness probe

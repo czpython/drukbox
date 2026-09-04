@@ -15,32 +15,32 @@ def resolve_capability(provider: VMProvider, capability: type[CapabilityT]) -> C
     return provider
 
 
-class HttpProxyCapability(abc.ABC):
-    """Mix-in declaring a VMProvider also speaks the http-proxy capability.
+class SecretInjectionCapability(abc.ABC):
+    """Mix-in declaring that a VMProvider can keep secrets outside its VMs.
 
     Modeled as an ABC (not a Protocol) so isinstance() really checks the
-    inheritance chain — runtime_checkable Protocols would let any object that
-    happens to expose the four method names pass the check, including MagicMock
+    inheritance chain. Runtime-checkable protocols would let any object that
+    happens to expose the three method names pass the check, including MagicMock
     instances and providers with mismatched signatures.
     """
 
     @abc.abstractmethod
-    async def create_http_proxy(
+    async def put_secret(
         self,
         *,
-        name: str,
-        target: str,
-        headers: dict[str, str],
-    ) -> None: ...
+        vm: str,
+        host: str,
+        env_var: str,
+        base_url_env_var: str | None,
+        placeholder: str,
+        value: str,
+    ) -> dict[str, str]: ...
 
     @abc.abstractmethod
-    async def delete_http_proxy(self, name: str) -> None: ...
+    async def delete_secret(self, *, vm: str, env_var: str) -> None: ...
 
     @abc.abstractmethod
-    async def attach_http_proxy(self, name: str, *, attach_vm: str) -> None: ...
-
-    @abc.abstractmethod
-    async def detach_http_proxy(self, name: str, *, attach_vm: str) -> None: ...
+    async def list_secrets(self, *, vm: str) -> list[str]: ...
 
 
 class TemplateCapability(abc.ABC):

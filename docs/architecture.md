@@ -73,18 +73,22 @@ the core settings knowing any provider exists.
 
 Not every provider supports every feature, and the host contract must
 not grow provider-shaped warts. Optional features are capability
-mix-ins: `HttpProxyCapability` declares the http-proxy surface, and
-`TemplateCapability` declares the template create and delete surface.
-`resolve_capability` narrows a specific provider instance
-to a capability — the default provider for account-bound operations,
-the host's own provider for host-bound ones — and raises the shared
+mix-ins: `SecretInjectionCapability` declares the box-scoped secret
+lifecycle, and `TemplateCapability` declares the template create and delete
+surface. `resolve_capability` narrows a specific provider instance to a
+capability and raises the shared
 `CapabilityUnsupportedError` when that provider does not implement it,
 which the routes surface as a clear error. New provider-specific
 features must follow this pattern rather than widening `VMProvider`
 or the host schema.
 
-The review question that guards the whole design: *does this change
-leak a provider into the contract?*
+Secret injection receives both the secret variable and the service's optional
+base-URL variable. It returns the environment that the box needs. A provider
+can give the box a placeholder, an alternate endpoint, or both without exposing
+its mechanism to the caller. Secret listings contain names only.
+
+The review question that guards the whole design: *does this change leak
+a provider into the contract?*
 
 ## Lifecycle
 

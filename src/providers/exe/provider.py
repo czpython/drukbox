@@ -2,7 +2,7 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import HttpProxyCapability, TemplateCapability
+from providers.capabilities import TemplateCapability
 from providers.docker.api import DockerAPI
 from providers.docker.exceptions import DockerProviderError
 from providers.docker.images import build_derived_image, remove_derived_image
@@ -23,7 +23,7 @@ from providers.exe.exceptions import (
 from providers.exe.settings import ExeSettings
 
 
-class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
+class ExeProvider(VMProvider, TemplateCapability):
     name: ClassVar[str] = "exe"
     diagnose_hint: ClassVar[str] = "check_exe_dev_api_token_and_url"
 
