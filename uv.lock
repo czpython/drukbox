@@ -484,6 +484,7 @@ dependencies = [
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-settings" },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "sqlalchemy-encrypted-field" },
     { name = "uuid6" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -517,6 +518,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic-settings", specifier = ">=2.8" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
+    { name = "sqlalchemy-encrypted-field", specifier = "==1.0.1" },
     { name = "uuid6", specifier = ">=2024.7.10" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34" },
 ]
@@ -1601,6 +1603,19 @@ wheels = [
 [package.optional-dependencies]
 asyncio = [
     { name = "greenlet" },
+]
+
+[[package]]
+name = "sqlalchemy-encrypted-field"
+version = "1.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "sqlalchemy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b9/f7/693fe27f4f734a0d6a846b7fe014d9dbd635a4be2217ea10fdd60adf167c/sqlalchemy_encrypted_field-1.0.1.tar.gz", hash = "sha256:7c7d637e3ebbbc9dc5a64a6d0489bcfab0201cbc35c1f49f17a9c3c0b8c08eb8", size = 10774, upload-time = "2026-09-02T16:57:55.201Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/f3/b95ca836cc5c0149a0de5d1beac822347b85ffc0528f006a4fd47e94280d/sqlalchemy_encrypted_field-1.0.1-py3-none-any.whl", hash = "sha256:1c360b924f1df60b5446e4413880e06675d3a70454dfe58c9a1483c4ee9f3007", size = 9690, upload-time = "2026-09-02T16:57:54.051Z" },
 ]
 
 [[package]]
