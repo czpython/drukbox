@@ -16,11 +16,23 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.add_column("hosts", sa.Column("secrets", sa.LargeBinary(), nullable=True))
-    hosts = sa.table("hosts", sa.column("secrets", sa.LargeBinary()))
-    op.get_bind().execute(hosts.update().values(secrets=b""))
-    with op.batch_alter_table("hosts") as batch:
-        batch.alter_column("secrets", existing_type=sa.LargeBinary(), nullable=False)
+    dialect = op.get_bind().dialect.name
+    if dialect == "postgresql":
+        empty_binary = sa.text("decode('', 'hex')")
+    elif dialect == "sqlite":
+        empty_binary = sa.text("X''")
+    else:
+        raise RuntimeError(f"unsupported database dialect: {dialect}")
+
+    op.add_column(
+        "hosts",
+        sa.Column(
+            "secrets",
+            sa.LargeBinary(),
+            nullable=False,
+            server_default=empty_binary,
+        ),
+    )
 
 
 def downgrade() -> None:
