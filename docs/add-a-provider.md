@@ -95,6 +95,11 @@ If a host has no direct route to the injecting proxy, inherit
 sshd becomes ready. The host lifecycle then opens and supervises the dedicated
 reverse tunnel.
 
+A bare provider implements secret injection with
+`ProxySecretInjectionCapability` from `providers.secret_proxy`. Set its
+`secret_proxy` attribute to a `SecretProxyClient`. Providers with an external
+injection edge implement the capability at that edge instead.
+
 ## 7. Tests
 
 - Unit-test the provider with a mocked api object

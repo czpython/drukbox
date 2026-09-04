@@ -9,7 +9,9 @@ from providers.exceptions import (
     ProviderNotFoundError,
     ProviderTransportError,
 )
+from providers.secret_proxy import ProxySecretInjectionCapability
 from providers.ssh_keys import generate_ed25519_keypair
+from secret_proxy.client import SecretProxyClient
 
 from .api import DockerAPI
 from .exceptions import DockerProviderError, DockerVMNotFoundError
@@ -21,7 +23,12 @@ _ENV_KEYS_ENV = "DRUKBOX_ENV_KEYS"
 _RESERVED_ENV_KEYS = frozenset({_AUTHORIZED_KEY_ENV, _ENV_KEYS_ENV})
 
 
-class DockerProvider(VMProvider, TemplateCapability, ReverseTunnelCapability):
+class DockerProvider(
+    ProxySecretInjectionCapability,
+    VMProvider,
+    TemplateCapability,
+    ReverseTunnelCapability,
+):
     name: ClassVar[str] = "docker"
     diagnose_hint: ClassVar[str] = "check_docker_daemon_is_running"
     # A local container has no path onto the tailnet; its hosts keep the
@@ -34,10 +41,12 @@ class DockerProvider(VMProvider, TemplateCapability, ReverseTunnelCapability):
         settings: DockerSettings,
         *,
         service_label: str = "drukbox",
+        secret_proxy: SecretProxyClient | None = None,
     ) -> None:
         self.api = api
         self.settings = settings
         self._service_label = service_label
+        self.secret_proxy = secret_proxy or SecretProxyClient.from_settings()
 
     @classmethod
     def from_settings(cls) -> Self:

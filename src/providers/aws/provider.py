@@ -8,8 +8,10 @@ from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import ReverseTunnelCapability
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
+from providers.secret_proxy import ProxySecretInjectionCapability
 from providers.setup_script import inject_authorized_keys, inject_env_exports
 from providers.ssh_keys import generate_ed25519_keypair
+from secret_proxy.client import SecretProxyClient
 
 from .api import AwsAPI
 from .exceptions import AwsProviderError, AwsVMNotFoundError
@@ -21,7 +23,7 @@ _MANAGED_SG_NAME = "drukbox-managed"
 _MANAGED_SG_DESCRIPTION = "SSH ingress for drukbox-managed sandbox VMs."
 
 
-class AWSProvider(VMProvider, ReverseTunnelCapability):
+class AWSProvider(ProxySecretInjectionCapability, VMProvider, ReverseTunnelCapability):
     name: ClassVar[str] = "aws"
     diagnose_hint: ClassVar[str] = "check_aws_credentials_and_region"
     supports_instance_type = True
@@ -34,11 +36,13 @@ class AWSProvider(VMProvider, ReverseTunnelCapability):
         *,
         tailscale_enabled: bool,
         service_label: str = "drukbox",
+        secret_proxy: SecretProxyClient | None = None,
     ) -> None:
         self.api = api
         self.settings = settings
         self._tailscale_enabled = tailscale_enabled
         self._service_label = service_label
+        self.secret_proxy = secret_proxy or SecretProxyClient.from_settings()
         self._cached_sg_id: str | None = settings.security_group_id
 
     @classmethod

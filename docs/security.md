@@ -108,6 +108,21 @@ the caller. Refresh source URLs must use HTTPS and cannot contain user
 credentials or fragments. Their paths and query strings are stored as readable
 addresses; put credentials only in the encrypted source headers.
 
+The injecting proxy holds active secret values in memory. A box receives only
+a placeholder and a box-specific route token. The proxy accepts requests only
+for fixed hosts registered to that box. It does not follow redirects. It rejects
+private or reserved upstream addresses by default.
+
+The proxy resolves and pins an upstream address for each request. This behavior
+prevents a DNS change during a connection. The proxy removes client
+authorization, cookies, and routing headers. Then it adds the registered headers
+and replaces placeholders in the request body.
+
+The proxy does not put request headers, bodies, secret values, or route tokens
+in logs or error responses. The proxy CA key has mode `0600`. The control socket
+also has mode `0600`. Protect both directories as service credentials. Install
+the CA certificate only in sandboxes that use the proxy.
+
 Two pieces of material reach the VM through its provider's user-data /
 setup-script mechanism, and that channel is the relevant exposure:
 

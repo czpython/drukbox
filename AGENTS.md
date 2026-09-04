@@ -18,6 +18,7 @@ It owns:
 - SSH host key scanning and `known_hosts` material
 - An SSH gateway for hosts of gateway providers (`python -m gateway.server`)
 - Account-bound exe.dev HTTP proxy resources
+- An injecting HTTPS proxy that keeps API secrets outside hosts
 
 Periodic maintenance runs as cron jobs: `python -m janitor` reaps expired
 hosts and abandoned, failed, or unused templates, and `python -m hosts.pool`
@@ -53,13 +54,13 @@ src/
   janitor/           # Cron entry point that runs the host and template reapers
   providers/         # VM provider ABC, capabilities, registry, adapters
   networking/        # Network provider framework and Tailscale adapter
-  secret_proxy/      # Per-host reverse tunnels and injecting proxy settings
+  secret_proxy/      # Reverse tunnels, injecting HTTPS proxy, and certificates
   templates/         # Template API, models, service, and janitor
   conftest.py        # Test env defaults and database reset fixture
 alembic/             # Database migrations
 api-tests/           # Playwright black-box API tests
 docs/                # Architecture, networking, deploy, add-a-provider
-Dockerfile           # Single image: API + cron commands + migrations
+Dockerfile           # Single image: API + proxy + cron commands + migrations
 ```
 
 ## Common Commands

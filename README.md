@@ -14,9 +14,9 @@ one is a config change, not a migration.
 It owns the sandbox lifecycle end to end: host records and state in
 Postgres, inline provisioning in `POST /hosts`, provider VM creation
 and teardown, optional Tailscale networking, and the `ssh-keyscan`
-material callers need to connect. It hands back SSH coordinates and
-stops there — drukbox does not speak SSH and does not own a runtime
-inside the VM.
+material callers need to connect. Its injecting proxy keeps registered
+API secrets outside the sandbox while it sends authorized requests.
+Drukbox does not own a runtime inside the VM.
 
 ## Quickstart
 

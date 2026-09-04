@@ -36,7 +36,7 @@ templates.api      template request/response concerns only
 templates.service  template build and delete behavior (TemplateService)
 providers/<name>   one package per VM provider
 networking/        network provider framework + Tailscale adapter
-secret_proxy/      per-host reverse tunnels and injecting proxy settings
+secret_proxy/      reverse tunnels and box-scoped HTTPS request injection
 core/              settings, database, exception base
 diagnostics/       /doctor orchestration
 ```
@@ -93,6 +93,21 @@ base-URL variable, placeholder, and secret value. It returns the environment
 that the box needs. The service name is the provider resource identity. A
 provider can give the box a placeholder, an alternate endpoint, or both without
 exposing its mechanism to the caller. Secret listings contain service names only.
+
+All VM providers use the shared injecting proxy. The API process registers a
+box, a fixed upstream host, and placeholder rules through a private UNIX socket.
+The proxy gives each box a separate route token. It accepts only registered
+upstream hosts for that box.
+
+The proxy terminates each HTTPS tunnel with its own CA. It replaces registered
+placeholders in request headers and bodies. Then it sends the request to a
+freshly resolved and pinned upstream address. It does not follow redirects.
+It removes client authorization, cookies, and routing headers first. Then it
+adds the registered headers. Responses stream to the box without buffering.
+
+Proxy rules stay in memory. The durable source is the encrypted secret recipe
+on the host record. The host integration must register those recipes again
+after a proxy restart.
 
 The review question that guards the whole design: *does this change leak
 a provider into the contract?*

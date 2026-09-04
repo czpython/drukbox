@@ -1,9 +1,16 @@
 import inspect
+from unittest.mock import MagicMock
 
 import pytest
 
+from providers.aws.provider import AWSProvider
 from providers.capabilities import SecretInjectionCapability, resolve_capability
+from providers.docker.provider import DockerProvider
+from providers.docker_sbx.provider import DockerSbxProvider
 from providers.exceptions import CapabilityUnsupportedError
+from providers.exe.provider import ExeProvider
+from providers.exoscale.provider import ExoscaleProvider
+from providers.hetzner.provider import HetznerProvider
 from providers.registry import get_vm_provider
 
 
@@ -44,7 +51,26 @@ def test_resolve_capability_returns_implementing_provider() -> None:
     assert resolve_capability(provider, SecretInjectionCapability) is provider
 
 
+@pytest.mark.parametrize(
+    "provider_class",
+    [
+        AWSProvider,
+        DockerProvider,
+        DockerSbxProvider,
+        ExeProvider,
+        ExoscaleProvider,
+        HetznerProvider,
+    ],
+)
+def test_all_vm_providers_implement_secret_injection(
+    provider_class: type[SecretInjectionCapability],
+) -> None:
+    assert issubclass(provider_class, SecretInjectionCapability)
+
+
 def test_resolve_capability_refuses_provider_without_capability() -> None:
     """A provider without the mix-in raises the shared unsupported error."""
-    with pytest.raises(CapabilityUnsupportedError, match="'docker' does not support"):
-        resolve_capability(get_vm_provider("docker"), SecretInjectionCapability)
+    provider = MagicMock()
+    provider.name = "plain"
+    with pytest.raises(CapabilityUnsupportedError, match="'plain' does not support"):
+        resolve_capability(provider, SecretInjectionCapability)

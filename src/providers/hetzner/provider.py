@@ -4,15 +4,17 @@ from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import ReverseTunnelCapability
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
+from providers.secret_proxy import ProxySecretInjectionCapability
 from providers.setup_script import inject_authorized_keys, inject_env_exports
 from providers.ssh_keys import generate_ed25519_keypair
+from secret_proxy.client import SecretProxyClient
 
 from .api import HetznerAPI
 from .exceptions import HetznerProviderError
 from .settings import HetznerSettings
 
 
-class HetznerProvider(VMProvider, ReverseTunnelCapability):
+class HetznerProvider(ProxySecretInjectionCapability, VMProvider, ReverseTunnelCapability):
     name: ClassVar[str] = "hetzner"
     diagnose_hint: ClassVar[str] = "check_hetzner_api_token_and_location"
     # instance_type maps onto Hetzner's server type; root disk size is fixed
@@ -25,10 +27,12 @@ class HetznerProvider(VMProvider, ReverseTunnelCapability):
         settings: HetznerSettings,
         *,
         service_label: str = "drukbox",
+        secret_proxy: SecretProxyClient | None = None,
     ) -> None:
         self.api = api
         self.settings = settings
         self._service_label = service_label
+        self.secret_proxy = secret_proxy or SecretProxyClient.from_settings()
 
     @classmethod
     def from_settings(cls) -> Self:

@@ -6,15 +6,29 @@ behind these defaults, read [Security](security.md).
 
 ## Image and processes
 
-One image serves everything — API, maintenance commands, migrations.
-It's published to `ghcr.io/czpython/drukbox` on every release; build
+One image serves the API, the secret proxy, maintenance commands, and migrations.
+The image is published to `ghcr.io/czpython/drukbox` on every release. Build
 `docker build -t ghcr.io/czpython/drukbox .` only to run a local change.
 
 ```bash
 IMAGE=ghcr.io/czpython/drukbox:latest
+PROXY_STATE="$(pwd)/secret-proxy-state"
+sudo install -d -m 700 -o 1001 -g 1001 "$PROXY_STATE"
 
 # API (port 8780; /healthz for liveness probes)
-docker run --rm -p 8780:8780 --env-file drukbox.env "$IMAGE"
+docker run --rm -p 8780:8780 --env-file drukbox.env \
+  --mount type=bind,src="$PROXY_STATE",dst=/var/lib/drukbox/secret-proxy \
+  --env SECRET_PROXY_CONTROL_SOCKET=/var/lib/drukbox/secret-proxy/control.sock \
+  --env SECRET_PROXY_CERTIFICATE_DIRECTORY=/var/lib/drukbox/secret-proxy/certificates \
+  "$IMAGE"
+
+# Injecting proxy (port 8781; long-lived)
+docker run --rm -p 127.0.0.1:8781:8781 --env-file drukbox.env \
+  --mount type=bind,src="$PROXY_STATE",dst=/var/lib/drukbox/secret-proxy \
+  --env SECRET_PROXY_BIND_HOST=0.0.0.0 \
+  --env SECRET_PROXY_CONTROL_SOCKET=/var/lib/drukbox/secret-proxy/control.sock \
+  --env SECRET_PROXY_CERTIFICATE_DIRECTORY=/var/lib/drukbox/secret-proxy/certificates \
+  "$IMAGE" .venv/bin/python -m secret_proxy
 
 # Migrations (one-off, before first start and on upgrades)
 docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/alembic upgrade head
@@ -31,6 +45,16 @@ pre-provisions warm hosts per provider and only does anything when at
 least one provider has a warm target (`POOL_SIZES` / `POOL_SIZE`).
 Schedule both under your cron infrastructure (k8s `CronJob`,
 systemd timer) from the same image and env file.
+
+Run one secret proxy beside each API deployment. Both processes must share the
+control-socket directory and certificate directory. The default paths work when
+both processes run directly on one host. Container deployments must mount these
+directories into both containers at the same paths.
+
+The proxy listens on loopback by default. A reverse tunnel or local container
+network must carry box traffic to it. Do not expose port 8781 to the public
+internet. The proxy requires a box-specific route token for each CONNECT
+request.
 
 Use Postgres in production (`postgresql+psycopg://...`). SQLite
 (`sqlite+aiosqlite:///./drukbox.db`) is for single-process demos and
@@ -340,6 +364,10 @@ Injecting proxy and reverse tunnel:
 | `SECRET_PROXY_TUNNEL_RECONCILE_INTERVAL_SECONDS` | `5.0` | Delay between active-host tunnel checks. |
 | `SECRET_PROXY_TUNNEL_KEEPALIVE_INTERVAL_SECONDS` | `15.0` | SSH keepalive interval. |
 | `SECRET_PROXY_TUNNEL_KEEPALIVE_COUNT_MAX` | `3` | Missed keepalives before the SSH connection closes. |
+| `SECRET_PROXY_CONTROL_SOCKET` | `~/.drukbox/secret-proxy/control.sock` | Private UNIX socket that receives secret rules. |
+| `SECRET_PROXY_CERTIFICATE_DIRECTORY` | `~/.drukbox/secret-proxy/certificates` | Directory for the proxy CA and host certificates. Preserve and restrict this directory. |
+| `SECRET_PROXY_ALLOW_PRIVATE_UPSTREAMS` | `false` | Permit private and reserved upstream addresses. Keep this false unless a registered service requires them. |
+| `SECRET_PROXY_UPSTREAM_TIMEOUT_SECONDS` | `60.0` | Total time limit for one upstream request. |
 
 Tailscale (required when `TAILSCALE_ENABLED=true`):
 
