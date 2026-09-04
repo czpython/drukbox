@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import socket
 import ssl
 import stat
@@ -9,7 +10,10 @@ from uuid import uuid4
 import httpx
 import pytest
 from aiohttp import web
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 
+from secret_proxy.certificates import CertificateAuthority
 from secret_proxy.client import SecretProxyClient
 from secret_proxy.server import PlaceholderSubstitution, SecretProxyServer
 from secret_proxy.settings import SecretProxySettings
@@ -27,6 +31,23 @@ def test_placeholder_substitution_handles_chunk_boundaries() -> None:
     output += substitution.replace(b"", final=True)
 
     assert output == b"before-secret-after"
+
+
+def test_certificate_authority_replaces_a_mismatched_cached_leaf(tmp_path) -> None:
+    authority = CertificateAuthority(tmp_path)
+    authority.server_context("api.example.com")
+    stem = hashlib.sha256(b"api.example.com").hexdigest()
+    key_path = tmp_path / f"{stem}.key"
+    wrong_key = ec.generate_private_key(ec.SECP256R1()).private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    key_path.write_bytes(wrong_key)
+
+    authority.server_context("api.example.com")
+
+    assert key_path.read_bytes() != wrong_key
 
 
 @pytest.mark.asyncio
@@ -95,6 +116,7 @@ async def test_proxy_injects_headers_and_bodies_without_forwarding_client_auth(t
                 headers={
                     "Authorization": "Bearer client-value",
                     "Cookie": "session=client-value",
+                    "Expect": "100-continue",
                     "X-Forwarded-For": "198.51.100.1",
                 },
             )
@@ -111,6 +133,7 @@ async def test_proxy_injects_headers_and_bodies_without_forwarding_client_auth(t
     assert isinstance(received_headers, dict)
     assert received_headers["Authorization"] == "Bearer real-secret"
     assert "Cookie" not in received_headers
+    assert "Expect" not in received_headers
     assert "X-Forwarded-For" not in received_headers
     assert "Proxy-Authorization" not in received_headers
 

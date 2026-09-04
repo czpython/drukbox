@@ -238,6 +238,15 @@ class SecretProxyServer:
         hostname, port = self.rules.split_host(authority)
         addresses = await self.rules.resolve(hostname, port)
         headers = self._upstream_headers(request.headers, rules)
+        expectations = [value for name, value in request.headers if name.lower() == b"expect"]
+        if expectations:
+            if len(expectations) != 1 or expectations[0].lower() != b"100-continue":
+                raise SecretProxyRejectedError("request expectation is not supported")
+            await self._send_event(
+                connection,
+                writer,
+                h11.InformationalResponse(status_code=100, headers=[]),
+            )
         body = self._request_body(connection, reader, PlaceholderSubstitution(rules))
         connector = aiohttp.TCPConnector(
             resolver=PinnedResolver(hostname, addresses),

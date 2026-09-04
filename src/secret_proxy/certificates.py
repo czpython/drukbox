@@ -6,6 +6,7 @@ import ssl
 from pathlib import Path
 
 from cryptography import x509
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
@@ -28,6 +29,16 @@ class CertificateAuthority:
             self._certificate = x509.load_pem_x509_certificate(
                 self.ca_certificate_path.read_bytes()
             )
+            key_public = self._key.public_key().public_bytes(
+                serialization.Encoding.DER,
+                serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            certificate_public = self._certificate.public_key().public_bytes(
+                serialization.Encoding.DER,
+                serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            if key_public != certificate_public:
+                raise ValueError("secret proxy CA key does not match its certificate")
         else:
             self._key, self._certificate = self._create()
 
@@ -86,10 +97,33 @@ class CertificateAuthority:
         certificate_path = self.directory / f"{stem}.crt"
         key_path = self.directory / f"{stem}.key"
         if certificate_path.exists() and key_path.exists():
-            certificate = x509.load_pem_x509_certificate(certificate_path.read_bytes())
-            refresh_after = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=1)
-            if certificate.not_valid_after_utc > refresh_after:
-                return certificate_path, key_path
+            try:
+                certificate = x509.load_pem_x509_certificate(certificate_path.read_bytes())
+                key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
+                certificate_public = certificate.public_key().public_bytes(
+                    serialization.Encoding.DER,
+                    serialization.PublicFormat.SubjectPublicKeyInfo,
+                )
+                key_public = key.public_key().public_bytes(
+                    serialization.Encoding.DER,
+                    serialization.PublicFormat.SubjectPublicKeyInfo,
+                )
+                signature_hash = certificate.signature_hash_algorithm
+                if not signature_hash:
+                    raise ValueError("cached secret proxy certificate has no signature hash")
+                self._key.public_key().verify(
+                    certificate.signature,
+                    certificate.tbs_certificate_bytes,
+                    ec.ECDSA(signature_hash),
+                )
+                refresh_after = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=1)
+                if (
+                    certificate_public == key_public
+                    and certificate.not_valid_after_utc > refresh_after
+                ):
+                    return certificate_path, key_path
+            except (InvalidSignature, TypeError, ValueError):
+                pass
 
         key = ec.generate_private_key(ec.SECP256R1())
         now = datetime.datetime.now(datetime.UTC)
@@ -134,5 +168,6 @@ class CertificateAuthority:
             encryption_algorithm=serialization.NoEncryption(),
         )
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(encoded)
