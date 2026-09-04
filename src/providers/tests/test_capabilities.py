@@ -1,30 +1,10 @@
+import inspect
+
 import pytest
 
 from providers.capabilities import SecretInjectionCapability, resolve_capability
 from providers.exceptions import CapabilityUnsupportedError
-from providers.exe.provider import ExeProvider
 from providers.registry import get_vm_provider
-
-
-class SecretInjectingExeProvider(ExeProvider, SecretInjectionCapability):
-    async def put_secret(
-        self,
-        *,
-        vm: str,
-        host: str,
-        env_var: str,
-        base_url_env: dict[str, str],
-        headers: dict[str, str],
-        placeholder: str,
-        value: str,
-    ) -> dict[str, str]:
-        return {env_var: placeholder, **base_url_env}
-
-    async def delete_secret(self, *, vm: str, env_var: str) -> None:
-        return
-
-    async def list_secrets(self, *, vm: str) -> list[str]:
-        return []
 
 
 def test_secret_injection_capability_has_one_box_scoped_lifecycle() -> None:
@@ -36,9 +16,31 @@ def test_secret_injection_capability_has_one_box_scoped_lifecycle() -> None:
     }
 
 
+def test_secret_injection_capability_has_exact_method_signatures() -> None:
+    assert tuple(inspect.signature(SecretInjectionCapability.put_secret).parameters) == (
+        "self",
+        "vm",
+        "name",
+        "host",
+        "auth_var",
+        "base_url_var",
+        "placeholder",
+        "value",
+    )
+    assert tuple(inspect.signature(SecretInjectionCapability.delete_secret).parameters) == (
+        "self",
+        "vm",
+        "name",
+    )
+    assert tuple(inspect.signature(SecretInjectionCapability.list_secrets).parameters) == (
+        "self",
+        "vm",
+    )
+
+
 def test_resolve_capability_returns_implementing_provider() -> None:
     """A provider that inherits the capability mix-in resolves to itself."""
-    provider = SecretInjectingExeProvider.from_settings()
+    provider = get_vm_provider("exe")
     assert resolve_capability(provider, SecretInjectionCapability) is provider
 
 

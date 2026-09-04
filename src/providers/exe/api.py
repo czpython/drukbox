@@ -168,6 +168,46 @@ class ExeAPI:
                 ) from exc
             raise
 
+    async def update_http_proxy(
+        self,
+        *,
+        name: str,
+        target: str,
+        headers: dict[str, str],
+    ) -> None:
+        command_parts = [
+            "integrations",
+            "edit",
+            shlex.quote(name),
+            f"--target={shlex.quote(target)}",
+        ]
+
+        for header_name, header_value in headers.items():
+            command_parts.append(f"--header={shlex.quote(f'{header_name}: {header_value}')}")
+
+        try:
+            await self._request(" ".join(command_parts))
+        except ExeCommandError as exc:
+            if "not found" in str(exc).lower():
+                raise ExeIntegrationNotFoundError(
+                    f"exe.dev integration '{name}' was not found"
+                ) from exc
+            raise
+
+    async def list_http_proxies(self) -> list[str]:
+        response = await self._request("integrations list --json")
+        payload = self._parse_json_response(response.text)
+
+        if not isinstance(payload, list):
+            raise ExeResponseError("exe.dev integrations list returned non-array JSON output")
+
+        names: list[str] = []
+        for integration in payload:
+            if not isinstance(integration, dict) or not isinstance(integration.get("name"), str):
+                raise ExeResponseError("exe.dev integration returned an invalid name")
+            names.append(integration["name"])
+        return names
+
     async def delete_http_proxy(self, name: str) -> None:
         try:
             await self._request(f"integrations remove {shlex.quote(name)}")

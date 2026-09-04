@@ -8,7 +8,7 @@ from providers.docker.api import DockerAPI
 from providers.docker.exceptions import DockerImageNotFoundError, DockerTransportError
 from providers.exceptions import ProviderCommandError, ProviderNotFoundError, ProviderTransportError
 from providers.exe.api import ExeAPI
-from providers.exe.exceptions import ExeVMNotFoundError
+from providers.exe.exceptions import ExeIntegrationAlreadyExistsError, ExeVMNotFoundError
 from providers.exe.provider import ExeProvider
 from providers.exe.settings import ExeSettings
 
@@ -157,6 +157,85 @@ async def test_http_proxy_methods_delegate_to_api(method_name: str, kwargs: dict
         positional.append(proxy_kwargs.pop("name"))
     await getattr(provider, method_name)(*positional, **proxy_kwargs)
     getattr(api, method_name).assert_awaited_once_with(*positional, **proxy_kwargs)
+
+
+async def test_put_secret_creates_and_attaches_box_scoped_integration() -> None:
+    api = SimpleNamespace(
+        create_http_proxy=AsyncMock(),
+        attach_http_proxy=AsyncMock(),
+    )
+    provider = _make_provider(api)
+
+    env = await provider.put_secret(
+        vm="sb-one",
+        name="acme",
+        host="api.acme.test",
+        auth_var="ACME_TOKEN",
+        base_url_var="ACME_BASE_URL",
+        placeholder="acme-proxy-managed",
+        value="secret-value",
+    )
+
+    api.create_http_proxy.assert_awaited_once_with(
+        name="sb-one--acme",
+        target="https://api.acme.test",
+        headers={"Authorization": "Bearer secret-value"},
+    )
+    api.attach_http_proxy.assert_awaited_once_with("sb-one--acme", attach_vm="sb-one")
+    assert env == {"ACME_BASE_URL": "https://sb-one--acme.int.exe.xyz"}
+
+
+async def test_put_secret_updates_existing_box_scoped_integration() -> None:
+    api = SimpleNamespace(
+        create_http_proxy=AsyncMock(side_effect=ExeIntegrationAlreadyExistsError("already exists")),
+        update_http_proxy=AsyncMock(),
+        attach_http_proxy=AsyncMock(),
+    )
+    provider = _make_provider(api)
+
+    await provider.put_secret(
+        vm="sb-one",
+        name="acme",
+        host="api.acme.test",
+        auth_var="ACME_TOKEN",
+        base_url_var="ACME_BASE_URL",
+        placeholder="acme-proxy-managed",
+        value="new-value",
+    )
+
+    api.update_http_proxy.assert_awaited_once_with(
+        name="sb-one--acme",
+        target="https://api.acme.test",
+        headers={"Authorization": "Bearer new-value"},
+    )
+    api.attach_http_proxy.assert_awaited_once_with("sb-one--acme", attach_vm="sb-one")
+
+
+async def test_delete_secret_deletes_only_box_scoped_integration() -> None:
+    api = SimpleNamespace(delete_http_proxy=AsyncMock())
+    provider = _make_provider(api)
+
+    await provider.delete_secret(vm="sb-one", name="acme")
+
+    api.delete_http_proxy.assert_awaited_once_with("sb-one--acme")
+
+
+async def test_list_secrets_returns_names_for_only_requested_box() -> None:
+    api = SimpleNamespace(
+        list_http_proxies=AsyncMock(
+            return_value=[
+                "sb-two--github",
+                "sb-one--github",
+                "account-proxy",
+                "sb-one--acme",
+            ]
+        )
+    )
+    provider = _make_provider(api)
+
+    names = await provider.list_secrets(vm="sb-one")
+
+    assert names == ["acme", "github"]
 
 
 def test_from_settings_constructs_with_exeapi() -> None:

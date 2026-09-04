@@ -29,16 +29,16 @@ class SecretInjectionCapability(abc.ABC):
         self,
         *,
         vm: str,
+        name: str,
         host: str,
-        env_var: str,
-        base_url_env: dict[str, str],
-        headers: dict[str, str],
+        auth_var: str,
+        base_url_var: str,
         placeholder: str,
         value: str,
     ) -> dict[str, str]: ...
 
     @abc.abstractmethod
-    async def delete_secret(self, *, vm: str, env_var: str) -> None: ...
+    async def delete_secret(self, *, vm: str, name: str) -> None: ...
 
     @abc.abstractmethod
     async def list_secrets(self, *, vm: str) -> list[str]: ...

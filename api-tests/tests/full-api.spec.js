@@ -7,6 +7,8 @@ const { settings } = require("./helpers/env");
 const { pollUntil } = require("./helpers/poll");
 
 const EXPECTED_OPENAPI_OPERATIONS = [
+  "DELETE /http-proxies/{name}",
+  "DELETE /http-proxies/{name}/hosts/{host_id}",
   "DELETE /hosts/{host_id}",
   "DELETE /templates/{template_id}",
   "GET /doctor",
@@ -14,6 +16,8 @@ const EXPECTED_OPENAPI_OPERATIONS = [
   "GET /hosts/{host_id}",
   "GET /templates",
   "GET /templates/{template_id}",
+  "POST /http-proxies",
+  "POST /http-proxies/{name}/hosts/{host_id}",
   "POST /hosts",
   "POST /hosts/{host_id}/renew",
   "POST /templates",
@@ -42,6 +46,12 @@ const RESERVED_ENV_KEYS = ["TAILSCALE_AUTHKEY"];
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const HTTP_PROXY_TARGET = "https://httpbin.org";
+
+// Account-bound HTTP proxies exist only on exe.dev. The lifecycle test skips
+// for all other providers.
+const HTTP_PROXY_PROVIDERS = new Set(["exe"]);
+
 test.describe.configure({ mode: "serial" });
 
 test.describe("Drukbox API", () => {
@@ -49,6 +59,7 @@ test.describe("Drukbox API", () => {
   let badTokenApi;
   let publicApi;
   let createdHost;
+  let createdProxyName;
   let createdTemplate;
   let config;
 
@@ -60,6 +71,12 @@ test.describe("Drukbox API", () => {
   });
 
   test.afterAll(async () => {
+    if (api && createdProxyName) {
+      try {
+        await api.delete(`/http-proxies/${createdProxyName}`);
+      } catch {}
+    }
+
     if (api && createdHost?.id) {
       try {
         await api.delete(`/hosts/${createdHost.id}`);
@@ -182,6 +199,66 @@ test.describe("Drukbox API", () => {
         message: "created host did not become active",
       },
     );
+  });
+
+  test("http proxy lifecycle works against a real host", async () => {
+    test.skip(
+      !HTTP_PROXY_PROVIDERS.has(config.expectedProvider),
+      `http proxies are not supported by provider "${config.expectedProvider}"`,
+    );
+    createdProxyName = `gmail-mcp-${Date.now().toString(36)}`;
+
+    await expectStatus(
+      await publicApi.post("/http-proxies", {
+        data: {
+          name: createdProxyName,
+          target: HTTP_PROXY_TARGET,
+          headers: { Authorization: "Bearer token" },
+        },
+      }),
+      401,
+    );
+    await expectStatus(
+      await badTokenApi.post("/http-proxies", {
+        data: {
+          name: createdProxyName,
+          target: HTTP_PROXY_TARGET,
+          headers: { Authorization: "Bearer token" },
+        },
+      }),
+      403,
+    );
+
+    const createdProxy = await expectJson(
+      await api.post("/http-proxies", {
+        data: {
+          name: createdProxyName,
+          target: HTTP_PROXY_TARGET,
+          headers: { Authorization: "Bearer token" },
+        },
+      }),
+      201,
+    );
+    expectObject(createdProxy, ["name", "status"]);
+    expect(createdProxy.name).toBe(createdProxyName);
+    expect(createdProxy.status).toBe("created");
+
+    const attachedProxy = await expectJson(
+      await api.post(`/http-proxies/${createdProxyName}/hosts/${createdHost.id}`),
+      200,
+    );
+    expectObject(attachedProxy, ["name", "host_id", "status"]);
+    expect(attachedProxy.name).toBe(createdProxyName);
+    expect(attachedProxy.host_id).toBe(createdHost.id);
+    expect(attachedProxy.status).toBe("attached");
+
+    await expectStatus(
+      await api.delete(`/http-proxies/${createdProxyName}/hosts/${createdHost.id}`),
+      204,
+    );
+    await expectStatus(await api.delete(`/http-proxies/${createdProxyName}`), 204);
+
+    createdProxyName = null;
   });
 
   test("POST /hosts/{host_id}/renew extends the host lease", async () => {

@@ -17,6 +17,7 @@ It owns:
 - Tailscale auth key creation, device discovery, and cleanup
 - SSH host key scanning and `known_hosts` material
 - An SSH gateway for hosts of gateway providers (`python -m gateway.server`)
+- Account-bound exe.dev HTTP proxy resources
 
 Periodic maintenance runs as cron jobs: `python -m janitor` reaps expired
 hosts and abandoned, failed, or unused templates, and `python -m hosts.pool`
@@ -47,6 +48,7 @@ src/
   core/              # Settings, database, exception base
   hosts/             # Host API, models, schemas, service, janitor, pool, auth
   gateway/           # SSH gateway for gateway-provider hosts
+  http_proxies/      # HTTP proxy API, schemas, service, deps
   janitor/           # Cron entry point that runs the host and template reapers
   providers/         # VM provider ABC, capabilities, registry, adapters
   networking/        # Network provider framework and Tailscale adapter
@@ -103,6 +105,7 @@ uv run alembic upgrade head
 
 - `hosts.api` owns HTTP request and response concerns.
 - `hosts.service.HostService` owns host lifecycle behavior.
+- `http_proxies.service.HTTPProxyService` owns HTTP proxy behavior.
 - VM provider implementations live in `providers/<name>/`.
 - Network provider implementations live in `networking/<name>/`.
 - Provider and networking packages register themselves through their registries
@@ -162,9 +165,23 @@ Do not fall back to deleting Tailscale machines by hostname.
 ### Auth And Data Exposure
 
 - Service bearer tokens can create, list, get, and delete hosts.
+- HTTP proxy endpoints are service-token only.
 - Caller-supplied host `env` must not include keys from
   `hosts.schemas.RESERVED_HOST_ENV_KEYS`.
 - Do not expose caller `env` in API responses.
+
+### HTTP Proxies
+
+HTTP proxies are account-bound exe.dev resources. They are not host-owned
+lifecycle state in this service.
+
+`POST /http-proxies` creates the provider resource. Attach and detach hosts with
+`POST /http-proxies/{name}/hosts/{host_id}` and
+`DELETE /http-proxies/{name}/hosts/{host_id}`. Deleting a host must not delete
+account-bound HTTP proxies.
+
+Keep the API provider-agnostic. Do not expose exe attachment specs or persist
+proxy headers/secrets in Postgres.
 
 ## Code Style
 
