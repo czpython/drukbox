@@ -27,7 +27,7 @@ COPY alembic/ ./alembic/
 
 RUN uv sync --frozen --no-dev --all-extras
 
-RUN useradd --system --no-create-home --uid 1001 appuser
+RUN useradd --system --create-home --uid 1001 appuser
 
 USER appuser
 
