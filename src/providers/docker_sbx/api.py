@@ -23,6 +23,9 @@ class SbxCLI:
     when drukbox runs in a container.
     """
 
+    async def set_sandbox_proxy(self, url: str) -> None:
+        await self._run("settings", "set", "proxy.sandbox", url)
+
     async def create_sandbox(
         self,
         *,

@@ -99,8 +99,8 @@ but a process with the key can decrypt it.
 
 Caller `env` stays plaintext by design. It is ordinary configuration that is
 delivered to the VM, but it is never echoed in any
-response, and reserved keys (`TAILSCALE_AUTHKEY`) are rejected at the
-schema.
+response. Tailscale credentials, Docker bootstrap keys, and proxy routing or
+CA variables are service-owned names and are rejected at the schema.
 
 Secret registration has no secret-bearing response. Validation responses omit
 the rejected input, so a bad static value or source header is not reflected to
@@ -108,13 +108,17 @@ the caller. Refresh source URLs must use HTTPS and cannot contain user
 credentials or fragments. Their paths and query strings are stored as readable
 addresses; put credentials only in the encrypted source headers.
 
-The injecting proxy holds active secret values in memory. A bare box receives
-only a placeholder. Its dedicated reverse tunnel supplies the box identity, and
-the proxy accepts only fixed hosts registered to that box. A shared proxy path,
+The injecting proxy holds active secret values in memory. A box that uses this
+edge receives only a placeholder. Its dedicated reverse tunnel supplies the box
+identity. The proxy
+inspects only fixed hosts registered to that box. It passes other allowed
+destinations as raw TCP, so their TLS session remains between the box and the
+upstream service. A shared proxy path,
 such as the daemon-wide docker-sbx route, has no box identity and cannot serve
-stored values. It may serve only non-secret refresh sentinels. The proxy does
-not follow redirects. It rejects private or reserved upstream addresses by
-default.
+stored values. It can serve only non-secret refresh sentinels. Until such a
+route exists, it passes all allowed traffic without TLS termination. The proxy
+does not follow redirects for inspected requests. It rejects private or
+reserved upstream addresses by default for both inspected and blind traffic.
 
 The proxy resolves and pins an upstream address for each request. This behavior
 prevents a DNS change during a connection. The proxy removes cookies and routing
@@ -125,7 +129,15 @@ body.
 The proxy does not put request headers, bodies, or secret values in logs or
 error responses. The proxy CA key has mode `0600`. The control socket
 also has mode `0600`. Protect both directories as service credentials. Install
-the CA certificate only in sandboxes that use the proxy.
+the CA certificate only in sandboxes that use the proxy. Drukbox installs it in
+the system store and sets the standard certificate variables used by HTTPX,
+Requests, curl, and Node.js. A client that ignores both the system store and
+these variables needs explicit certificate settings in its template.
+
+The CA is in the sandbox trust store, but the proxy presents a certificate from
+it only for a host-specific registered route. Unregistered destinations stay on
+the blind path. Thus CA use is scoped by proxy routing, because common system
+trust stores cannot scope one CA to a list of host names.
 
 Two pieces of material reach the VM through its provider's user-data /
 setup-script mechanism, and that channel is the relevant exposure:

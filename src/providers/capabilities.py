@@ -61,6 +61,10 @@ class ReverseTunnelCapability(abc.ABC):
     ) -> VMCreateResult: ...
 
 
+class SecretProxyRoutingCapability:
+    """Marker for providers whose hosts must trust and route through the proxy."""
+
+
 class TemplateCapability(abc.ABC):
     """Mix-in declaring a VMProvider can build and delete template images.
 

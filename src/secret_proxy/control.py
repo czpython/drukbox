@@ -10,9 +10,10 @@ from secret_proxy.rules import SecretRules
 
 
 class SecretProxyControlServer:
-    def __init__(self, socket_path: Path, rules: SecretRules) -> None:
+    def __init__(self, socket_path: Path, rules: SecretRules, *, ca_certificate: str) -> None:
         self.socket_path = socket_path
         self.rules = rules
+        self.ca_certificate = ca_certificate
         self._server: asyncio.AbstractServer | None = None
         self._socket_inode: int | None = None
 
@@ -95,6 +96,8 @@ class SecretProxyControlServer:
         if not isinstance(request, dict):
             raise TypeError
         operation = request["operation"]
+        if operation == "certificate_authority":
+            return self.ca_certificate
         vm = request["vm"]
         if not isinstance(operation, str) or not isinstance(vm, str):
             raise TypeError

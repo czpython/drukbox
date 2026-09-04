@@ -15,6 +15,13 @@ for name in ${DRUKBOX_ENV_KEYS:-}; do
   printf '%s=%s\n' "$name" "${!name-}" >> /etc/environment
 done
 
+# This is service-generated bootstrap configuration, not caller environment.
+# Run it before sshd starts, then remove it from the daemon environment.
+if [[ -n ${DRUKBOX_SETUP_SCRIPT:-} ]]; then
+  printf '%s\n' "$DRUKBOX_SETUP_SCRIPT" | /bin/bash
+fi
+unset DRUKBOX_SETUP_SCRIPT
+
 # Generate host keys if the image doesn't ship any.
 ssh-keygen -A
 

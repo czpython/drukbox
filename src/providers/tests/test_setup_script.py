@@ -1,6 +1,10 @@
 import pytest
 
-from providers.setup_script import inject_authorized_keys, inject_env_exports
+from providers.setup_script import (
+    inject_authorized_keys,
+    inject_env_exports,
+    inject_secret_proxy_trust,
+)
 
 
 def test_returns_script_unchanged_when_no_env():
@@ -41,7 +45,8 @@ def test_injects_additional_authorized_keys_after_the_shebang():
     assert script.startswith("#!/usr/bin/env bash\n")
     assert "drukbox_ssh_user=ubuntu" in script
     assert 'if [ -z "$drukbox_ssh_home" ]; then exit 1; fi' in script
-    assert 'chmod 600 "$drukbox_ssh_home/.ssh/authorized_keys" || exit 1' in script
+    assert 'install -m 600 -o "$drukbox_ssh_uid"' in script
+    assert "sudo -n" in script
     assert "ssh-ed25519 AAAATUNNEL" in script
     assert script.index("ssh-ed25519 AAAATUNNEL") < script.index("echo ready")
 
@@ -60,3 +65,29 @@ def test_adds_a_shell_shebang_when_the_key_is_the_only_bootstrap():
     )
 
     assert script.startswith("#!/bin/sh\n")
+
+
+def test_injects_proxy_ca_and_per_host_route_after_the_shebang():
+    script = inject_secret_proxy_trust(
+        "#!/bin/sh\necho ready\n",
+        ca_certificate="-----BEGIN CERTIFICATE-----\ndGVzdA==\n-----END CERTIFICATE-----\n",
+        proxy_url="http://127.0.0.1:8781",
+    )
+
+    assert script.startswith("#!/bin/sh\n")
+    assert "update-ca-certificates" in script
+    assert "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" in script
+    assert "NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/" in script
+    assert "HTTPS_PROXY=http://127.0.0.1:8781" in script
+    assert script.endswith("echo ready\n")
+
+
+def test_shared_proxy_trust_does_not_set_a_per_host_proxy_route():
+    script = inject_secret_proxy_trust(
+        "",
+        ca_certificate="-----BEGIN CERTIFICATE-----\ndGVzdA==\n-----END CERTIFICATE-----\n",
+        proxy_url=None,
+    )
+
+    assert "update-ca-certificates" in script
+    assert "HTTPS_PROXY=" not in script

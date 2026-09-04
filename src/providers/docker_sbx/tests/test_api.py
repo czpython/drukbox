@@ -19,6 +19,23 @@ def _process(*, returncode: int = 0, stdout: bytes = b"", stderr: bytes = b"") -
 
 
 @pytest.mark.asyncio
+async def test_sets_the_daemon_wide_sandbox_proxy(monkeypatch):
+    create = AsyncMock(return_value=_process())
+    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", create)
+
+    await SbxCLI().set_sandbox_proxy("http://127.0.0.1:8781")
+
+    assert create.await_args is not None
+    assert create.await_args.args == (
+        "sbx",
+        "settings",
+        "set",
+        "proxy.sandbox",
+        "http://127.0.0.1:8781",
+    )
+
+
+@pytest.mark.asyncio
 async def test_create_sandbox_requests_the_shell_agent_with_explicit_sizing(monkeypatch):
     captured: dict = {}
 

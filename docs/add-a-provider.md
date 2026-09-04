@@ -95,6 +95,12 @@ If a host has no direct route to the injecting proxy, inherit
 sshd becomes ready. The host lifecycle then opens and supervises the dedicated
 reverse tunnel.
 
+Every provider whose hosts can use the injecting proxy must also inherit
+`SecretProxyRoutingCapability`. Host provisioning then installs the public CA.
+Providers with `ReverseTunnelCapability` also receive a loopback HTTPS proxy
+route. A provider with a shared external route must configure that route at its
+own boundary.
+
 A bare provider implements secret injection with
 `ProxySecretInjectionCapability` from `providers.secret_proxy`. Set its
 `secret_proxy` attribute to a `SecretProxyClient`. Providers with an external

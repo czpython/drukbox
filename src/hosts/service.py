@@ -23,7 +23,7 @@ from networking.tailscale import (
     NetworkError,
     Tailscale,
 )
-from providers.capabilities import ReverseTunnelCapability
+from providers.capabilities import ReverseTunnelCapability, SecretProxyRoutingCapability
 from providers.exceptions import (
     ProviderCommandError,
     ProviderNotFoundError,
@@ -32,7 +32,9 @@ from providers.exceptions import (
     UnsupportedSizingError,
 )
 from providers.registry import get_provider_names, get_vm_provider
-from secret_proxy.exceptions import ReverseTunnelError
+from providers.setup_script import inject_secret_proxy_trust
+from secret_proxy.client import SecretProxyClient
+from secret_proxy.exceptions import ReverseTunnelError, SecretProxyError
 from secret_proxy.settings import SecretProxySettings
 from secret_proxy.tunnels import ReverseTunnelManager, load_reverse_tunnel_key
 from templates.exceptions import TemplateNotAvailableError, UnknownTemplateError
@@ -77,6 +79,7 @@ class HostService:
         *,
         tailscale: Tailscale | None = None,
         reverse_tunnels: ReverseTunnelManager | None = None,
+        secret_proxy: SecretProxyClient | None = None,
     ) -> None:
         self.session = session
         self.settings = settings or get_settings()
@@ -92,6 +95,7 @@ class HostService:
         else:
             self.tailscale = None
         self.reverse_tunnels = reverse_tunnels
+        self.secret_proxy = secret_proxy or SecretProxyClient.from_settings()
 
     def _default_lease_expires_at(self) -> datetime:
         return utc_now() + timedelta(seconds=self.settings.lease_default_ttl)
@@ -482,6 +486,13 @@ class HostService:
         await self.session.commit()
 
         vm = get_vm_provider(host.provider)
+        proxy_ca: str | None = None
+        if isinstance(vm, SecretProxyRoutingCapability):
+            try:
+                proxy_ca = await self.secret_proxy.certificate_authority()
+            except SecretProxyError as exc:
+                await self.mark_failed(host, exc)
+                return
         tailscale: Tailscale | None = None
         if vm.supports_tailnet:
             tailscale = self.tailscale
@@ -498,6 +509,18 @@ class HostService:
                 return
             join_env = dict(join_credentials.env)
             setup_script = _SANDBOX_BOOTSTRAP_SCRIPT
+
+        if proxy_ca:
+            proxy_settings = SecretProxySettings()
+            setup_script = inject_secret_proxy_trust(
+                setup_script or "",
+                ca_certificate=proxy_ca,
+                proxy_url=(
+                    f"http://127.0.0.1:{proxy_settings.tunnel_box_port}"
+                    if isinstance(vm, ReverseTunnelCapability)
+                    else None
+                ),
+            )
 
         environment = {**host.env, **join_env}
 

@@ -202,6 +202,20 @@ async def test_bare_host_tunnel_injects_headers_and_bodies(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_shared_sbx_path_never_serves_a_registered_value(tmp_path) -> None:
+    received_authorization = ""
+
+    async def upstream(request: web.Request) -> web.Response:
+        nonlocal received_authorization
+        received_authorization = request.headers["Authorization"]
+        return web.Response(text="blind-response")
+
+    application = web.Application()
+    application.router.add_get("/", upstream)
+    runner = web.AppRunner(application)
+    await runner.setup()
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.setblocking(False)
     settings = SecretProxySettings(
         bind_port=0,
         control_socket=_socket_path(),
@@ -209,25 +223,40 @@ async def test_shared_sbx_path_never_serves_a_registered_value(tmp_path) -> None
         allow_private_upstreams=True,
     )
     proxy = SecretProxyServer(settings, upstream_ssl=False)
+    site = web.SockSite(
+        runner,
+        listener,
+        ssl_context=proxy.certificates.server_context("127.0.0.1"),
+    )
+    await site.start()
+    host = f"127.0.0.1:{listener.getsockname()[1]}"
     await proxy.start()
     control = SecretProxyClient(settings.expanded_control_socket)
     await control.put_secret(
         vm="box-one",
         name="openai",
-        host="127.0.0.1:443",
+        host=host,
         placeholder="placeholder",
         value="real-secret",
     )
     proxy_host, proxy_port = proxy.address
+    trust = ssl.create_default_context(cafile=proxy.certificates.ca_certificate_path)
     try:
         async with httpx.AsyncClient(
             proxy=f"http://box-one:spoofed@{proxy_host}:{proxy_port}",
+            verify=trust,
             trust_env=False,
         ) as client:
-            with pytest.raises(httpx.ProxyError):
-                await client.get("https://127.0.0.1/")
+            response = await client.get(
+                f"https://{host}/",
+                headers={"Authorization": "Bearer placeholder"},
+            )
     finally:
         await proxy.close()
+        await runner.cleanup()
+
+    assert response.text == "blind-response"
+    assert received_authorization == "Bearer placeholder"
 
 
 @pytest.mark.asyncio
@@ -299,25 +328,71 @@ async def test_proxy_streams_the_upstream_response(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_proxy_rejects_an_unregistered_host_for_an_authorized_box(tmp_path) -> None:
+async def test_httpx_uses_the_installed_proxy_environment(tmp_path, monkeypatch) -> None:
     async def upstream(request: web.Request) -> web.Response:
-        return web.Response(text="not reached")
+        return web.Response(text="trusted")
 
     application = web.Application()
     application.router.add_get("/", upstream)
-    runner, proxy, forwarder, client, _ = await _start_proxy_fixture(
+    runner, proxy, forwarder, configured_client, host = await _start_proxy_fixture(
         tmp_path,
         application,
     )
+    await configured_client.aclose()
+    proxy_port = int(forwarder.sockets[0].getsockname()[1])
+    monkeypatch.setenv("HTTPS_PROXY", f"http://127.0.0.1:{proxy_port}")
+    monkeypatch.setenv("SSL_CERT_FILE", str(proxy.certificates.ca_certificate_path))
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
     try:
-        with pytest.raises(httpx.ProxyError):
-            await client.get("https://example.com/")
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"https://{host}/")
+    finally:
+        forwarder.close()
+        await forwarder.wait_closed()
+        await proxy.close()
+        await runner.cleanup()
+
+    assert response.text == "trusted"
+
+
+@pytest.mark.asyncio
+async def test_proxy_blind_tunnels_an_unregistered_host_for_an_authorized_box(tmp_path) -> None:
+    reached = False
+
+    async def upstream(request: web.Request) -> web.Response:
+        nonlocal reached
+        reached = True
+        return web.Response(text="untouched")
+
+    application = web.Application()
+    application.router.add_get("/", upstream)
+    runner, proxy, forwarder, client, registered_host = await _start_proxy_fixture(
+        tmp_path,
+        application,
+    )
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.setblocking(False)
+    site = web.SockSite(
+        runner,
+        listener,
+        ssl_context=proxy.certificates.server_context("127.0.0.1"),
+    )
+    await site.start()
+    other_host = f"127.0.0.1:{listener.getsockname()[1]}"
+    assert other_host != registered_host
+    try:
+        response = await client.get(f"https://{other_host}/")
     finally:
         await client.aclose()
         forwarder.close()
         await forwarder.wait_closed()
         await proxy.close()
         await runner.cleanup()
+
+    assert response.text == "untouched"
+    assert reached
 
 
 async def _start_proxy_fixture(

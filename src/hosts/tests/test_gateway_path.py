@@ -63,6 +63,10 @@ async def test_gateway_provider_hosts_advertise_the_gateway(
     assert host.public_key == "ssh-ed25519 AAAAPUB"
     # The caller still gets the private key exactly once.
     assert host.private_key == "PRIVATE"
+    assert create_vm.await_args is not None
+    setup_script = create_vm.await_args.kwargs["setup_script"]
+    assert "update-ca-certificates" in setup_script
+    assert "HTTPS_PROXY=" not in setup_script
 
 
 async def test_gateway_provider_hosts_fail_cleanly_without_an_address(

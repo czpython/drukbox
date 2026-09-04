@@ -121,15 +121,16 @@ def test_session_prepares_the_per_host_home_before_the_command():
 def test_session_without_a_command_runs_a_login_shell_in_the_home():
     script = _session_script("sb-abc", None, "root")
     assert "mkdir -p /home/sb-abc" in script
-    assert script.endswith("exec bash -l")
+    assert shlex.quote("exec bash -l") in script
 
 
-def test_root_session_is_byte_identical_to_the_plain_home_setup():
-    # The default install must not change: no chown, no su.
+def test_root_session_uses_pam_without_changing_home_ownership():
+    # PAM loads /etc/environment for the default root session too.
     assert _session_script("sb-abc", "git status", "root") == (
-        "mkdir -p /home/sb-abc && cd /home/sb-abc && export HOME=/home/sb-abc\ngit status"
+        "mkdir -p /home/sb-abc && cd /home/sb-abc && export HOME=/home/sb-abc\n"
+        "exec su -m root -s /bin/bash -c 'git status'"
     )
-    assert "su" not in _session_script("sb-abc", None, "root")
+    assert "chown" not in _session_script("sb-abc", None, "root")
 
 
 def test_non_root_session_chowns_the_home_and_drops_to_the_user():

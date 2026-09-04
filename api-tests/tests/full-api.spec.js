@@ -42,7 +42,20 @@ const HOST_KEYS = [
   "expires_at",
 ];
 
-const RESERVED_ENV_KEYS = ["TAILSCALE_AUTHKEY"];
+const RESERVED_ENV_KEYS = [
+  "CURL_CA_BUNDLE",
+  "DRUKBOX_AUTHORIZED_KEY",
+  "DRUKBOX_ENV_KEYS",
+  "DRUKBOX_SETUP_SCRIPT",
+  "HTTPS_PROXY",
+  "NODE_EXTRA_CA_CERTS",
+  "NO_PROXY",
+  "REQUESTS_CA_BUNDLE",
+  "SSL_CERT_FILE",
+  "TAILSCALE_AUTHKEY",
+  "https_proxy",
+  "no_proxy",
+];
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

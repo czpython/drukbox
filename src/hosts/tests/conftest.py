@@ -1,9 +1,25 @@
 from collections.abc import Iterator
+from unittest.mock import AsyncMock
 
 import pytest
 
 from providers import registry as registry_module
 from providers.base import VMCreateResult, VMProvider
+from secret_proxy.client import SecretProxyClient
+
+_TEST_CA = """-----BEGIN CERTIFICATE-----
+dGVzdA==
+-----END CERTIFICATE-----
+"""
+
+
+@pytest.fixture(autouse=True)
+def secret_proxy_ca(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        SecretProxyClient,
+        "certificate_authority",
+        AsyncMock(return_value=_TEST_CA),
+    )
 
 
 class StubVMProvider(VMProvider):

@@ -2,7 +2,7 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import ReverseTunnelCapability
+from providers.capabilities import ReverseTunnelCapability, SecretProxyRoutingCapability
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
 from providers.secret_proxy import ProxySecretInjectionCapability
 from providers.setup_script import inject_authorized_keys, inject_env_exports
@@ -14,7 +14,12 @@ from .exceptions import ExoscaleProviderError
 from .settings import ExoscaleSettings
 
 
-class ExoscaleProvider(ProxySecretInjectionCapability, VMProvider, ReverseTunnelCapability):
+class ExoscaleProvider(
+    ProxySecretInjectionCapability,
+    VMProvider,
+    ReverseTunnelCapability,
+    SecretProxyRoutingCapability,
+):
     name: ClassVar[str] = "exoscale"
     diagnose_hint: ClassVar[str] = "check_exoscale_api_credentials_and_zone"
     supports_instance_type = True

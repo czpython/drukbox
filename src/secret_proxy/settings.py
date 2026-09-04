@@ -14,6 +14,7 @@ class SecretProxySettings(BaseSettings):
 
     bind_host: str = "127.0.0.1"
     bind_port: int = Field(default=8781, ge=0, le=65535)
+    sandbox_url: str = Field(default="http://127.0.0.1:8781", min_length=1)
     tunnel_target_host: str = Field(default="127.0.0.1", min_length=1)
     tunnel_box_port: int = Field(default=8781, ge=1, le=65535)
     tunnel_key_path: Path = Path("~/.drukbox/secret-proxy/tunnel_key")

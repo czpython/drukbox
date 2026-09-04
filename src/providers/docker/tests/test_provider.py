@@ -82,13 +82,13 @@ async def test_create_vm_adds_service_authorized_keys():
 
 
 @pytest.mark.asyncio
-async def test_create_vm_rejects_setup_script_because_tailscale_is_unsupported():
+async def test_create_vm_passes_service_setup_script_to_the_entrypoint():
     api = _api_mock()
     provider = DockerProvider(api, _settings())
 
-    with pytest.raises(ProviderCommandError):
-        await provider.create_vm(name="sb-test", image="img", env={}, setup_script="#!/bin/sh\n")
-    api.run_container.assert_not_called()
+    await provider.create_vm(name="sb-test", image="img", env={}, setup_script="#!/bin/sh\n")
+
+    assert api.run_container.await_args.kwargs["env"]["DRUKBOX_SETUP_SCRIPT"] == "#!/bin/sh\n"
 
 
 @pytest.mark.asyncio

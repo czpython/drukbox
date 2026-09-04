@@ -62,6 +62,10 @@ class CertificateAuthority:
         context.load_cert_chain(certificate_path, key_path)
         return context
 
+    @property
+    def certificate_pem(self) -> str:
+        return self._certificate.public_bytes(serialization.Encoding.PEM).decode("ascii")
+
     def _create(self) -> tuple[ec.EllipticCurvePrivateKey, x509.Certificate]:
         key = ec.generate_private_key(ec.SECP256R1())
         subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "drukbox secret proxy")])

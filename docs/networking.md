@@ -24,7 +24,7 @@ Callers pick whichever path they can reach and dial it themselves.
 
 ## Reverse tunnel to the injecting proxy
 
-Docker, AWS, Hetzner, and Exoscale hosts cannot dial the injecting proxy
+Docker, exe.dev, AWS, Hetzner, and Exoscale hosts cannot dial the injecting proxy
 directly. Drukbox opens one reverse SSH forward for each such host. The forward
 listens on `127.0.0.1:8781` inside the host and sends traffic to the proxy bind
 port. The proxy and the remote listener both stay on loopback by default.
@@ -48,6 +48,12 @@ process creates a host. A pool claim also waits for the tunnel before it returns
 the host. If an established tunnel drops, Drukbox marks the host `error`, expires
 it, and tells the caller to create a replacement. It does not leave an active host
 with a dead proxy route.
+
+Provisioning installs the proxy CA in each supported host. Hosts with a reverse
+tunnel also get `HTTPS_PROXY` and the common CA environment variables in
+`/etc/environment`. Docker Sandboxes use the daemon-wide `proxy.sandbox` route
+instead of a per-host listener. Drukbox sets that route before each sandbox
+create.
 
 ## Tailscale on: the overlay is the security model
 
@@ -78,7 +84,8 @@ self-delete and operator cleanup can race the API.
 With Tailscale off the provider's public path is the only path.
 
 On exe.dev, SSH terminates at exe's edge (`ssh_dest`), and exe owns
-authentication; drukbox returns no key material.
+caller authentication. Drukbox returns no key material. The setup script also
+installs the public service key that Drukbox uses for the dedicated proxy tunnel.
 
 On AWS, drukbox generates a per-VM ed25519 keypair, imports the public
 half, and returns the private half exactly once in the create

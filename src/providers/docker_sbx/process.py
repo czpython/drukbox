@@ -19,17 +19,16 @@ def _set_terminal_size(descriptor: int, size: TerminalSize) -> None:
 
 
 def _session_script(name: str, command: str | None, user: str) -> str:
-    # The exec enters as root and prepares the per-host home. For a non-root
-    # user it then drops with `su -m`, which keeps the exported HOME and,
-    # through PAM, still applies /etc/environment.
+    # The exec enters as root and prepares the per-host home. It then enters
+    # the configured user through PAM, including when that user is root. PAM
+    # applies /etc/environment, which holds caller env and proxy trust config.
     home = f"/home/{name}"
     payload = command if command is not None else "exec bash -l"
     prepare = f"mkdir -p {home} && cd {home} && export HOME={home}"
-    if user == "root":
-        return f"{prepare}\n{payload}"
     owner = shlex.quote(user)
     drop = f"exec su -m {owner} -s /bin/bash -c {shlex.quote(payload)}"
-    return f"{prepare} && chown {owner} {home}\n{drop}"
+    chown = "" if user == "root" else f" && chown {owner} {home}"
+    return f"{prepare}{chown}\n{drop}"
 
 
 class SbxExecProcess(SandboxProcess):

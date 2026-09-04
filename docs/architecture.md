@@ -81,7 +81,8 @@ not grow provider-shaped warts. Optional features are capability
 mix-ins: `SecretInjectionCapability` declares the box-scoped secret lifecycle,
 `TemplateCapability` declares the template create and delete surface, and
 `ReverseTunnelCapability` declares that `create_vm` accepts additional SSH
-authorized keys for the service connection. `resolve_capability` narrows a
+authorized keys for the service connection. `SecretProxyRoutingCapability`
+marks providers whose hosts must receive the proxy CA and route. `resolve_capability` narrows a
 specific provider instance to a capability and raises the shared
 `CapabilityUnsupportedError` when that provider does not implement it,
 which the routes surface as a clear error. New provider-specific
@@ -94,9 +95,11 @@ that the box needs. The service name is the provider resource identity. A
 provider can give the box a placeholder, an alternate endpoint, or both without
 exposing its mechanism to the caller. Secret listings contain service names only.
 
-Bare providers use the injecting proxy as their secret edge. The API process
+AWS, Docker, Hetzner, and Exoscale use the injecting proxy as their static-secret
+edge. exe.dev keeps its native static-secret edge, but uses the proxy route for
+refresh traffic. The API process
 registers a box, service name, fixed upstream host, and placeholder through a
-private UNIX socket. Each bare box has a dedicated reverse tunnel. The trusted
+private UNIX socket. Each host with a dialable SSH endpoint has a dedicated reverse tunnel. The trusted
 tunnel preamble selects that box's rules; request headers cannot select another
 box.
 
@@ -107,6 +110,11 @@ It removes cookies and routing headers. It also removes authorization unless it
 contains a registered placeholder. Registered placeholders are replaced in
 the remaining headers and the request body. Responses stream to the box without
 buffering.
+
+When a destination has no rule for the identified box, the proxy opens a raw
+TCP tunnel and does not terminate TLS. This keeps unrelated public HTTPS traffic
+end to end. The shared docker-sbx route has no box identity, so all its traffic
+uses this blind path until a non-secret refresh route is registered.
 
 Proxy rules stay in memory. The durable source is the encrypted secret recipe
 on the host record. The host integration must register those recipes again
@@ -123,10 +131,10 @@ left in `error` state. States live in `hosts.models.HostStatus`:
 `provisioning → creating_network → creating_vm → bootstrapping →
 active`, with `error` as the terminal failure.
 
-Docker, AWS, Hetzner, and Exoscale need a reverse SSH forward because they have
-no direct route to the injecting proxy. Provisioning installs the service's
-public tunnel key when the public SSH path is used, scans the host key, and then
-opens one dedicated tunnel connection before the host becomes `active`. A
+Docker, exe.dev, AWS, Hetzner, and Exoscale need a reverse SSH forward because
+they have no direct route to the injecting proxy. Provisioning installs the service's
+public tunnel key for a public SSH path. Then it scans the host key and opens
+one dedicated tunnel before the host becomes `active`. A
 tailnet host uses Tailscale SSH on its internal path instead of the service key.
 Each forwarded connection carries a host-ID preamble produced by the tunnel, so
 the proxy does not trust box-controlled identity data.
@@ -175,8 +183,8 @@ Two maintenance commands run as cron jobs from the same image:
   (`POOL_SIZES`, with `POOL_SIZE` as the default provider's target) to
   hide provider cold starts.
 
-The API process owns reverse tunnels. A pool process can prepare a bare host
-without keeping a connection after the one-off process exits. The API restores
+The API process owns reverse tunnels. A pool process can prepare a tunnel-capable
+host without keeping a connection after the one-off process exits. The API restores
 that tunnel from the database, and a pool claim confirms that the tunnel is open
 before it returns the host.
 

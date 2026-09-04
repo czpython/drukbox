@@ -53,7 +53,8 @@ systemd timer) from the same image and env file.
 Run one secret proxy beside each API deployment. Both processes must share the
 control-socket directory and certificate directory. The default paths work when
 both processes run directly on one host. Container deployments must mount these
-directories into both containers at the same paths.
+directories into both containers at the same paths. Start the proxy before you
+provision hosts. Host creation reads its public CA over the control socket.
 
 The proxy listens on loopback by default. A reverse tunnel or local container
 network must carry box traffic to it. Do not expose port 8781 to the public
@@ -70,7 +71,7 @@ API process holds an exclusive lock next to the shared tunnel key, so a second
 process that uses the same key path fails at startup. Use the normal async
 concurrency of one Uvicorn process.
 
-The API and every pool process that provisions Docker, AWS, Hetzner, or Exoscale
+The API and every pool process that provisions Docker, exe.dev, AWS, Hetzner, or Exoscale
 hosts must use the same persistent `SECRET_PROXY_TUNNEL_KEY_PATH`. When these
 processes run in separate containers, mount one durable volume at that path in
 both containers. The file is created with mode `0600`. Do not replace it while
@@ -125,7 +126,8 @@ unreachable, enable host networking in Docker Desktop's settings.
 The sandbox image (`DOCKER_DEFAULT_IMAGE`, default
 `ghcr.io/czpython/drukbox/sandbox:latest`) is pulled on first provision.
 To customize it, build [images/local/](../images/local/) and point
-`DOCKER_DEFAULT_IMAGE` at your tag.
+`DOCKER_DEFAULT_IMAGE` at your tag. A replacement image must keep the entrypoint
+contract so Drukbox can run its CA and proxy bootstrap before sshd starts.
 
 Containers publish sshd on a random `127.0.0.1` port and are reachable
 only from the host that runs drukbox; the per-host key is the auth
@@ -202,6 +204,12 @@ Callers reach the sandboxes through
 for each host is the auth boundary. Sandboxes have no `SERVICE_LABEL`
 tag, because `sbx create` has no label option.
 
+Before each create, Drukbox sets the daemon-wide `proxy.sandbox` value to
+`SECRET_PROXY_SANDBOX_URL`. The URL is resolved from the sandbox daemon's
+network context, not from the Drukbox container. The shared route has no host
+identity. It can pass ordinary traffic and non-secret refresh requests, but it
+cannot retrieve a stored secret value.
+
 The template image (`DOCKER_SBX_DEFAULT_IMAGE`, default
 `ghcr.io/czpython/drukbox/sbx-sandbox:latest`) must start sshd without
 environment variables. `sbx create` sends none. drukbox injects the key
@@ -209,6 +217,11 @@ for each host through the exec channel after the start. Build
 [images/sbx/](../images/sbx/) to change the template. The
 `images/local/` entrypoint needs boot-time environment variables and
 cannot start as a sandbox template.
+
+The bundled local images contain `base64`, `update-ca-certificates`, and the
+system CA bundle. A custom remote image must provide the same commands. When
+its SSH user is not root, it must also allow non-interactive `sudo` for
+bootstrap installation.
 
 The daemon has its own image store and does not read local Docker
 images. It pulls unknown template names from a registry. For a local
@@ -361,6 +374,7 @@ Injecting proxy and reverse tunnel:
 | --- | --- | --- |
 | `SECRET_PROXY_BIND_HOST` | `127.0.0.1` | Injecting proxy bind address. Keep it private. |
 | `SECRET_PROXY_BIND_PORT` | `8781` | Proxy port and default tunnel target port. |
+| `SECRET_PROXY_SANDBOX_URL` | `http://127.0.0.1:8781` | Host-reachable proxy URL written to the daemon-wide `proxy.sandbox` setting. |
 | `SECRET_PROXY_TUNNEL_TARGET_HOST` | `127.0.0.1` | Address that the Drukbox side of a reverse tunnel connects to. Use a private service address when the proxy runs in another container. |
 | `SECRET_PROXY_TUNNEL_BOX_PORT` | `8781` | Port where each host reaches the proxy. |
 | `SECRET_PROXY_TUNNEL_KEY_PATH` | `~/.drukbox/secret-proxy/tunnel_key` | Persistent private key for public-path reverse tunnels. Share it with pool processes. |
@@ -371,7 +385,7 @@ Injecting proxy and reverse tunnel:
 | `SECRET_PROXY_CONTROL_SOCKET` | `~/.drukbox/secret-proxy/control.sock` | Private UNIX socket that receives secret rules. |
 | `SECRET_PROXY_CERTIFICATE_DIRECTORY` | `~/.drukbox/secret-proxy/certificates` | Directory for the proxy CA and host certificates. Preserve and restrict this directory. |
 | `SECRET_PROXY_ALLOW_PRIVATE_UPSTREAMS` | `false` | Permit private and reserved upstream addresses. Keep this false unless a registered service requires them. |
-| `SECRET_PROXY_UPSTREAM_TIMEOUT_SECONDS` | `60.0` | Total time limit for one upstream request. |
+| `SECRET_PROXY_UPSTREAM_TIMEOUT_SECONDS` | `60.0` | Total time limit for one inspected upstream request and connect timeout for blind traffic. |
 
 Tailscale (required when `TAILSCALE_ENABLED=true`):
 

@@ -2,7 +2,7 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import ReverseTunnelCapability
+from providers.capabilities import ReverseTunnelCapability, SecretProxyRoutingCapability
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
 from providers.secret_proxy import ProxySecretInjectionCapability
 from providers.setup_script import inject_authorized_keys, inject_env_exports
@@ -14,7 +14,12 @@ from .exceptions import HetznerProviderError
 from .settings import HetznerSettings
 
 
-class HetznerProvider(ProxySecretInjectionCapability, VMProvider, ReverseTunnelCapability):
+class HetznerProvider(
+    ProxySecretInjectionCapability,
+    VMProvider,
+    ReverseTunnelCapability,
+    SecretProxyRoutingCapability,
+):
     name: ClassVar[str] = "hetzner"
     diagnose_hint: ClassVar[str] = "check_hetzner_api_token_and_location"
     # instance_type maps onto Hetzner's server type; root disk size is fixed

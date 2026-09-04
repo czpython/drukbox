@@ -65,6 +65,22 @@ async def test_create_vm_forwards_kwargs_and_maps_result() -> None:
     assert result.ssh_host == "sb-1234.public.exe.dev"
 
 
+async def test_create_vm_installs_reverse_tunnel_key_with_privilege() -> None:
+    api = SimpleNamespace(create_vm=AsyncMock(return_value=_vm_payload()))
+    provider = _make_provider(api)
+
+    await provider.create_vm(
+        name="sb-1",
+        image="img:latest",
+        authorized_keys=("ssh-ed25519 AAAATUNNEL",),
+    )
+
+    script = api.create_vm.await_args.kwargs["setup_script"]
+    assert "ssh-ed25519 AAAATUNNEL" in script
+    assert "sudo -n" in script
+    assert "drukbox_ssh_user=exedev" in script
+
+
 def _vm_payload() -> dict[str, str]:
     return {"vm_name": "sb-1", "ssh_port": "22", "ssh_dest": "sb-1.public.exe.dev"}
 

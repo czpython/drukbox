@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import ClassVar, Self
 
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import TemplateCapability
+from providers.capabilities import SecretProxyRoutingCapability, TemplateCapability
 from providers.docker.api import DockerAPI
 from providers.docker.images import build_derived_image, remove_derived_image
 from providers.exceptions import (
@@ -14,6 +14,7 @@ from providers.exceptions import (
     ProviderTransportError,
 )
 from providers.ssh_keys import generate_ed25519_keypair
+from secret_proxy.settings import SecretProxySettings
 
 from .api import SbxCLI
 from .exceptions import DockerSbxNotFoundError, DockerSbxProviderError
@@ -45,7 +46,7 @@ def _bootstrap_script(*, public_key: str, env: dict[str, str], ssh_username: str
     return "\n".join(lines) + "\n"
 
 
-class DockerSbxProvider(VMProvider, TemplateCapability):
+class DockerSbxProvider(VMProvider, TemplateCapability, SecretProxyRoutingCapability):
     name: ClassVar[str] = "docker-sbx"
     diagnose_hint: ClassVar[str] = "check_sandboxd_is_running_and_logged_in"
     # Sandboxes have no dialable sshd; the gateway serves them, and there is
@@ -63,17 +64,21 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
         settings: DockerSbxSettings,
         *,
         docker: DockerAPI,
+        sandbox_proxy_url: str = "http://127.0.0.1:8781",
     ) -> None:
         self.api = api
         self.settings = settings
         self.docker = docker
+        self.sandbox_proxy_url = sandbox_proxy_url
 
     @classmethod
     def from_settings(cls) -> Self:
+        proxy_settings = SecretProxySettings()
         return cls(
             SbxCLI(),
             DockerSbxSettings(),  # pyright: ignore[reportCallIssue]
             docker=DockerAPI(),
+            sandbox_proxy_url=proxy_settings.sandbox_url,
         )
 
     @property
@@ -94,15 +99,6 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
-        # The service does not send a setup script, because supports_tailnet
-        # is False. A script here shows a defect in the caller. Stop with an
-        # error. Do not start a sandbox that cannot obey the script.
-        if setup_script:
-            raise ProviderCommandError(
-                "docker-sbx provider runs sandboxes locally and does not "
-                "support Tailscale networking"
-            )
-
         caller_env = env or {}
         if unsafe_keys := sorted(
             key for key, value in caller_env.items() if _UNSAFE_ENV_VALUE_CHARS.intersection(value)
@@ -120,6 +116,12 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
             # read-only filesystem). The service cannot classify a raw
             # OSError, thus the error becomes a provider error here.
             raise ProviderTransportError(f"cannot create sandbox workspace: {exc}") from exc
+
+        try:
+            await self.api.set_sandbox_proxy(self.sandbox_proxy_url)
+        except DockerSbxProviderError as exc:
+            self._remove_workspace(name)
+            raise ProviderTransportError(str(exc)) from exc
 
         try:
             await self.api.create_sandbox(
@@ -147,6 +149,10 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
                 env=caller_env,
                 ssh_username=self.settings.ssh_username,
             )
+            if setup_script:
+                script += setup_script
+                if not setup_script.endswith("\n"):
+                    script += "\n"
             await self.api.run_bootstrap(name, script)
         except DockerSbxProviderError as exc:
             with contextlib.suppress(DockerSbxProviderError):

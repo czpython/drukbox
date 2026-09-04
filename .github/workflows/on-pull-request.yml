@@ -156,11 +156,30 @@ jobs:
       - name: Build drukbox image
         run: docker build -t drukbox:api-test .
 
+      - name: Start injecting proxy
+        run: |
+          sudo install -d -m 700 -o 1001 -g 1001 /tmp/drukbox-secret-proxy
+          docker run --name drukbox-secret-proxy-test --detach \
+            --network host \
+            --mount type=bind,src=/tmp/drukbox-secret-proxy,dst=/var/lib/drukbox/secret-proxy \
+            --env SECRET_PROXY_CONTROL_SOCKET=/var/lib/drukbox/secret-proxy/control.sock \
+            --env SECRET_PROXY_CERTIFICATE_DIRECTORY=/var/lib/drukbox/secret-proxy/certificates \
+            drukbox:api-test \
+            .venv/bin/python -m secret_proxy
+          for _ in $(seq 1 60); do
+            test -S /tmp/drukbox-secret-proxy/control.sock && exit 0
+            sleep 1
+          done
+          echo "injecting proxy failed to start" >&2
+          docker logs drukbox-secret-proxy-test
+          exit 1
+
       - name: Start drukbox
         run: |
           docker run --name drukbox-api-test --detach \
             --network host \
             --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
+            --mount type=bind,src=/tmp/drukbox-secret-proxy,dst=/var/lib/drukbox/secret-proxy \
             --group-add "$(stat -c '%g' /var/run/docker.sock)" \
             --env DATABASE_URL \
             --env DRUKBOX_SECRETS_KEY \
@@ -168,6 +187,9 @@ jobs:
             --env DEFAULT_HOST_PROVIDER \
             --env DOCKER_DEFAULT_IMAGE \
             --env UVICORN_HOST \
+            --env SECRET_PROXY_CONTROL_SOCKET=/var/lib/drukbox/secret-proxy/control.sock \
+            --env SECRET_PROXY_CERTIFICATE_DIRECTORY=/var/lib/drukbox/secret-proxy/certificates \
+            --env SECRET_PROXY_TUNNEL_KEY_PATH=/var/lib/drukbox/secret-proxy/tunnel_key \
             drukbox:api-test \
             /bin/sh -c '.venv/bin/alembic upgrade head && exec .venv/bin/uvicorn api.app:app --port 8780'
           for _ in $(seq 1 60); do
@@ -202,8 +224,12 @@ jobs:
 
       - name: Dump drukbox log on failure
         if: failure()
-        run: docker logs drukbox-api-test || true
+        run: |
+          docker logs drukbox-api-test || true
+          docker logs drukbox-secret-proxy-test || true
 
       - name: Remove drukbox container
         if: always()
-        run: docker rm -f drukbox-api-test || true
+        run: |
+          docker rm -f drukbox-api-test || true
+          docker rm -f drukbox-secret-proxy-test || true

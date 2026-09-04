@@ -16,9 +16,12 @@ import pytest
 
 from core.database import async_session_factory
 from core.settings import Settings, get_settings
+from hosts.exceptions import ProvisioningFailedError
 from hosts.models import Host, HostStatus
 from hosts.service import HostService
 from providers.base import VMCreateResult
+from secret_proxy.client import SecretProxyClient
+from secret_proxy.exceptions import SecretProxyUnavailableError
 
 
 @pytest.fixture
@@ -80,11 +83,13 @@ async def test_provision_skips_tailscale_when_disabled(
     issue_join.assert_not_awaited()
     wait_for_device.assert_not_awaited()
 
-    # Provider was called WITHOUT a setup script (the bootstrap script
-    # hard-requires TAILSCALE_AUTHKEY and would error on a stock image).
+    # The setup contains proxy trust and routing, but not the Tailscale
+    # bootstrap or its required auth key.
     assert create_vm.await_args is not None
     call_kwargs = create_vm.await_args.kwargs
-    assert call_kwargs["setup_script"] is None
+    assert "update-ca-certificates" in call_kwargs["setup_script"]
+    assert "HTTPS_PROXY=http://127.0.0.1:8781" in call_kwargs["setup_script"]
+    assert "TAILSCALE_AUTHKEY" not in call_kwargs["setup_script"]
     assert "TAILSCALE_AUTHKEY" not in (call_kwargs.get("env") or {})
 
 
@@ -124,7 +129,9 @@ async def test_docker_host_stays_local_on_a_tailnet_mode_service(
     tailscale.wait_for_device.assert_not_awaited()
     assert create_vm.await_args is not None
     call_kwargs = create_vm.await_args.kwargs
-    assert call_kwargs["setup_script"] is None
+    assert "update-ca-certificates" in call_kwargs["setup_script"]
+    assert "HTTPS_PROXY=http://127.0.0.1:8781" in call_kwargs["setup_script"]
+    assert "TAILSCALE_AUTHKEY" not in call_kwargs["setup_script"]
     assert "TAILSCALE_AUTHKEY" not in (call_kwargs.get("env") or {})
 
 
@@ -163,3 +170,26 @@ async def test_delete_skips_tailscale_release_when_disabled(
         await service.delete_host(host_id)
 
     release.assert_not_awaited()
+
+
+async def test_provision_fails_before_vm_creation_when_proxy_ca_is_unavailable(
+    tailscale_disabled_settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_vm = AsyncMock()
+    monkeypatch.setattr("providers.exe.provider.ExeProvider.create_vm", create_vm)
+    secret_proxy = AsyncMock(spec=SecretProxyClient)
+    secret_proxy.certificate_authority.side_effect = SecretProxyUnavailableError(
+        "secret proxy is unavailable"
+    )
+
+    async with async_session_factory() as session:
+        service = HostService(
+            session,
+            settings=tailscale_disabled_settings,
+            secret_proxy=secret_proxy,
+        )
+        with pytest.raises(ProvisioningFailedError, match="secret proxy is unavailable"):
+            await service.create_host(env={}, image=None)
+
+    create_vm.assert_not_awaited()

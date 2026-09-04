@@ -47,6 +47,12 @@ class SecretProxyClient:
             raise SecretProxyUnavailableError("secret proxy returned an invalid response")
         return result
 
+    async def certificate_authority(self) -> str:
+        result = await self._request({"operation": "certificate_authority"})
+        if not isinstance(result, str) or not result.startswith("-----BEGIN CERTIFICATE-----\n"):
+            raise SecretProxyUnavailableError("secret proxy returned an invalid response")
+        return result
+
     async def _request(self, request: dict[str, object]) -> object:
         try:
             reader, writer = await asyncio.open_unix_connection(self.socket_path)

@@ -4,7 +4,22 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
-RESERVED_HOST_ENV_KEYS = frozenset({"TAILSCALE_AUTHKEY"})
+RESERVED_HOST_ENV_KEYS = frozenset(
+    {
+        "CURL_CA_BUNDLE",
+        "DRUKBOX_AUTHORIZED_KEY",
+        "DRUKBOX_ENV_KEYS",
+        "DRUKBOX_SETUP_SCRIPT",
+        "HTTPS_PROXY",
+        "NODE_EXTRA_CA_CERTS",
+        "NO_PROXY",
+        "REQUESTS_CA_BUNDLE",
+        "SSL_CERT_FILE",
+        "TAILSCALE_AUTHKEY",
+        "https_proxy",
+        "no_proxy",
+    }
+)
 _ENV_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 

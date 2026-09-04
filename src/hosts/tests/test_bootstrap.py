@@ -1,4 +1,6 @@
 from hosts.service import _SANDBOX_BOOTSTRAP_SCRIPT as SCRIPT
+from providers.setup_script import inject_authorized_keys, inject_secret_proxy_trust
+from secret_proxy.certificates import CertificateAuthority
 
 
 def test_bootstrap_script_fits_exe_setup_script_size_limit() -> None:
@@ -6,6 +8,22 @@ def test_bootstrap_script_fits_exe_setup_script_size_limit() -> None:
     # double-quote wrapping) is slightly larger; assert raw size first and
     # leave headroom for encoding overhead.
     assert len(SCRIPT.encode("utf-8")) < 9 * 1024
+
+
+def test_full_exe_bootstrap_fits_setup_script_size_limit(tmp_path) -> None:
+    authority = CertificateAuthority(tmp_path)
+    script = inject_secret_proxy_trust(
+        SCRIPT,
+        ca_certificate=authority.certificate_pem,
+        proxy_url="http://127.0.0.1:8781",
+    )
+    script = inject_authorized_keys(
+        script,
+        username="exedev",
+        authorized_keys=("ssh-ed25519 AAAATUNNEL",),
+    )
+
+    assert len(script.encode("utf-8")) < 10 * 1024
 
 
 def test_bootstrap_script_has_bash_shebang() -> None:

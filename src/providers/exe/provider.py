@@ -2,7 +2,12 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import SecretInjectionCapability, TemplateCapability
+from providers.capabilities import (
+    ReverseTunnelCapability,
+    SecretInjectionCapability,
+    SecretProxyRoutingCapability,
+    TemplateCapability,
+)
 from providers.docker.api import DockerAPI
 from providers.docker.exceptions import DockerProviderError
 from providers.docker.images import build_derived_image, remove_derived_image
@@ -21,9 +26,16 @@ from providers.exe.exceptions import (
     ExeVMNotFoundError,
 )
 from providers.exe.settings import ExeSettings
+from providers.setup_script import inject_authorized_keys
 
 
-class ExeProvider(VMProvider, TemplateCapability, SecretInjectionCapability):
+class ExeProvider(
+    VMProvider,
+    TemplateCapability,
+    SecretInjectionCapability,
+    ReverseTunnelCapability,
+    SecretProxyRoutingCapability,
+):
     name: ClassVar[str] = "exe"
     diagnose_hint: ClassVar[str] = "check_exe_dev_api_token_and_url"
 
@@ -65,6 +77,7 @@ class ExeProvider(VMProvider, TemplateCapability, SecretInjectionCapability):
         image: str,
         env: dict[str, str] | None = None,
         setup_script: str | None = None,
+        authorized_keys: tuple[str, ...] = (),
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
@@ -83,11 +96,16 @@ class ExeProvider(VMProvider, TemplateCapability, SecretInjectionCapability):
             registry_auth = f"{self.settings.registry_username}:{self.settings.registry_password}"
 
         # Tags are operator-facing: `exe ls --tag=managed-by-<env>` shows what this deployment owns.
+        setup_script = inject_authorized_keys(
+            setup_script or "",
+            username=self.settings.ssh_username,
+            authorized_keys=authorized_keys,
+        )
         payload = await self.api.create_vm(
             name=name,
             image=image,
             env=env,
-            setup_script=setup_script,
+            setup_script=setup_script or None,
             tags=[f"managed-by-{self._service_label}"],
             registry_auth=registry_auth,
         )

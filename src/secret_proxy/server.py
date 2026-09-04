@@ -109,7 +109,11 @@ class SecretProxyServer:
             allow_private_upstreams=settings.allow_private_upstreams,
         )
         self.certificates = CertificateAuthority(settings.expanded_certificate_directory)
-        self.control = SecretProxyControlServer(settings.expanded_control_socket, self.rules)
+        self.control = SecretProxyControlServer(
+            settings.expanded_control_socket,
+            self.rules,
+            ca_certificate=self.certificates.certificate_pem,
+        )
         self.upstream_ssl = upstream_ssl
         self._server: asyncio.Server | None = None
 
@@ -153,11 +157,16 @@ class SecretProxyServer:
         writer: asyncio.StreamWriter,
     ) -> None:
         try:
-            vm = await self._read_tunnel_identity(reader)
-            authority = await self._accept_tunnel(vm, reader, writer)
-            hostname, _ = self.rules.split_host(authority)
-            await writer.start_tls(self.certificates.server_context(hostname))
-            await self._serve_tunnel(vm, authority, reader, writer)
+            vm, first_line = await self._read_tunnel_identity(reader)
+            authority, inspect = await self._accept_tunnel(vm, first_line, reader)
+            if inspect:
+                await self._send_tunnel_established(writer)
+                hostname, _ = self.rules.split_host(authority)
+                await writer.start_tls(self.certificates.server_context(hostname))
+                assert vm is not None
+                await self._serve_tunnel(vm, authority, reader, writer)
+            else:
+                await self._blind_tunnel(authority, reader, writer)
         except (SecretProxyRejectedError, h11.ProtocolError, UnicodeError, ValueError):
             if not writer.is_closing():
                 await self._send_plain_error(writer, 403, b"Forbidden")
@@ -174,39 +183,115 @@ class SecretProxyServer:
 
     async def _accept_tunnel(
         self,
-        vm: str,
+        vm: str | None,
+        first_line: bytes,
         reader: asyncio.StreamReader,
-        writer: asyncio.StreamWriter,
-    ) -> str:
+    ) -> tuple[str, bool]:
         connection = h11.Connection(h11.SERVER)
+        if first_line:
+            connection.receive_data(first_line)
         event = await self._next_event(connection, reader)
         if not isinstance(event, h11.Request) or event.method != b"CONNECT":
             raise SecretProxyRejectedError("secret proxy accepts CONNECT requests only")
         authority = event.target.decode("ascii")
-        if not self.rules.for_host(vm=vm, host=authority):
-            raise SecretProxyRejectedError("secret proxy route is not registered")
+        inspect = bool(vm and self.rules.for_host(vm=vm, host=authority))
 
         event = await self._next_event(connection, reader)
         if not isinstance(event, h11.EndOfMessage):
             raise SecretProxyRejectedError("CONNECT request body is not permitted")
-        writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-        await writer.drain()
-        return authority
+        trailing_data, _ = connection.trailing_data
+        if trailing_data:
+            raise SecretProxyRejectedError("CONNECT request contains trailing data")
+        return authority, inspect
 
     @staticmethod
-    async def _read_tunnel_identity(reader: asyncio.StreamReader) -> str:
-        identity = await reader.readline()
+    async def _read_tunnel_identity(
+        reader: asyncio.StreamReader,
+    ) -> tuple[str | None, bytes]:
+        first_line = await reader.readline()
         # docker-sbx uses one daemon-wide proxy route, so it has no box identity.
-        # That shared path may serve refresh sentinels only, never stored values.
-        if not identity.startswith(TUNNEL_IDENTITY_PREFIX) or not identity.endswith(b"\r\n"):
-            raise SecretProxyRejectedError("a dedicated host tunnel is required")
-        encoded_vm = identity[len(TUNNEL_IDENTITY_PREFIX) : -2]
+        # A standard CONNECT line is therefore accepted as blind traffic. It
+        # never selects a VM rule and cannot retrieve a stored value.
+        if not first_line.startswith(TUNNEL_IDENTITY_PREFIX):
+            return None, first_line
+        if not first_line.endswith(b"\r\n"):
+            raise SecretProxyRejectedError("tunnel identity is invalid")
+        encoded_vm = first_line[len(TUNNEL_IDENTITY_PREFIX) : -2]
         if not encoded_vm or len(encoded_vm) > 253:
             raise SecretProxyRejectedError("tunnel identity is invalid")
         try:
-            return encoded_vm.decode("ascii")
+            return encoded_vm.decode("ascii"), b""
         except UnicodeDecodeError as error:
             raise SecretProxyRejectedError("tunnel identity is invalid") from error
+
+    async def _blind_tunnel(
+        self,
+        authority: str,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        hostname, port = self.rules.split_host(authority)
+        addresses = await self.rules.resolve(hostname, port)
+        upstream_reader, upstream_writer = await self._open_pinned_connection(addresses, port)
+        try:
+            await self._send_tunnel_established(writer)
+            await self._relay_streams(reader, writer, upstream_reader, upstream_writer)
+        finally:
+            upstream_writer.close()
+            with suppress(OSError, ssl.SSLError):
+                await upstream_writer.wait_closed()
+
+    async def _open_pinned_connection(
+        self,
+        addresses: list[str],
+        port: int,
+    ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        last_error: OSError | TimeoutError | None = None
+        for address in addresses:
+            family = (
+                socket.AF_INET6 if ipaddress.ip_address(address).version == 6 else socket.AF_INET
+            )
+            try:
+                async with asyncio.timeout(self.settings.upstream_timeout_seconds):
+                    return await asyncio.open_connection(address, port, family=family)
+            except (OSError, TimeoutError) as error:
+                last_error = error
+        if last_error:
+            raise last_error
+        raise OSError("upstream has no dialable address")
+
+    @staticmethod
+    async def _relay_streams(
+        client_reader: asyncio.StreamReader,
+        client_writer: asyncio.StreamWriter,
+        upstream_reader: asyncio.StreamReader,
+        upstream_writer: asyncio.StreamWriter,
+    ) -> None:
+        tasks = {
+            asyncio.create_task(SecretProxyServer._copy_stream(client_reader, upstream_writer)),
+            asyncio.create_task(SecretProxyServer._copy_stream(upstream_reader, client_writer)),
+        }
+        _, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    @staticmethod
+    async def _copy_stream(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        while data := await reader.read(64 * 1024):
+            writer.write(data)
+            await writer.drain()
+        if writer.can_write_eof():
+            writer.write_eof()
+            await writer.drain()
+
+    @staticmethod
+    async def _send_tunnel_established(writer: asyncio.StreamWriter) -> None:
+        writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        await writer.drain()
 
     async def _serve_tunnel(
         self,

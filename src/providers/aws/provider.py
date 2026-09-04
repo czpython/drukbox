@@ -6,7 +6,7 @@ import httpx
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import ReverseTunnelCapability
+from providers.capabilities import ReverseTunnelCapability, SecretProxyRoutingCapability
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
 from providers.secret_proxy import ProxySecretInjectionCapability
 from providers.setup_script import inject_authorized_keys, inject_env_exports
@@ -23,7 +23,12 @@ _MANAGED_SG_NAME = "drukbox-managed"
 _MANAGED_SG_DESCRIPTION = "SSH ingress for drukbox-managed sandbox VMs."
 
 
-class AWSProvider(ProxySecretInjectionCapability, VMProvider, ReverseTunnelCapability):
+class AWSProvider(
+    ProxySecretInjectionCapability,
+    VMProvider,
+    ReverseTunnelCapability,
+    SecretProxyRoutingCapability,
+):
     name: ClassVar[str] = "aws"
     diagnose_hint: ClassVar[str] = "check_aws_credentials_and_region"
     supports_instance_type = True

@@ -3,7 +3,11 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import ReverseTunnelCapability, TemplateCapability
+from providers.capabilities import (
+    ReverseTunnelCapability,
+    SecretProxyRoutingCapability,
+    TemplateCapability,
+)
 from providers.exceptions import (
     ProviderCommandError,
     ProviderNotFoundError,
@@ -20,7 +24,8 @@ from .settings import DockerSettings
 
 _AUTHORIZED_KEY_ENV = "DRUKBOX_AUTHORIZED_KEY"
 _ENV_KEYS_ENV = "DRUKBOX_ENV_KEYS"
-_RESERVED_ENV_KEYS = frozenset({_AUTHORIZED_KEY_ENV, _ENV_KEYS_ENV})
+_SETUP_SCRIPT_ENV = "DRUKBOX_SETUP_SCRIPT"
+_RESERVED_ENV_KEYS = frozenset({_AUTHORIZED_KEY_ENV, _ENV_KEYS_ENV, _SETUP_SCRIPT_ENV})
 
 
 class DockerProvider(
@@ -28,6 +33,7 @@ class DockerProvider(
     VMProvider,
     TemplateCapability,
     ReverseTunnelCapability,
+    SecretProxyRoutingCapability,
 ):
     name: ClassVar[str] = "docker"
     diagnose_hint: ClassVar[str] = "check_docker_daemon_is_running"
@@ -76,20 +82,10 @@ class DockerProvider(
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
-        # A setup script only ever arrives when Tailscale is enabled, and a
-        # local container has no path onto the tailnet. Fail loud rather than
-        # silently start a box that never joins.
-        if setup_script:
-            raise ProviderCommandError(
-                "docker provider runs sandboxes locally and does not support "
-                "Tailscale networking; set TAILSCALE_ENABLED=false"
-            )
-
         caller_env = env or {}
-        # These names carry the per-VM public key and the env-key manifest the
-        # entrypoint reads; a caller-supplied value would clobber the generated
-        # key (locking the caller out) or rewrite the manifest. Reject rather
-        # than let `**caller_env` silently win.
+        # These names carry the key, env manifest, and trusted setup script the
+        # entrypoint reads. A caller value could lock out the service or run as
+        # root. Reject it before `**caller_env` can win.
         if reserved := _RESERVED_ENV_KEYS.intersection(caller_env):
             raise ProviderCommandError(
                 f"env keys reserved by the docker provider are not allowed: "
@@ -102,6 +98,7 @@ class DockerProvider(
         container_env = {
             _AUTHORIZED_KEY_ENV: "\n".join((public_key, *authorized_keys)),
             _ENV_KEYS_ENV: " ".join(caller_env),
+            _SETUP_SCRIPT_ENV: setup_script or "",
             **caller_env,
         }
         labels = {"managed-by": self._service_label, "drukbox-host-name": name}

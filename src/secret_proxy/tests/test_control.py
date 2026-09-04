@@ -10,6 +10,11 @@ from secret_proxy.control import SecretProxyControlServer
 from secret_proxy.exceptions import SecretProxyRejectedError, SecretProxyUnavailableError
 from secret_proxy.rules import SecretRules
 
+_TEST_CA = """-----BEGIN CERTIFICATE-----
+dGVzdA==
+-----END CERTIFICATE-----
+"""
+
 
 def _socket_path() -> Path:
     return Path("/tmp") / f"drukbox-test-{uuid4().hex}.sock"
@@ -19,7 +24,7 @@ def _socket_path() -> Path:
 async def test_client_controls_rules_through_the_private_socket(tmp_path) -> None:
     socket_path = _socket_path()
     rules = SecretRules(allow_private_upstreams=True)
-    server = SecretProxyControlServer(socket_path, rules)
+    server = SecretProxyControlServer(socket_path, rules, ca_certificate=_TEST_CA)
     await server.start()
     client = SecretProxyClient(socket_path)
     try:
@@ -32,6 +37,7 @@ async def test_client_controls_rules_through_the_private_socket(tmp_path) -> Non
         )
 
         assert await client.list_secrets(vm="box-one") == ["openai"]
+        assert await client.certificate_authority() == _TEST_CA
 
         await client.delete_secret(vm="box-one", name="openai")
         assert await client.list_secrets(vm="box-one") == []
@@ -47,6 +53,7 @@ async def test_control_errors_do_not_return_request_values(tmp_path) -> None:
     server = SecretProxyControlServer(
         socket_path,
         SecretRules(allow_private_upstreams=True),
+        ca_certificate=_TEST_CA,
     )
     await server.start()
     try:
@@ -78,6 +85,7 @@ async def test_client_raises_a_typed_error_for_a_rejected_request(tmp_path) -> N
     server = SecretProxyControlServer(
         socket_path,
         SecretRules(allow_private_upstreams=True),
+        ca_certificate=_TEST_CA,
     )
     await server.start()
     client = SecretProxyClient(socket_path)

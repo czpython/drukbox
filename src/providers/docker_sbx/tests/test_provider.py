@@ -24,6 +24,7 @@ def _settings(workspace_root: Path, **overrides: Any) -> DockerSbxSettings:
 
 def _api_mock() -> MagicMock:
     api = MagicMock()
+    api.set_sandbox_proxy = AsyncMock()
     api.create_sandbox = AsyncMock()
     api.run_bootstrap = AsyncMock()
     api.remove_sandbox = AsyncMock()
@@ -63,6 +64,7 @@ async def test_create_vm_creates_a_sized_sandbox_and_returns_key_material(tmp_pa
     # directory must exist before the sandbox creation.
     assert create_kwargs["workspace"] == str(tmp_path / "sb-test")
     assert (tmp_path / "sb-test").is_dir()
+    api.set_sandbox_proxy.assert_awaited_once_with("http://127.0.0.1:8781")
 
     # The sandbox has no reachable address of its own; the service fills
     # the gateway coordinates in.
@@ -106,15 +108,19 @@ async def test_create_vm_installs_the_key_for_the_configured_ssh_user(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_create_vm_rejects_setup_script_because_tailscale_is_unsupported(tmp_path):
+async def test_create_vm_runs_service_setup_script_during_bootstrap(tmp_path):
     api = _api_mock()
     provider = _provider(api, _settings(tmp_path))
 
-    # The service does not send a script, because supports_tailnet is
-    # False. This guard finds a defect in the caller.
-    with pytest.raises(ProviderCommandError, match="Tailscale"):
-        await provider.create_vm(name="sb-test", image="img", env={}, setup_script="#!/bin/sh\n")
-    api.create_sandbox.assert_not_called()
+    await provider.create_vm(
+        name="sb-test",
+        image="img",
+        env={},
+        setup_script="printf service-setup\n",
+    )
+
+    _, script = api.run_bootstrap.await_args.args
+    assert script.endswith("printf service-setup\n")
 
 
 @pytest.mark.asyncio
@@ -139,6 +145,20 @@ async def test_create_vm_cleans_up_when_the_sandbox_cannot_be_created(tmp_path):
     # The CLI can stop after the daemon makes the sandbox. A failed create
     # also tries the removal.
     api.remove_sandbox.assert_awaited_once_with("sb-test")
+    assert not (tmp_path / "sb-test").exists()
+
+
+@pytest.mark.asyncio
+async def test_create_vm_does_not_remove_a_sandbox_when_proxy_configuration_fails(tmp_path):
+    api = _api_mock()
+    api.set_sandbox_proxy.side_effect = DockerSbxTransportError("settings failed")
+    provider = _provider(api, _settings(tmp_path))
+
+    with pytest.raises(ProviderTransportError, match="settings failed"):
+        await provider.create_vm(name="sb-test", image="img", env={})
+
+    api.create_sandbox.assert_not_awaited()
+    api.remove_sandbox.assert_not_awaited()
     assert not (tmp_path / "sb-test").exists()
 
 
