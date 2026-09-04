@@ -22,9 +22,8 @@ class SecretProxyClient:
         self,
         *,
         vm: str,
+        name: str,
         host: str,
-        env_var: str,
-        headers: dict[str, str],
         placeholder: str,
         value: str,
     ) -> None:
@@ -32,32 +31,21 @@ class SecretProxyClient:
             {
                 "operation": "put",
                 "vm": vm,
+                "name": name,
                 "host": host,
-                "env_var": env_var,
-                "headers": headers,
                 "placeholder": placeholder,
                 "value": value,
             }
         )
 
-    async def delete_secret(self, *, vm: str, env_var: str) -> None:
-        await self._request({"operation": "delete", "vm": vm, "env_var": env_var})
+    async def delete_secret(self, *, vm: str, name: str) -> None:
+        await self._request({"operation": "delete", "vm": vm, "name": name})
 
     async def list_secrets(self, *, vm: str) -> list[str]:
         result = await self._request({"operation": "list", "vm": vm})
         if not isinstance(result, list) or not all(isinstance(item, str) for item in result):
             raise SecretProxyUnavailableError("secret proxy returned an invalid response")
         return result
-
-    async def route(self, *, vm: str) -> dict[str, str]:
-        result = await self._request({"operation": "route", "vm": vm})
-        if not isinstance(result, dict):
-            raise SecretProxyUnavailableError("secret proxy returned an invalid response")
-        username = result.get("username")
-        password = result.get("password")
-        if not isinstance(username, str) or not isinstance(password, str):
-            raise SecretProxyUnavailableError("secret proxy returned an invalid response")
-        return {"username": username, "password": password}
 
     async def _request(self, request: dict[str, object]) -> object:
         try:

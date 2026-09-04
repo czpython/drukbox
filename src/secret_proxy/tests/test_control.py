@@ -25,19 +25,15 @@ async def test_client_controls_rules_through_the_private_socket(tmp_path) -> Non
     try:
         await client.put_secret(
             vm="box-one",
+            name="openai",
             host="127.0.0.1:8443",
-            env_var="API_TOKEN",
-            headers={"Authorization": "Bearer placeholder"},
             placeholder="placeholder",
             value="secret-value",
         )
 
-        assert await client.list_secrets(vm="box-one") == ["API_TOKEN"]
-        route = await client.route(vm="box-one")
-        assert route["username"] == "box-one"
-        assert rules.authenticate(vm="box-one", token=route["password"])
+        assert await client.list_secrets(vm="box-one") == ["openai"]
 
-        await client.delete_secret(vm="box-one", env_var="API_TOKEN")
+        await client.delete_secret(vm="box-one", name="openai")
         assert await client.list_secrets(vm="box-one") == []
     finally:
         await server.close()
@@ -87,6 +83,6 @@ async def test_client_raises_a_typed_error_for_a_rejected_request(tmp_path) -> N
     client = SecretProxyClient(socket_path)
     try:
         with pytest.raises(SecretProxyRejectedError, match="rejected"):
-            await client.delete_secret(vm="box-one", env_var="missing")
+            await client.delete_secret(vm="box-one", name="missing")
     finally:
         await server.close()

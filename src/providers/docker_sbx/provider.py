@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import ClassVar, Self
 
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import SecretInjectionCapability, TemplateCapability
+from providers.capabilities import TemplateCapability
 from providers.docker.api import DockerAPI
 from providers.docker.images import build_derived_image, remove_derived_image
 from providers.exceptions import (
@@ -45,7 +45,7 @@ def _bootstrap_script(*, public_key: str, env: dict[str, str], ssh_username: str
     return "\n".join(lines) + "\n"
 
 
-class DockerSbxProvider(VMProvider, TemplateCapability, SecretInjectionCapability):
+class DockerSbxProvider(VMProvider, TemplateCapability):
     name: ClassVar[str] = "docker-sbx"
     diagnose_hint: ClassVar[str] = "check_sandboxd_is_running_and_logged_in"
     # Sandboxes have no dialable sshd; the gateway serves them, and there is

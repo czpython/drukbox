@@ -1,8 +1,10 @@
 import datetime
+import fcntl
 import hashlib
 import ipaddress
 import os
 import ssl
+import stat
 from pathlib import Path
 
 from cryptography import x509
@@ -18,29 +20,39 @@ class CertificateAuthority:
         self.ca_key_path = directory / "ca.key"
         self.ca_certificate_path = directory / "ca.crt"
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if self.ca_key_path.exists() and self.ca_certificate_path.exists():
-            key = serialization.load_pem_private_key(
-                self.ca_key_path.read_bytes(),
-                password=None,
-            )
-            if not isinstance(key, ec.EllipticCurvePrivateKey):
-                raise ValueError("secret proxy CA key has an invalid type")
-            self._key = key
-            self._certificate = x509.load_pem_x509_certificate(
-                self.ca_certificate_path.read_bytes()
-            )
-            key_public = self._key.public_key().public_bytes(
-                serialization.Encoding.DER,
-                serialization.PublicFormat.SubjectPublicKeyInfo,
-            )
-            certificate_public = self._certificate.public_key().public_bytes(
-                serialization.Encoding.DER,
-                serialization.PublicFormat.SubjectPublicKeyInfo,
-            )
-            if key_public != certificate_public:
-                raise ValueError("secret proxy CA key does not match its certificate")
-        else:
-            self._key, self._certificate = self._create()
+        lock_descriptor = os.open(
+            directory / "ca.lock",
+            os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o600,
+        )
+        try:
+            fcntl.flock(lock_descriptor, fcntl.LOCK_EX)
+            if self.ca_key_path.exists() and self.ca_certificate_path.exists():
+                self._require_private_permissions(self.ca_key_path)
+                key = serialization.load_pem_private_key(
+                    self.ca_key_path.read_bytes(),
+                    password=None,
+                )
+                if not isinstance(key, ec.EllipticCurvePrivateKey):
+                    raise ValueError("secret proxy CA key has an invalid type")
+                self._key = key
+                self._certificate = x509.load_pem_x509_certificate(
+                    self.ca_certificate_path.read_bytes()
+                )
+                key_public = self._key.public_key().public_bytes(
+                    serialization.Encoding.DER,
+                    serialization.PublicFormat.SubjectPublicKeyInfo,
+                )
+                certificate_public = self._certificate.public_key().public_bytes(
+                    serialization.Encoding.DER,
+                    serialization.PublicFormat.SubjectPublicKeyInfo,
+                )
+                if key_public != certificate_public:
+                    raise ValueError("secret proxy CA key does not match its certificate")
+            else:
+                self._key, self._certificate = self._create()
+        finally:
+            os.close(lock_descriptor)
 
     def server_context(self, hostname: str) -> ssl.SSLContext:
         certificate_path, key_path = self._certificate_for(hostname)
@@ -98,6 +110,7 @@ class CertificateAuthority:
         key_path = self.directory / f"{stem}.key"
         if certificate_path.exists() and key_path.exists():
             try:
+                self._require_private_permissions(key_path)
                 certificate = x509.load_pem_x509_certificate(certificate_path.read_bytes())
                 key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
                 certificate_public = certificate.public_key().public_bytes(
@@ -167,7 +180,17 @@ class CertificateAuthority:
             format=serialization.PrivateFormat.PKCS8,
             encryption_algorithm=serialization.NoEncryption(),
         )
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        descriptor = os.open(
+            path,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o600,
+        )
         os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(encoded)
+
+    @staticmethod
+    def _require_private_permissions(path: Path) -> None:
+        mode = path.lstat().st_mode
+        if not stat.S_ISREG(mode) or stat.S_IMODE(mode) & 0o077:
+            raise ValueError("secret proxy private key must not be group or world accessible")

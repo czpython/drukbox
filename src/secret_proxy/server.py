@@ -1,6 +1,4 @@
 import asyncio
-import base64
-import binascii
 import ipaddress
 import re
 import socket
@@ -14,16 +12,14 @@ import aiohttp
 import h11
 from aiohttp.abc import AbstractResolver, ResolveResult
 
+from secret_proxy import TUNNEL_IDENTITY_PREFIX
 from secret_proxy.certificates import CertificateAuthority
 from secret_proxy.control import SecretProxyControlServer
 from secret_proxy.exceptions import SecretProxyRejectedError
 from secret_proxy.rules import ROUTING_HEADERS, SecretRules
 from secret_proxy.settings import SecretProxySettings
 
-_REQUEST_HEADERS_TO_REMOVE = frozenset(name.encode() for name in ROUTING_HEADERS) | {
-    b"authorization",
-    b"cookie",
-}
+_REQUEST_HEADERS_TO_REMOVE = frozenset(name.encode() for name in ROUTING_HEADERS) | {b"cookie"}
 _RESPONSE_HEADERS_TO_REMOVE = frozenset(
     {
         b"connection",
@@ -157,7 +153,8 @@ class SecretProxyServer:
         writer: asyncio.StreamWriter,
     ) -> None:
         try:
-            vm, authority = await self._accept_tunnel(reader, writer)
+            vm = await self._read_tunnel_identity(reader)
+            authority = await self._accept_tunnel(vm, reader, writer)
             hostname, _ = self.rules.split_host(authority)
             await writer.start_tls(self.certificates.server_context(hostname))
             await self._serve_tunnel(vm, authority, reader, writer)
@@ -177,17 +174,15 @@ class SecretProxyServer:
 
     async def _accept_tunnel(
         self,
+        vm: str,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
-    ) -> tuple[str, str]:
+    ) -> str:
         connection = h11.Connection(h11.SERVER)
         event = await self._next_event(connection, reader)
         if not isinstance(event, h11.Request) or event.method != b"CONNECT":
             raise SecretProxyRejectedError("secret proxy accepts CONNECT requests only")
         authority = event.target.decode("ascii")
-        vm, token = self._proxy_credentials(event.headers)
-        if not self.rules.authenticate(vm=vm, token=token):
-            raise SecretProxyRejectedError("secret proxy authentication failed")
         if not self.rules.for_host(vm=vm, host=authority):
             raise SecretProxyRejectedError("secret proxy route is not registered")
 
@@ -196,7 +191,22 @@ class SecretProxyServer:
             raise SecretProxyRejectedError("CONNECT request body is not permitted")
         writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
         await writer.drain()
-        return vm, authority
+        return authority
+
+    @staticmethod
+    async def _read_tunnel_identity(reader: asyncio.StreamReader) -> str:
+        identity = await reader.readline()
+        # docker-sbx uses one daemon-wide proxy route, so it has no box identity.
+        # That shared path may serve refresh sentinels only, never stored values.
+        if not identity.startswith(TUNNEL_IDENTITY_PREFIX) or not identity.endswith(b"\r\n"):
+            raise SecretProxyRejectedError("a dedicated host tunnel is required")
+        encoded_vm = identity[len(TUNNEL_IDENTITY_PREFIX) : -2]
+        if not encoded_vm or len(encoded_vm) > 253:
+            raise SecretProxyRejectedError("tunnel identity is invalid")
+        try:
+            return encoded_vm.decode("ascii")
+        except UnicodeDecodeError as error:
+            raise SecretProxyRejectedError("tunnel identity is invalid") from error
 
     async def _serve_tunnel(
         self,
@@ -310,37 +320,19 @@ class SecretProxyServer:
                 connection_headers.update(item.strip().lower() for item in value.split(b","))
         removed = _REQUEST_HEADERS_TO_REMOVE | connection_headers
         replacements = {str(rule["placeholder"]): str(rule["value"]) for rule in rules}
+        pattern = re.compile(
+            "|".join(re.escape(value) for value in sorted(replacements, key=len, reverse=True))
+        )
         headers: list[tuple[str, str]] = []
         for name, value in incoming:
             if name.lower() not in removed:
                 rendered = value.decode("latin-1")
-                for placeholder, secret in replacements.items():
-                    rendered = rendered.replace(placeholder, secret)
+                substituted = bool(pattern.search(rendered))
+                rendered = pattern.sub(lambda match: replacements[match.group()], rendered)
+                if name.lower() == b"authorization" and not substituted:
+                    continue
                 headers.append((name.decode("ascii"), rendered))
-        configured: dict[str, str] = {}
-        for rule in rules:
-            rule_headers = cast(dict[str, str], rule["headers"])
-            for name, value in rule_headers.items():
-                rendered = str(value)
-                for placeholder, secret in replacements.items():
-                    rendered = rendered.replace(placeholder, secret)
-                configured[str(name)] = rendered
-        configured_names = {name.lower() for name in configured}
-        headers = [(name, value) for name, value in headers if name.lower() not in configured_names]
-        headers.extend(configured.items())
         return headers
-
-    @staticmethod
-    def _proxy_credentials(headers: Sequence[tuple[bytes, bytes]]) -> tuple[str, str]:
-        values = [value for name, value in headers if name.lower() == b"proxy-authorization"]
-        if len(values) != 1 or values[0][:6].lower() != b"basic ":
-            raise SecretProxyRejectedError("proxy authorization is required")
-        try:
-            decoded = base64.b64decode(values[0][6:], validate=True).decode("utf-8")
-            vm, token = decoded.split(":", 1)
-        except (binascii.Error, UnicodeDecodeError, ValueError) as error:
-            raise SecretProxyRejectedError("proxy authorization is invalid") from error
-        return vm, token
 
     @staticmethod
     async def _next_event(

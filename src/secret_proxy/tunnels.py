@@ -16,13 +16,13 @@ from core.database import async_session_factory
 from hosts.models import Host, HostStatus
 from providers.capabilities import ReverseTunnelCapability
 from providers.registry import get_vm_provider
+from secret_proxy import TUNNEL_IDENTITY_PREFIX
 from secret_proxy.exceptions import ReverseTunnelError
 from secret_proxy.settings import SecretProxySettings
 
 logger = logging.getLogger(__name__)
 
 TunnelDropped = Callable[["ReverseTunnel"], Awaitable[None]]
-TUNNEL_IDENTITY_PREFIX = b"DRUKBOX-TUNNEL/1 "
 
 
 @lru_cache

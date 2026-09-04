@@ -1,14 +1,10 @@
 import asyncio
 import ipaddress
-import re
-import secrets
 import socket
-from typing import cast
 from urllib.parse import urlsplit
 
 from secret_proxy.exceptions import SecretProxyRejectedError
 
-_HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 ROUTING_HEADERS = frozenset(
     {
         "connection",
@@ -35,74 +31,44 @@ class SecretRules:
     def __init__(self, *, allow_private_upstreams: bool = False) -> None:
         self.allow_private_upstreams = allow_private_upstreams
         self._rules: dict[str, dict[str, dict[str, object]]] = {}
-        self._tokens: dict[str, str] = {}
 
     async def put(
         self,
         *,
         vm: str,
+        name: str,
         host: str,
-        env_var: str,
-        headers: dict[str, str],
         placeholder: str,
         value: str,
     ) -> None:
-        if not vm or ":" in vm or not env_var or not placeholder:
+        if not vm or "\r" in vm or "\n" in vm or not name or not placeholder:
             raise SecretProxyRejectedError("secret rule identifiers are invalid")
-        if any(
-            not _HEADER_NAME.fullmatch(name)
-            or name.lower() in ROUTING_HEADERS
-            or "\r" in value
-            or "\n" in value
-            for name, value in headers.items()
-        ):
-            raise SecretProxyRejectedError("secret rule headers are invalid")
         hostname, port = self.split_host(host)
         await self.resolve(hostname, port)
         normalized_host = self.normalize_host(hostname, port)
-        new_header_names = {name.lower() for name in headers}
-        for name, rule in self._rules.get(vm, {}).items():
-            existing_headers = cast(dict[str, str], rule["headers"])
+        for existing_name, rule in self._rules.get(vm, {}).items():
             if (
-                name != env_var
+                existing_name != name
                 and rule["host"] == normalized_host
-                and (
-                    rule["placeholder"] == placeholder
-                    or new_header_names.intersection(
-                        existing_name.lower() for existing_name in existing_headers
-                    )
-                )
+                and rule["placeholder"] == placeholder
             ):
                 raise SecretProxyRejectedError("secret rules for one host conflict")
-        self._rules.setdefault(vm, {})[env_var] = {
+        self._rules.setdefault(vm, {})[name] = {
             "host": normalized_host,
-            "headers": dict(headers),
             "placeholder": placeholder,
             "value": value,
         }
-        self._tokens.setdefault(vm, secrets.token_urlsafe(32))
 
-    def delete(self, *, vm: str, env_var: str) -> None:
+    def delete(self, *, vm: str, name: str) -> None:
         vm_rules = self._rules.get(vm)
-        if not vm_rules or env_var not in vm_rules:
-            raise SecretProxyRejectedError(f"secret '{env_var}' is not registered for VM '{vm}'")
-        del vm_rules[env_var]
+        if not vm_rules or name not in vm_rules:
+            raise SecretProxyRejectedError(f"secret '{name}' is not registered for VM '{vm}'")
+        del vm_rules[name]
         if not vm_rules:
             del self._rules[vm]
-            del self._tokens[vm]
 
     def names(self, *, vm: str) -> list[str]:
         return sorted(self._rules.get(vm, {}))
-
-    def route(self, *, vm: str) -> dict[str, str]:
-        token = self._tokens.get(vm)
-        if not token:
-            raise SecretProxyRejectedError(f"VM '{vm}' has no registered secret route")
-        return {"username": vm, "password": token}
-
-    def authenticate(self, *, vm: str, token: str) -> bool:
-        expected = self._tokens.get(vm, "")
-        return bool(expected) and secrets.compare_digest(expected, token)
 
     def for_host(self, *, vm: str, host: str) -> list[dict[str, object]]:
         hostname, port = self.split_host(host)

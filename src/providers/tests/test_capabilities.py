@@ -6,7 +6,6 @@ import pytest
 from providers.aws.provider import AWSProvider
 from providers.capabilities import SecretInjectionCapability, resolve_capability
 from providers.docker.provider import DockerProvider
-from providers.docker_sbx.provider import DockerSbxProvider
 from providers.exceptions import CapabilityUnsupportedError
 from providers.exe.provider import ExeProvider
 from providers.exoscale.provider import ExoscaleProvider
@@ -56,13 +55,12 @@ def test_resolve_capability_returns_implementing_provider() -> None:
     [
         AWSProvider,
         DockerProvider,
-        DockerSbxProvider,
         ExeProvider,
         ExoscaleProvider,
         HetznerProvider,
     ],
 )
-def test_all_vm_providers_implement_secret_injection(
+def test_providers_with_a_secret_edge_implement_secret_injection(
     provider_class: type[SecretInjectionCapability],
 ) -> None:
     assert issubclass(provider_class, SecretInjectionCapability)

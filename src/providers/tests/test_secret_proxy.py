@@ -13,7 +13,7 @@ def _provider() -> tuple[DockerProvider, MagicMock]:
     secret_proxy = MagicMock(spec=SecretProxyClient)
     secret_proxy.put_secret = AsyncMock()
     secret_proxy.delete_secret = AsyncMock()
-    secret_proxy.list_secrets = AsyncMock(return_value=["API_TOKEN"])
+    secret_proxy.list_secrets = AsyncMock(return_value=["openai"])
     provider = DockerProvider(
         MagicMock(),
         DockerSettings(),
@@ -28,23 +28,19 @@ async def test_proxy_capability_registers_the_value_and_returns_box_environment(
 
     environment = await provider.put_secret(
         vm="box-one",
+        name="openai",
         host="api.example.com",
-        env_var="API_TOKEN",
-        base_url_env={"API_BASE_URL": "https://api.example.com/v1"},
-        headers={"Authorization": "Bearer placeholder"},
+        auth_var="API_TOKEN",
+        base_url_var="API_BASE_URL",
         placeholder="placeholder",
         value="real-secret",
     )
 
-    assert environment == {
-        "API_TOKEN": "placeholder",
-        "API_BASE_URL": "https://api.example.com/v1",
-    }
+    assert environment == {"API_TOKEN": "placeholder"}
     proxy.put_secret.assert_awaited_once_with(
         vm="box-one",
+        name="openai",
         host="api.example.com",
-        env_var="API_TOKEN",
-        headers={"Authorization": "Bearer placeholder"},
         placeholder="placeholder",
         value="real-secret",
     )
@@ -54,11 +50,11 @@ async def test_proxy_capability_registers_the_value_and_returns_box_environment(
 async def test_proxy_capability_deletes_and_lists_box_secrets() -> None:
     provider, proxy = _provider()
 
-    assert await provider.list_secrets(vm="box-one") == ["API_TOKEN"]
-    await provider.delete_secret(vm="box-one", env_var="API_TOKEN")
+    assert await provider.list_secrets(vm="box-one") == ["openai"]
+    await provider.delete_secret(vm="box-one", name="openai")
 
     proxy.list_secrets.assert_awaited_once_with(vm="box-one")
-    proxy.delete_secret.assert_awaited_once_with(vm="box-one", env_var="API_TOKEN")
+    proxy.delete_secret.assert_awaited_once_with(vm="box-one", name="openai")
 
 
 @pytest.mark.asyncio
@@ -69,10 +65,10 @@ async def test_proxy_capability_translates_control_errors_without_secret_values(
     with pytest.raises(ProviderTransportError, match="secret proxy request failed") as caught:
         await provider.put_secret(
             vm="box-one",
+            name="openai",
             host="api.example.com",
-            env_var="API_TOKEN",
-            base_url_env={},
-            headers={},
+            auth_var="API_TOKEN",
+            base_url_var="API_BASE_URL",
             placeholder="placeholder",
             value="must-not-appear",
         )

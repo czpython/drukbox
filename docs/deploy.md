@@ -20,6 +20,7 @@ docker run --rm -p 8780:8780 --env-file drukbox.env \
   --mount type=bind,src="$PROXY_STATE",dst=/var/lib/drukbox/secret-proxy \
   --env SECRET_PROXY_CONTROL_SOCKET=/var/lib/drukbox/secret-proxy/control.sock \
   --env SECRET_PROXY_CERTIFICATE_DIRECTORY=/var/lib/drukbox/secret-proxy/certificates \
+  --env SECRET_PROXY_TUNNEL_KEY_PATH=/var/lib/drukbox/secret-proxy/tunnel_key \
   "$IMAGE"
 
 # Injecting proxy (port 8781; long-lived)
@@ -35,7 +36,10 @@ docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/alembic upgrade head
 
 # Maintenance (cron, e.g. every 10-15 min)
 docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/python -m janitor
-docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/python -m hosts.pool
+docker run --rm --env-file drukbox.env \
+  --mount type=bind,src="$PROXY_STATE",dst=/var/lib/drukbox/secret-proxy \
+  --env SECRET_PROXY_TUNNEL_KEY_PATH=/var/lib/drukbox/secret-proxy/tunnel_key \
+  "$IMAGE" .venv/bin/python -m hosts.pool
 ```
 
 The janitor reaps expired and orphaned hosts, marks abandoned template
@@ -53,8 +57,8 @@ directories into both containers at the same paths.
 
 The proxy listens on loopback by default. A reverse tunnel or local container
 network must carry box traffic to it. Do not expose port 8781 to the public
-internet. The proxy requires a box-specific route token for each CONNECT
-request.
+internet. Bare-host CONNECT requests must arrive through a dedicated reverse
+tunnel, which supplies the trusted host identity.
 
 Use Postgres in production (`postgresql+psycopg://...`). SQLite
 (`sqlite+aiosqlite:///./drukbox.db`) is for single-process demos and

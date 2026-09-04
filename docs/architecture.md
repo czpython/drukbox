@@ -94,16 +94,19 @@ that the box needs. The service name is the provider resource identity. A
 provider can give the box a placeholder, an alternate endpoint, or both without
 exposing its mechanism to the caller. Secret listings contain service names only.
 
-All VM providers use the shared injecting proxy. The API process registers a
-box, a fixed upstream host, and placeholder rules through a private UNIX socket.
-The proxy gives each box a separate route token. It accepts only registered
-upstream hosts for that box.
+Bare providers use the injecting proxy as their secret edge. The API process
+registers a box, service name, fixed upstream host, and placeholder through a
+private UNIX socket. Each bare box has a dedicated reverse tunnel. The trusted
+tunnel preamble selects that box's rules; request headers cannot select another
+box.
 
 The proxy terminates each HTTPS tunnel with its own CA. It replaces registered
 placeholders in request headers and bodies. Then it sends the request to a
 freshly resolved and pinned upstream address. It does not follow redirects.
-It removes client authorization, cookies, and routing headers first. Then it
-adds the registered headers. Responses stream to the box without buffering.
+It removes cookies and routing headers. It also removes authorization unless it
+contains a registered placeholder. Registered placeholders are replaced in
+the remaining headers and the request body. Responses stream to the box without
+buffering.
 
 Proxy rules stay in memory. The durable source is the encrypted secret recipe
 on the host record. The host integration must register those recipes again

@@ -13,14 +13,10 @@ from sqlalchemy import select
 
 from core.database import async_session_factory
 from hosts.models import Host, HostStatus
+from secret_proxy import TUNNEL_IDENTITY_PREFIX
 from secret_proxy.exceptions import ReverseTunnelError
 from secret_proxy.settings import SecretProxySettings
-from secret_proxy.tunnels import (
-    TUNNEL_IDENTITY_PREFIX,
-    ReverseTunnel,
-    ReverseTunnelManager,
-    load_reverse_tunnel_key,
-)
+from secret_proxy.tunnels import ReverseTunnel, ReverseTunnelManager, load_reverse_tunnel_key
 
 
 class ForwardingSSHServer(asyncssh.SSHServer):
@@ -102,7 +98,9 @@ async def test_tunnel_survives_an_unrelated_connection_and_reports_its_own_drop(
         server_host_keys=[host_key],
     )
     ssh_port = ssh_server.get_port()
-    known_hosts = f"[127.0.0.1]:{ssh_port} {_public_key(host_key)}\n"
+    known_hosts = (
+        f"[127.0.0.1]:{ssh_port} {host_key.export_public_key('openssh').decode().strip()}\n"
+    )
     now = datetime.now(UTC)
     host = Host(
         name="sb-tunnel-test",
@@ -195,7 +193,9 @@ async def test_tailnet_tunnel_uses_ssh_without_a_client_key() -> None:
         ssh_host="127.0.0.1",
         ssh_port=ssh_port,
         ssh_username="ubuntu",
-        known_hosts=f"[127.0.0.1]:{ssh_port} {_public_key(host_key)}\n",
+        known_hosts=(
+            f"[127.0.0.1]:{ssh_port} {host_key.export_public_key('openssh').decode().strip()}\n"
+        ),
         client_key=None,
         settings=settings,
         dropped=AsyncMock(),
@@ -285,10 +285,6 @@ def _unused_port() -> int:
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
         return int(reservation.getsockname()[1])
-
-
-def _public_key(key: asyncssh.SSHKey) -> str:
-    return key.export_public_key("openssh").decode().strip()
 
 
 async def _round_trip(port: int, value: bytes) -> bytes:

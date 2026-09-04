@@ -101,33 +101,25 @@ class SecretProxyControlServer:
 
         if operation == "put":
             host = request["host"]
-            env_var = request["env_var"]
-            headers = request["headers"]
+            name = request["name"]
             placeholder = request["placeholder"]
             value = request["value"]
-            if not all(isinstance(item, str) for item in (host, env_var, placeholder, value)):
-                raise TypeError
-            if not isinstance(headers, dict) or not all(
-                isinstance(key, str) and isinstance(item, str) for key, item in headers.items()
-            ):
+            if not all(isinstance(item, str) for item in (host, name, placeholder, value)):
                 raise TypeError
             await self.rules.put(
                 vm=vm,
+                name=name,
                 host=host,
-                env_var=env_var,
-                headers=headers,
                 placeholder=placeholder,
                 value=value,
             )
             return
         if operation == "delete":
-            env_var = request["env_var"]
-            if not isinstance(env_var, str):
+            name = request["name"]
+            if not isinstance(name, str):
                 raise TypeError
-            self.rules.delete(vm=vm, env_var=env_var)
+            self.rules.delete(vm=vm, name=name)
             return
         if operation == "list":
             return self.rules.names(vm=vm)
-        if operation == "route":
-            return self.rules.route(vm=vm)
         raise SecretProxyRejectedError("unknown secret proxy operation")

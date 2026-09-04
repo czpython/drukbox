@@ -3,20 +3,35 @@ import hashlib
 import socket
 import ssl
 import stat
+import uuid
 from collections.abc import AsyncIterator
+from functools import partial
 from pathlib import Path
+from typing import cast
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import asyncssh
 import httpx
 import pytest
 from aiohttp import web
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from secret_proxy import TUNNEL_IDENTITY_PREFIX
 from secret_proxy.certificates import CertificateAuthority
 from secret_proxy.client import SecretProxyClient
 from secret_proxy.server import PlaceholderSubstitution, SecretProxyServer
 from secret_proxy.settings import SecretProxySettings
+from secret_proxy.tunnels import ReverseTunnel
+
+
+class NoneAuthForwardingSSHServer(asyncssh.SSHServer):
+    def begin_auth(self, username: str) -> bool:
+        return False
+
+    def server_requested(self, listen_host: str, listen_port: int) -> bool:
+        return listen_host == "127.0.0.1"
 
 
 def _socket_path() -> Path:
@@ -31,6 +46,21 @@ def test_placeholder_substitution_handles_chunk_boundaries() -> None:
     output += substitution.replace(b"", final=True)
 
     assert output == b"before-secret-after"
+
+
+def test_header_substitution_does_not_reprocess_injected_values() -> None:
+    headers = SecretProxyServer._upstream_headers(
+        [
+            (b"Authorization", b"Bearer client-secret"),
+            (b"Authorization", b"Bearer short-placeholder"),
+        ],
+        [
+            {"placeholder": "short-placeholder", "value": "long-placeholder"},
+            {"placeholder": "long-placeholder", "value": "wrong-secret"},
+        ],
+    )
+
+    assert headers == [("Authorization", "Bearer long-placeholder")]
 
 
 def test_certificate_authority_replaces_a_mismatched_cached_leaf(tmp_path) -> None:
@@ -50,8 +80,16 @@ def test_certificate_authority_replaces_a_mismatched_cached_leaf(tmp_path) -> No
     assert key_path.read_bytes() != wrong_key
 
 
+def test_certificate_authority_rejects_an_exposed_ca_key(tmp_path) -> None:
+    authority = CertificateAuthority(tmp_path)
+    authority.ca_key_path.chmod(0o644)
+
+    with pytest.raises(ValueError, match="group or world accessible"):
+        CertificateAuthority(tmp_path)
+
+
 @pytest.mark.asyncio
-async def test_proxy_injects_headers_and_bodies_without_forwarding_client_auth(tmp_path) -> None:
+async def test_bare_host_tunnel_injects_headers_and_bodies(tmp_path) -> None:
     received: dict[str, object] = {}
 
     async def upstream(request: web.Request) -> web.Response:
@@ -93,15 +131,37 @@ async def test_proxy_injects_headers_and_bodies_without_forwarding_client_auth(t
     host = f"127.0.0.1:{upstream_port}"
     await control.put_secret(
         vm="box-one",
+        name="openai",
         host=host,
-        env_var="API_TOKEN",
-        headers={"Authorization": "Bearer placeholder"},
         placeholder="placeholder",
         value="real-secret",
     )
-    route = await control.route(vm="box-one")
-    proxy_host, proxy_port = proxy.address
-    proxy_url = f"http://{route['username']}:{route['password']}@{proxy_host}:{proxy_port}"
+    _, proxy_port = proxy.address
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        box_port = int(reservation.getsockname()[1])
+    host_key = asyncssh.generate_private_key("ssh-ed25519")
+    ssh_server = await asyncssh.listen(
+        "127.0.0.1",
+        0,
+        server_factory=NoneAuthForwardingSSHServer,
+        server_host_keys=[host_key],
+    )
+    ssh_port = ssh_server.get_port()
+    tunnel = await ReverseTunnel.open(
+        host_id=uuid.uuid4(),
+        host_name="box-one",
+        ssh_host="127.0.0.1",
+        ssh_port=ssh_port,
+        ssh_username="root",
+        known_hosts=(
+            f"[127.0.0.1]:{ssh_port} {host_key.export_public_key('openssh').decode().strip()}\n"
+        ),
+        client_key=None,
+        settings=settings.model_copy(update={"bind_port": proxy_port, "tunnel_box_port": box_port}),
+        dropped=AsyncMock(),
+    )
+    proxy_url = f"http://127.0.0.1:{box_port}"
     trust = ssl.create_default_context(cafile=proxy.certificates.ca_certificate_path)
 
     async def body() -> AsyncIterator[bytes]:
@@ -114,13 +174,16 @@ async def test_proxy_injects_headers_and_bodies_without_forwarding_client_auth(t
                 f"https://{host}/request?mode=proxy",
                 content=body(),
                 headers={
-                    "Authorization": "Bearer client-value",
+                    "Authorization": "Bearer placeholder",
                     "Cookie": "session=client-value",
                     "Expect": "100-continue",
                     "X-Forwarded-For": "198.51.100.1",
                 },
             )
     finally:
+        await tunnel.aclose()
+        ssh_server.close()
+        await ssh_server.wait_closed()
         await proxy.close()
         await runner.cleanup()
 
@@ -129,13 +192,42 @@ async def test_proxy_injects_headers_and_bodies_without_forwarding_client_auth(t
     assert received["method"] == "POST"
     assert received["path"] == "/request?mode=proxy"
     assert received["body"] == b"token=real-secret"
-    received_headers = received["headers"]
-    assert isinstance(received_headers, dict)
+    received_headers = cast(dict[str, str], received["headers"])
     assert received_headers["Authorization"] == "Bearer real-secret"
     assert "Cookie" not in received_headers
     assert "Expect" not in received_headers
     assert "X-Forwarded-For" not in received_headers
     assert "Proxy-Authorization" not in received_headers
+
+
+@pytest.mark.asyncio
+async def test_shared_sbx_path_never_serves_a_registered_value(tmp_path) -> None:
+    settings = SecretProxySettings(
+        bind_port=0,
+        control_socket=_socket_path(),
+        certificate_directory=tmp_path / "certificates",
+        allow_private_upstreams=True,
+    )
+    proxy = SecretProxyServer(settings, upstream_ssl=False)
+    await proxy.start()
+    control = SecretProxyClient(settings.expanded_control_socket)
+    await control.put_secret(
+        vm="box-one",
+        name="openai",
+        host="127.0.0.1:443",
+        placeholder="placeholder",
+        value="real-secret",
+    )
+    proxy_host, proxy_port = proxy.address
+    try:
+        async with httpx.AsyncClient(
+            proxy=f"http://box-one:spoofed@{proxy_host}:{proxy_port}",
+            trust_env=False,
+        ) as client:
+            with pytest.raises(httpx.ProxyError):
+                await client.get("https://127.0.0.1/")
+    finally:
+        await proxy.close()
 
 
 @pytest.mark.asyncio
@@ -153,7 +245,7 @@ async def test_proxy_returns_redirects_without_following_them(tmp_path) -> None:
     application = web.Application()
     application.router.add_get("/redirect", redirect)
     application.router.add_get("/destination", destination)
-    runner, proxy, client, host = await _start_proxy_fixture(
+    runner, proxy, forwarder, client, host = await _start_proxy_fixture(
         tmp_path,
         application,
     )
@@ -161,6 +253,8 @@ async def test_proxy_returns_redirects_without_following_them(tmp_path) -> None:
         response = await client.get(f"https://{host}/redirect")
     finally:
         await client.aclose()
+        forwarder.close()
+        await forwarder.wait_closed()
         await proxy.close()
         await runner.cleanup()
 
@@ -182,7 +276,7 @@ async def test_proxy_streams_the_upstream_response(tmp_path) -> None:
 
     application = web.Application()
     application.router.add_get("/stream", stream)
-    runner, proxy, client, host = await _start_proxy_fixture(
+    runner, proxy, forwarder, client, host = await _start_proxy_fixture(
         tmp_path,
         application,
     )
@@ -195,6 +289,8 @@ async def test_proxy_streams_the_upstream_response(tmp_path) -> None:
     finally:
         release.set()
         await client.aclose()
+        forwarder.close()
+        await forwarder.wait_closed()
         await proxy.close()
         await runner.cleanup()
 
@@ -209,7 +305,7 @@ async def test_proxy_rejects_an_unregistered_host_for_an_authorized_box(tmp_path
 
     application = web.Application()
     application.router.add_get("/", upstream)
-    runner, proxy, client, _ = await _start_proxy_fixture(
+    runner, proxy, forwarder, client, _ = await _start_proxy_fixture(
         tmp_path,
         application,
     )
@@ -218,6 +314,8 @@ async def test_proxy_rejects_an_unregistered_host_for_an_authorized_box(tmp_path
             await client.get("https://example.com/")
     finally:
         await client.aclose()
+        forwarder.close()
+        await forwarder.wait_closed()
         await proxy.close()
         await runner.cleanup()
 
@@ -225,7 +323,7 @@ async def test_proxy_rejects_an_unregistered_host_for_an_authorized_box(tmp_path
 async def _start_proxy_fixture(
     tmp_path,
     application: web.Application,
-) -> tuple[web.AppRunner, SecretProxyServer, httpx.AsyncClient, str]:
+) -> tuple[web.AppRunner, SecretProxyServer, asyncio.Server, httpx.AsyncClient, str]:
     runner = web.AppRunner(application)
     await runner.setup()
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -250,15 +348,52 @@ async def _start_proxy_fixture(
     control = SecretProxyClient(settings.expanded_control_socket)
     await control.put_secret(
         vm="box-one",
+        name="openai",
         host=host,
-        env_var="API_TOKEN",
-        headers={"Authorization": "Bearer placeholder"},
         placeholder="placeholder",
         value="real-secret",
     )
-    route = await control.route(vm="box-one")
     proxy_host, proxy_port = proxy.address
-    proxy_url = f"http://{route['username']}:{route['password']}@{proxy_host}:{proxy_port}"
+    forwarder = await asyncio.start_server(
+        partial(_forward_with_identity, target_host=proxy_host, target_port=proxy_port),
+        "127.0.0.1",
+        0,
+    )
+    proxy_url = f"http://127.0.0.1:{int(forwarder.sockets[0].getsockname()[1])}"
     trust = ssl.create_default_context(cafile=proxy.certificates.ca_certificate_path)
     client = httpx.AsyncClient(proxy=proxy_url, verify=trust, trust_env=False)
-    return runner, proxy, client, host
+    return runner, proxy, forwarder, client, host
+
+
+async def _forward_with_identity(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    *,
+    target_host: str,
+    target_port: int,
+) -> None:
+    target_reader, target_writer = await asyncio.open_connection(target_host, target_port)
+    target_writer.write(TUNNEL_IDENTITY_PREFIX + b"box-one\r\n")
+    await target_writer.drain()
+    try:
+        await asyncio.gather(
+            _copy_stream(reader, target_writer),
+            _copy_stream(target_reader, writer),
+        )
+    finally:
+        target_writer.close()
+        writer.close()
+        await asyncio.gather(
+            target_writer.wait_closed(),
+            writer.wait_closed(),
+            return_exceptions=True,
+        )
+
+
+async def _copy_stream(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    while data := await reader.read(64 * 1024):
+        writer.write(data)
+        await writer.drain()
+    if writer.can_write_eof():
+        writer.write_eof()
+        await writer.drain()

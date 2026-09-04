@@ -12,29 +12,28 @@ class ProxySecretInjectionCapability(SecretInjectionCapability):
         self,
         *,
         vm: str,
+        name: str,
         host: str,
-        env_var: str,
-        base_url_env: dict[str, str],
-        headers: dict[str, str],
+        auth_var: str,
+        base_url_var: str,
         placeholder: str,
         value: str,
     ) -> dict[str, str]:
         try:
             await self.secret_proxy.put_secret(
                 vm=vm,
+                name=name,
                 host=host,
-                env_var=env_var,
-                headers=headers,
                 placeholder=placeholder,
                 value=value,
             )
         except SecretProxyError as error:
             raise ProviderTransportError("secret proxy request failed") from error
-        return {env_var: placeholder, **base_url_env}
+        return {auth_var: placeholder}
 
-    async def delete_secret(self, *, vm: str, env_var: str) -> None:
+    async def delete_secret(self, *, vm: str, name: str) -> None:
         try:
-            await self.secret_proxy.delete_secret(vm=vm, env_var=env_var)
+            await self.secret_proxy.delete_secret(vm=vm, name=name)
         except SecretProxyError as error:
             raise ProviderTransportError("secret proxy request failed") from error
 
