@@ -36,7 +36,11 @@ async def test_create_vm_mints_key_and_returns_public_ip_and_private_key():
     provider = HetznerProvider(api, _settings())
 
     result = await provider.create_vm(
-        name="sb-test", image="ubuntu-24.04", env={"FOO": "bar"}, setup_script="echo hi"
+        name="sb-test",
+        image="ubuntu-24.04",
+        env={"FOO": "bar"},
+        setup_script="echo hi",
+        authorized_keys=("ssh-ed25519 AAAATUNNEL",),
     )
 
     api.ensure_ssh_key.assert_awaited_once()
@@ -50,11 +54,12 @@ async def test_create_vm_mints_key_and_returns_public_ip_and_private_key():
     assert server_kwargs["ssh_key_name"] == "drukbox-sb-test"
     # The bootstrap script gets the caller env prepended as shell exports.
     assert "export FOO=bar" in server_kwargs["user_data"]
+    assert "ssh-ed25519 AAAATUNNEL" in server_kwargs["user_data"]
 
     assert result.ssh_host == "203.0.113.7"
     assert result.ssh_port == 22
     assert result.ssh_username == "root"
-    assert result.private_key is not None
+    assert result.private_key
     assert "-----BEGIN OPENSSH PRIVATE KEY-----" in result.private_key
 
 

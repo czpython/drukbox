@@ -2,8 +2,9 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
+from providers.capabilities import ReverseTunnelCapability
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
-from providers.setup_script import inject_env_exports
+from providers.setup_script import inject_authorized_keys, inject_env_exports
 from providers.ssh_keys import generate_ed25519_keypair
 
 from .api import HetznerAPI
@@ -11,7 +12,7 @@ from .exceptions import HetznerProviderError
 from .settings import HetznerSettings
 
 
-class HetznerProvider(VMProvider):
+class HetznerProvider(VMProvider, ReverseTunnelCapability):
     name: ClassVar[str] = "hetzner"
     diagnose_hint: ClassVar[str] = "check_hetzner_api_token_and_location"
     # instance_type maps onto Hetzner's server type; root disk size is fixed
@@ -54,6 +55,7 @@ class HetznerProvider(VMProvider):
         image: str,
         env: dict[str, str] | None = None,
         setup_script: str | None = None,
+        authorized_keys: tuple[str, ...] = (),
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
@@ -70,7 +72,12 @@ class HetznerProvider(VMProvider):
         except HetznerProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
 
-        user_data = inject_env_exports(setup_script or "", env)
+        user_data = inject_authorized_keys(
+            setup_script or "",
+            username=self.settings.ssh_username,
+            authorized_keys=authorized_keys,
+        )
+        user_data = inject_env_exports(user_data, env)
         try:
             server_id = await self.api.create_server(
                 name=name,
@@ -108,7 +115,7 @@ class HetznerProvider(VMProvider):
         try:
             await self.api.delete_ssh_key(f"drukbox-{name}")
             server_id = await self.api.find_server_id_by_name(name)
-            if server_id is None:
+            if not server_id:
                 raise ProviderNotFoundError(f"hetzner VM '{name}' was not found")
             await self.api.delete_server(server_id)
         except HetznerProviderError as exc:

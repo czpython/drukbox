@@ -89,6 +89,12 @@ provider-specific fields to the host schema. Add a capability instead.
 The three methods are the full provider contract. The `name` argument is the
 service identity. `auth_var` and `base_url_var` are environment variable names.
 
+If a host has no direct route to the injecting proxy, inherit
+`ReverseTunnelCapability`. Its extended `create_vm` contract accepts
+`authorized_keys`. Install every supplied key for the returned SSH user before
+sshd becomes ready. The host lifecycle then opens and supervises the dedicated
+reverse tunnel.
+
 ## 7. Tests
 
 - Unit-test the provider with a mocked api object

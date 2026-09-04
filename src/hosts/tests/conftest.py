@@ -50,7 +50,7 @@ class StubVMProvider(VMProvider):
         return "stub ok"
 
     async def aclose(self) -> None:
-        return None
+        return
 
 
 @pytest.fixture

@@ -16,6 +16,7 @@ from hosts.api import router as hosts_router
 from http_proxies.api import router as http_proxies_router
 from networking.tailscale import Tailscale
 from providers.registry import iter_initialized_vm_providers
+from secret_proxy.tunnels import ReverseTunnelManager
 from templates.api import router as templates_router
 
 _log_level = getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO)
@@ -46,10 +47,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # the network layer entirely.
     settings = get_settings()
     tailscale: Tailscale | None = Tailscale.from_settings() if settings.tailscale_enabled else None
+    reverse_tunnels = ReverseTunnelManager()
     app.state.tailscale = tailscale
+    app.state.reverse_tunnels = reverse_tunnels
     try:
+        await reverse_tunnels.start()
         yield
     finally:
+        await reverse_tunnels.aclose()
         if tailscale:
             await tailscale.aclose()
         for vm_provider in iter_initialized_vm_providers():

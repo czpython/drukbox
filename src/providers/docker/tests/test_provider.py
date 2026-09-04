@@ -66,6 +66,22 @@ async def test_create_vm_passes_caller_env_and_names_it_for_the_entrypoint():
 
 
 @pytest.mark.asyncio
+async def test_create_vm_adds_service_authorized_keys():
+    api = _api_mock()
+    provider = DockerProvider(api, _settings())
+
+    await provider.create_vm(
+        name="sb-test",
+        image="img",
+        authorized_keys=("ssh-ed25519 AAAATUNNEL",),
+    )
+
+    keys = api.run_container.await_args.kwargs["env"]["DRUKBOX_AUTHORIZED_KEY"].splitlines()
+    assert keys[0].startswith("ssh-ed25519 ")
+    assert keys[1] == "ssh-ed25519 AAAATUNNEL"
+
+
+@pytest.mark.asyncio
 async def test_create_vm_rejects_setup_script_because_tailscale_is_unsupported():
     api = _api_mock()
     provider = DockerProvider(api, _settings())

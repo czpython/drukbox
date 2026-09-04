@@ -5,6 +5,7 @@ import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import EllipsisType
+from typing import cast
 
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -22,6 +23,7 @@ from networking.tailscale import (
     NetworkError,
     Tailscale,
 )
+from providers.capabilities import ReverseTunnelCapability
 from providers.exceptions import (
     ProviderCommandError,
     ProviderNotFoundError,
@@ -30,6 +32,9 @@ from providers.exceptions import (
     UnsupportedSizingError,
 )
 from providers.registry import get_provider_names, get_vm_provider
+from secret_proxy.exceptions import ReverseTunnelError
+from secret_proxy.settings import SecretProxySettings
+from secret_proxy.tunnels import ReverseTunnelManager, load_reverse_tunnel_key
 from templates.exceptions import TemplateNotAvailableError, UnknownTemplateError
 from templates.models import Template, TemplateStatus
 
@@ -71,6 +76,7 @@ class HostService:
         settings: Settings | None = None,
         *,
         tailscale: Tailscale | None = None,
+        reverse_tunnels: ReverseTunnelManager | None = None,
     ) -> None:
         self.session = session
         self.settings = settings or get_settings()
@@ -85,6 +91,7 @@ class HostService:
             self.tailscale = Tailscale.from_settings()
         else:
             self.tailscale = None
+        self.reverse_tunnels = reverse_tunnels
 
     def _default_lease_expires_at(self) -> datetime:
         return utc_now() + timedelta(seconds=self.settings.lease_default_ttl)
@@ -138,6 +145,8 @@ class HostService:
                 instance_type=instance_type,
                 disk_gb=disk_gb,
             )
+        else:
+            await self._ensure_reverse_tunnel(host)
 
         if idempotency_key and not await self._record_idempotency_key(idempotency_key, host):
             logger.info(
@@ -432,6 +441,8 @@ class HostService:
             # force is the janitor reaping an abandoned provision: attempt
             # teardown even from an early state, since a row stranded in
             # CREATING_VM may already have a VM (delete_vm no-ops if it doesn't).
+            if self.reverse_tunnels:
+                await self.reverse_tunnels.close(host.id)
             if host.tailscale_device_id and self.tailscale:
                 # Clear and commit the device_id before deleting the VM:
                 # a later delete_vm transport error must not retry the
@@ -470,8 +481,9 @@ class HostService:
         host.updated_at = utc_now()
         await self.session.commit()
 
+        vm = get_vm_provider(host.provider)
         tailscale: Tailscale | None = None
-        if get_vm_provider(host.provider).supports_tailnet:
+        if vm.supports_tailnet:
             tailscale = self.tailscale
 
         join_env: dict[str, str] = {}
@@ -493,7 +505,22 @@ class HostService:
         host.updated_at = utc_now()
         await self.session.commit()
 
-        vm = get_vm_provider(host.provider)
+        authorized_keys: tuple[str, ...] = ()
+        if isinstance(vm, ReverseTunnelCapability) and not tailscale:
+            if self.reverse_tunnels:
+                authorized_keys = (self.reverse_tunnels.public_key,)
+            else:
+                tunnel_settings = SecretProxySettings()
+                try:
+                    authorized_keys = (
+                        load_reverse_tunnel_key(tunnel_settings.expanded_tunnel_key_path)
+                        .export_public_key("openssh")
+                        .decode()
+                        .strip(),
+                    )
+                except ReverseTunnelError as exc:
+                    await self.mark_failed(host, exc)
+                    return
         gateway = GatewaySettings()
         if vm.gateway_process_class and not gateway.ssh_host:
             # A gateway-provider host is reachable only through the gateway;
@@ -507,14 +534,25 @@ class HostService:
             )
             return
         try:
-            vm_result = await vm.create_vm(
-                name=host.name,
-                image=host.image,
-                env=environment,
-                setup_script=setup_script,
-                instance_type=host.instance_type,
-                disk_gb=host.disk_gb,
-            )
+            if isinstance(vm, ReverseTunnelCapability):
+                vm_result = await cast(ReverseTunnelCapability, vm).create_vm(
+                    name=host.name,
+                    image=host.image,
+                    env=environment,
+                    setup_script=setup_script,
+                    authorized_keys=authorized_keys,
+                    instance_type=host.instance_type,
+                    disk_gb=host.disk_gb,
+                )
+            else:
+                vm_result = await vm.create_vm(
+                    name=host.name,
+                    image=host.image,
+                    env=environment,
+                    setup_script=setup_script,
+                    instance_type=host.instance_type,
+                    disk_gb=host.disk_gb,
+                )
         except (ProviderCommandError, ProviderTransportError) as exc:
             await self.mark_failed(host, exc)
             return
@@ -562,10 +600,23 @@ class HostService:
             return
 
         host.known_hosts = known_hosts_data.decode("utf-8")
+        await self._ensure_reverse_tunnel(host)
         host.status = HostStatus.ACTIVE.value
         host.activated_at = utc_now()
         host.updated_at = utc_now()
         await self.session.commit()
+
+    async def _ensure_reverse_tunnel(self, host: Host) -> None:
+        vm = get_vm_provider(host.provider)
+        if self.reverse_tunnels and isinstance(vm, ReverseTunnelCapability):
+            try:
+                await self.reverse_tunnels.ensure(
+                    host,
+                    timeout_seconds=vm.bootstrap_ssh_timeout_seconds,
+                )
+            except ReverseTunnelError as exc:
+                await self.mark_failed(host, exc)
+                raise ProvisioningFailedError(host.last_error) from exc
 
     async def mark_failed(self, host: Host, exc: Exception) -> None:
         logger.exception(

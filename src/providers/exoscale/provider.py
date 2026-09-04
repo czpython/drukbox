@@ -2,8 +2,9 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
+from providers.capabilities import ReverseTunnelCapability
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
-from providers.setup_script import inject_env_exports
+from providers.setup_script import inject_authorized_keys, inject_env_exports
 from providers.ssh_keys import generate_ed25519_keypair
 
 from .api import ExoscaleAPI
@@ -11,7 +12,7 @@ from .exceptions import ExoscaleProviderError
 from .settings import ExoscaleSettings
 
 
-class ExoscaleProvider(VMProvider):
+class ExoscaleProvider(VMProvider, ReverseTunnelCapability):
     name: ClassVar[str] = "exoscale"
     diagnose_hint: ClassVar[str] = "check_exoscale_api_credentials_and_zone"
     supports_instance_type = True
@@ -53,6 +54,7 @@ class ExoscaleProvider(VMProvider):
         image: str,
         env: dict[str, str] | None = None,
         setup_script: str | None = None,
+        authorized_keys: tuple[str, ...] = (),
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
@@ -64,7 +66,12 @@ class ExoscaleProvider(VMProvider):
         except ExoscaleProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
 
-        user_data = inject_env_exports(setup_script or "", env)
+        user_data = inject_authorized_keys(
+            setup_script or "",
+            username=self.settings.ssh_username,
+            authorized_keys=authorized_keys,
+        )
+        user_data = inject_env_exports(user_data, env)
         try:
             instance_id = await self.api.create_instance(
                 name=name,
@@ -103,7 +110,7 @@ class ExoscaleProvider(VMProvider):
         try:
             await self.api.delete_ssh_key(f"drukbox-{name}")
             instance_id = await self.api.find_instance_id_by_name(name)
-            if instance_id is None:
+            if not instance_id:
                 raise ProviderNotFoundError(f"exoscale VM '{name}' was not found")
             await self.api.delete_instance(instance_id)
         except ExoscaleProviderError as exc:
