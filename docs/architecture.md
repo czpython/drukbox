@@ -37,7 +37,7 @@ core/              settings, database, exception base
 diagnostics/       /doctor orchestration
 ```
 
-Provider-specific logic never lives in route imagers; HTTP decisions
+Provider-specific logic never lives in route handlers; HTTP decisions
 never live in service methods. Provider exceptions (`Exe*Error`,
 `Aws*Error`, `Hetzner*Error`, `Tailscale*Error`) are translated at the
 package boundary into neutral exceptions from `providers.exceptions` and
@@ -46,7 +46,7 @@ its exception types.
 
 ## The provider contract
 
-`providers.base.VMProvider` is the whole interface:
+`providers.base.VMProvider` is the base interface:
 
 - `name` / `diagnose_hint` class vars
 - `supports_instance_type` / `supports_disk_gb` class vars — which
@@ -82,10 +82,10 @@ which the routes surface as a clear error. New provider-specific
 features must follow this pattern rather than widening `VMProvider`
 or the host schema.
 
-Secret injection receives both the secret variable and the service's optional
-base-URL variable. It returns the environment that the box needs. A provider
-can give the box a placeholder, an alternate endpoint, or both without exposing
-its mechanism to the caller. Secret listings contain names only.
+Secret injection receives the secret variable, request-header shape, and any
+base-URL environment values. It returns the environment that the box needs. A
+provider can give the box a placeholder, an alternate endpoint, or both without
+exposing its mechanism to the caller. Secret listings contain names only.
 
 The review question that guards the whole design: *does this change leak
 a provider into the contract?*

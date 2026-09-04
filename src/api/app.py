@@ -1,5 +1,6 @@
 import logging
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -34,7 +35,7 @@ logging.getLogger("uvicorn.access").addFilter(_HealthzAccessFilter())
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Process-wide Tailscale client when enabled: reusing one
     # httpx.AsyncClient amortises the TLS handshake and OAuth token cache
     # across every provision instead of paying both per request. When
@@ -46,7 +47,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        if tailscale is not None:
+        if tailscale:
             await tailscale.aclose()
         for vm_provider in iter_initialized_vm_providers():
             await vm_provider.aclose()

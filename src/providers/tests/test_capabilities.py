@@ -13,14 +13,12 @@ class SecretInjectingExeProvider(ExeProvider, SecretInjectionCapability):
         vm: str,
         host: str,
         env_var: str,
-        base_url_env_var: str | None,
+        base_url_env: dict[str, str],
+        headers: dict[str, str],
         placeholder: str,
         value: str,
     ) -> dict[str, str]:
-        environment = {env_var: placeholder}
-        if base_url_env_var:
-            environment[base_url_env_var] = f"https://{host}"
-        return environment
+        return {env_var: placeholder, **base_url_env}
 
     async def delete_secret(self, *, vm: str, env_var: str) -> None:
         return

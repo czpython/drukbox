@@ -31,7 +31,8 @@ class SecretInjectionCapability(abc.ABC):
         vm: str,
         host: str,
         env_var: str,
-        base_url_env_var: str | None,
+        base_url_env: dict[str, str],
+        headers: dict[str, str],
         placeholder: str,
         value: str,
     ) -> dict[str, str]: ...
