@@ -10,6 +10,7 @@ from networking.tailscale_settings import TailscaleSettings
 def _base_env() -> dict[str, str]:
     return {
         "DATABASE_URL": "sqlite+aiosqlite:///./.drukbox-test.db",
+        "DRUKBOX_SECRETS_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
         "SERVICE_TOKENS": "tok",
     }
 
@@ -31,6 +32,40 @@ def test_service_tokens_must_contain_a_token(monkeypatch: pytest.MonkeyPatch, bl
     env: dict[str, str | None] = {**_base_env(), "SERVICE_TOKENS": blank}
     with pytest.raises(ValueError, match="SERVICE_TOKENS"):
         _settings_with(monkeypatch, env)
+
+
+def test_secrets_key_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    env: dict[str, str | None] = {**_base_env(), "DRUKBOX_SECRETS_KEY": None}
+
+    with pytest.raises(ValueError, match="DRUKBOX_SECRETS_KEY"):
+        _settings_with(monkeypatch, env)
+
+
+def test_secrets_key_accepts_a_rotation_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    first = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+    second = "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE="
+    env: dict[str, str | None] = {
+        **_base_env(),
+        "DRUKBOX_SECRETS_KEY": f" {first}, {second} ",
+    }
+
+    settings = _settings_with(monkeypatch, env)
+
+    assert settings.secrets_key.get_secret_value() == f"{first},{second}"
+    assert first not in repr(settings)
+
+
+def test_secrets_key_rejects_invalid_key_without_echoing_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalid_key = "not-a-secret-key"
+    env: dict[str, str | None] = {**_base_env(), "DRUKBOX_SECRETS_KEY": invalid_key}
+
+    with pytest.raises(ValueError) as error:
+        _settings_with(monkeypatch, env)
+
+    assert "base64-encoded" in str(error.value)
+    assert invalid_key not in str(error.value)
 
 
 def test_tailscale_disabled_by_default_with_no_credentials(monkeypatch: pytest.MonkeyPatch) -> None:

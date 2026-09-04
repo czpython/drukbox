@@ -5,6 +5,7 @@ from enum import StrEnum
 from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, TypeDecorator, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy_encrypted_field import EncryptedJsonField, SecretsMapping
 from uuid6 import uuid7
 
 from core.database import Base
@@ -36,7 +37,7 @@ class _UTCDateTime(TypeDecorator[datetime]):
         return value
 
     def process_result_value(self, value: datetime | None, dialect: object) -> datetime | None:
-        if value is not None and value.tzinfo is None:
+        if value and not value.tzinfo:
             return value.replace(tzinfo=UTC)
         return value
 
@@ -71,6 +72,7 @@ class Host(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid7)
     env: Mapped[dict[str, str]] = mapped_column(_JSONType, default=dict)
+    secrets: Mapped[SecretsMapping] = EncryptedJsonField()
     name: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     status: Mapped[str] = mapped_column(String(32), default=HostStatus.PROVISIONING.value)
     provider: Mapped[str] = mapped_column(String(20), default="exe")
