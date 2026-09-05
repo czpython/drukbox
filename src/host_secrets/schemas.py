@@ -51,7 +51,7 @@ class SecretSource(BaseModel):
         }
 
 
-class SecretRegistration(BaseModel):
+class SecretEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     host: str | None = Field(default=None, max_length=253, pattern=HOST_PATTERN)

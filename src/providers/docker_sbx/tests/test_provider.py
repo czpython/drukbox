@@ -122,7 +122,7 @@ async def test_create_vm_rejects_env_values_that_would_forge_environment_entries
     api = _api_mock()
     provider = _provider(api, _settings(tmp_path))
 
-    with pytest.raises(ProviderCommandError, match="NUL or newline"):
+    with pytest.raises(ProviderCommandError, match="must be printable ASCII"):
         await provider.create_vm(name="sb-test", image="img", env={"EVIL": "value\nINJECTED=x"})
     api.create_sandbox.assert_not_called()
     assert not (tmp_path / "sb-test").exists()

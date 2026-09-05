@@ -1,11 +1,9 @@
 import contextlib
-import shlex
 from typing import ClassVar, Self
 
 from core.settings import get_settings
-from host_secrets.placeholder import Placeholder
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import SecretInjectionCapability, TemplateCapability
+from providers.capabilities import TemplateCapability
 from providers.exceptions import (
     ProviderCommandError,
     ProviderNotFoundError,
@@ -18,24 +16,12 @@ from .exceptions import DockerProviderError, DockerVMNotFoundError
 from .images import build_derived_image, remove_derived_image
 from .settings import DockerSettings
 
-# pam_env gives every SSH session the lines in /etc/environment. A secret
-# reaches a running sandbox as lines in that file, as caller env does at boot.
-_ENVIRONMENT_FILE = "/etc/environment"
-
 _AUTHORIZED_KEY_ENV = "DRUKBOX_AUTHORIZED_KEY"
 _ENV_KEYS_ENV = "DRUKBOX_ENV_KEYS"
 _RESERVED_ENV_KEYS = frozenset({_AUTHORIZED_KEY_ENV, _ENV_KEYS_ENV})
 
 
-def _placeholders(environment: dict[str, str]) -> dict[str, Placeholder]:
-    found = {}
-    for key, value in environment.items():
-        with contextlib.suppress(ValueError):
-            found[key] = Placeholder.read(value)
-    return found
-
-
-class DockerProvider(VMProvider, TemplateCapability, SecretInjectionCapability):
+class DockerProvider(VMProvider, TemplateCapability):
     name: ClassVar[str] = "docker"
     diagnose_hint: ClassVar[str] = "check_docker_daemon_is_running"
     # A local container has no path onto the tailnet; its hosts keep the
@@ -48,12 +34,10 @@ class DockerProvider(VMProvider, TemplateCapability, SecretInjectionCapability):
         settings: DockerSettings,
         *,
         service_label: str = "drukbox",
-        secrets_exchange_url: str = "",
     ) -> None:
         self.api = api
         self.settings = settings
         self._service_label = service_label
-        self._secrets_exchange_url = secrets_exchange_url
 
     @classmethod
     def from_settings(cls) -> Self:
@@ -62,7 +46,6 @@ class DockerProvider(VMProvider, TemplateCapability, SecretInjectionCapability):
             DockerAPI(),
             DockerSettings(),  # pyright: ignore[reportCallIssue]
             service_label=core.service_label,
-            secrets_exchange_url=core.secrets_exchange_url,
         )
 
     @property
@@ -143,58 +126,6 @@ class DockerProvider(VMProvider, TemplateCapability, SecretInjectionCapability):
             await self.api.remove_container(name)
         except DockerVMNotFoundError as exc:
             raise ProviderNotFoundError(f"docker container '{name}' was not found") from exc
-        except DockerProviderError as exc:
-            raise ProviderTransportError(str(exc)) from exc
-
-    async def put_secret(
-        self,
-        *,
-        vm: str,
-        service: dict[str, str],
-        value: str,
-    ) -> dict[str, str]:
-        if not self._secrets_exchange_url:
-            raise ProviderCommandError("SECRETS_EXCHANGE_URL must name the secrets exchange")
-        env = {service["credential_var"]: value}
-        if service["endpoint_var"]:
-            env[service["endpoint_var"]] = (
-                f"{self._secrets_exchange_url}/{service['host']}{service['base_path']}"
-            )
-        environment = await self._environment(vm)
-        environment.update(env)
-        await self._write_environment(vm, environment)
-        return env
-
-    async def delete_secret(self, *, vm: str, name: str) -> None:
-        # The endpoint variable stays. A base URL without a credential fails
-        # closed at the exchange.
-        environment = await self._environment(vm)
-        for key, placeholder in _placeholders(environment).items():
-            if placeholder.service == name:
-                del environment[key]
-        await self._write_environment(vm, environment)
-
-    async def list_secrets(self, *, vm: str) -> list[str]:
-        environment = await self._environment(vm)
-        return sorted({placeholder.service for placeholder in _placeholders(environment).values()})
-
-    async def _environment(self, vm: str) -> dict[str, str]:
-        environment = {}
-        for line in (await self._shell(vm, f"cat {_ENVIRONMENT_FILE}")).splitlines():
-            key, separator, value = line.partition("=")
-            if separator:
-                environment[key] = value
-        return environment
-
-    async def _write_environment(self, vm: str, environment: dict[str, str]) -> None:
-        lines = " ".join(shlex.quote(f"{key}={value}") for key, value in environment.items())
-        await self._shell(vm, f"printf '%s\\n' {lines} > {_ENVIRONMENT_FILE}")
-
-    async def _shell(self, vm: str, script: str) -> str:
-        try:
-            return await self.api.run_shell(vm, script)
-        except DockerVMNotFoundError as exc:
-            raise ProviderNotFoundError(f"docker container '{vm}' was not found") from exc
         except DockerProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
 

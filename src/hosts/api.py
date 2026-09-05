@@ -48,6 +48,7 @@ async def create_host(
     try:
         return await service.get_or_create_host(
             env=host_create.env,
+            secrets={name: entry.to_storage() for name, entry in host_create.secrets.items()},
             image=host_create.image,
             template=host_create.template,
             expires_at=expires_at,

@@ -4,7 +4,7 @@ from typing import Any, Self
 
 import httpx
 
-from providers.setup_script import inject_env_exports
+from providers import environment
 
 from .exceptions import (
     ExeAuthError,
@@ -91,7 +91,9 @@ class ExeAPI:
             command_parts.append(f"--registry-auth={shlex.quote(registry_auth)}")
 
         if setup_script:
-            setup_script = inject_env_exports(setup_script, env)
+            # The setup script runs before the VM's own env applies.
+            shebang, _, body = setup_script.partition("\n")
+            setup_script = "\n".join([shebang, *environment.export(env or {}), body])
             command_parts.append(f"--setup-script={_encode_setup_script(setup_script)}")
 
         if tags:

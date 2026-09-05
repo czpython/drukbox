@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from host_secrets.schemas import SecretRegistration
+from host_secrets.schemas import SecretEntry
 
 
 def _source(
@@ -18,14 +18,14 @@ def _source(
 
 
 def test_static_built_in_entry_has_only_the_value() -> None:
-    registration = SecretRegistration.model_validate({"value": "static-secret"})
+    registration = SecretEntry.model_validate({"value": "static-secret"})
 
     assert registration.to_storage() == {"value": "static-secret"}
     assert "static-secret" not in repr(registration)
 
 
 def test_refreshable_entry_preserves_the_readable_recipe() -> None:
-    registration = SecretRegistration.model_validate(
+    registration = SecretEntry.model_validate(
         {
             "source": {
                 "url": "https://mint.example.test/boxes/box-1/token?audience=github",
@@ -46,7 +46,7 @@ def test_refreshable_entry_preserves_the_readable_recipe() -> None:
 
 
 def test_custom_entry_stores_the_whole_service_with_bearer_defaults() -> None:
-    registration = SecretRegistration.model_validate(
+    registration = SecretEntry.model_validate(
         {"host": "api.acme.test", "credential_var": "ACME_TOKEN", "value": "static-secret"}
     )
 
@@ -62,7 +62,7 @@ def test_custom_entry_stores_the_whole_service_with_bearer_defaults() -> None:
 
 
 def test_custom_entry_can_override_the_auth_shape() -> None:
-    registration = SecretRegistration.model_validate(
+    registration = SecretEntry.model_validate(
         {
             "host": "api.acme.test",
             "credential_header": "x-api-key",
@@ -101,7 +101,7 @@ def test_registration_rejects_ambiguous_or_incomplete_shapes(
     payload: dict[str, object],
 ) -> None:
     with pytest.raises(ValidationError):
-        SecretRegistration.model_validate(payload)
+        SecretEntry.model_validate(payload)
 
 
 @pytest.mark.parametrize(
@@ -117,4 +117,4 @@ def test_registration_rejects_ambiguous_or_incomplete_shapes(
 )
 def test_source_rejects_unsafe_or_invalid_recipes(source: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
-        SecretRegistration.model_validate({"source": source})
+        SecretEntry.model_validate({"source": source})

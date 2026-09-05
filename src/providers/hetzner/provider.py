@@ -1,9 +1,9 @@
 from typing import ClassVar, Self
 
 from core.settings import get_settings
+from providers import environment
 from providers.base import VMCreateResult, VMProvider
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
-from providers.setup_script import inject_env_exports
 from providers.ssh_keys import generate_ed25519_keypair
 
 from .api import HetznerAPI
@@ -70,7 +70,7 @@ class HetznerProvider(VMProvider):
         except HetznerProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
 
-        user_data = inject_env_exports(setup_script or "", env)
+        user_data = environment.cloud_init(setup_script or "", env)
         try:
             server_id = await self.api.create_server(
                 name=name,

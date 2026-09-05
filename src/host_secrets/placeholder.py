@@ -4,6 +4,9 @@ import secrets
 import uuid
 from typing import NamedTuple, Self
 
+from host_secrets import catalog
+from hosts.models import Host
+
 # A placeholder names its box and its service. The exchange reads both and
 # checks one entry, so no lookup table exists.
 _PREFIX = "drk"
@@ -36,3 +39,20 @@ class Placeholder(NamedTuple):
 
     def matches(self, fingerprint: str) -> bool:
         return hmac.compare_digest(self.fingerprint, fingerprint)
+
+    def environment(self, service: dict[str, str], exchange_url: str) -> dict[str, str]:
+        """What the box needs to reach ``service`` through the exchange with this placeholder."""
+        return {
+            service["credential_var"]: str(self),
+            service["endpoint_var"]: f"{exchange_url}/{service['host']}{service['base_path']}",
+        }
+
+
+def issue_placeholders(host: Host, exchange_url: str) -> dict[str, str]:
+    """Mint one placeholder per secret, keep its fingerprint, and return the box's environment."""
+    environment: dict[str, str] = {}
+    for name, entry in host.secrets.items():
+        placeholder = Placeholder.mint(host.id, name)
+        host.secrets[name] = {**entry, "placeholder_fingerprint": placeholder.fingerprint}
+        environment.update(placeholder.environment(catalog.service(name, entry), exchange_url))
+    return environment
