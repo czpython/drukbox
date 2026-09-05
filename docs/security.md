@@ -85,12 +85,17 @@ environment. Rotate it by prepending a new key, then remove an old key only
 after no stored row needs it. A database dump or backup contains ciphertext,
 but a process with the key can decrypt it.
 
-Caller `env` stays plaintext by design. It is ordinary configuration that is
-delivered to the VM, but it is never echoed in any
-response, and reserved keys (`TAILSCALE_AUTHKEY`) are rejected at the
-schema.
+Caller `env` stays plaintext by design. It is ordinary configuration. Each
+provider writes it to `/etc/environment` on the VM, and PAM hands it to every
+session at login. No response echoes it. The schema rejects the reserved key
+`TAILSCALE_AUTHKEY`. It also rejects a value that PAM would change. PAM cuts a
+value at `#`, treats a quote as the start of a quoted value, and joins the
+next line after a trailing backslash. It also stops at a line of 8192 bytes
+and loses every entry after it. So a value must be printable ASCII without
+`#`, quotes, or backslashes, and without a space at either end, and the whole
+`KEY=VALUE` line must stay under 8191 bytes.
 
-Secret registration returns no body. A validation response omits the rejected
+`POST /hosts` never returns a secret. A validation response omits the rejected
 input, so a bad value or a bad source header does not reach the caller. A
 source URL must use HTTPS. It must not carry user credentials or a fragment.
 Drukbox stores the URL path and query as a readable address. Put credentials

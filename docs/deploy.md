@@ -304,12 +304,13 @@ set it to Caddy on the Docker bridge, for example `http://172.17.0.1:8080`, and
 let Caddy listen there without TLS. A public deployment uses a public name with
 automatic HTTPS. A private network works the same way with its own address.
 
-When you register a secret on an `active` sandbox, the provider delivers the
-placeholder at once. The service must have a base URL variable, because the
-exchange routes by base URL. A service without one, such as `github`, answers
-`409` until its client configuration exists. A sandbox that still provisions
-receives nothing until a later release. A refreshable secret, one registered
-with `source`, gets `503` from the exchange until the refresh loop exists.
+Give secrets to `POST /hosts`. Provisioning delivers the placeholders in the
+sandbox's boot environment, on every provider, the same way as `env`. The
+service must have a base URL variable, because the exchange routes by base
+URL. A service without one, such as `github`, answers `422` until its client
+configuration exists. A refreshable secret, one given with `source`, gets `503`
+from the exchange until the refresh loop exists. A pool host takes no secrets:
+a request with secrets always provisions a new sandbox.
 
 ## Verify
 
@@ -363,7 +364,7 @@ Secrets exchange:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SECRETS_EXCHANGE_URL` | — | Base URL a sandbox dials to reach the secrets exchange. Required to register a secret on an `active` host. |
+| `SECRETS_EXCHANGE_URL` | — | Base URL a sandbox dials to reach the secrets exchange. Required to create a host with secrets. |
 | `SECRETS_EXCHANGE_BIND_HOST` | `127.0.0.1` | Interface the exchange process binds. Bind it where only Caddy can reach it. |
 | `SECRETS_EXCHANGE_PORT` | `8781` | Port the exchange process listens on. |
 

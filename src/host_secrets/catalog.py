@@ -45,6 +45,6 @@ CATALOG: dict[str, Service] = {
 
 
 def service(name: str, entry: dict[str, Any]) -> dict[str, str]:
-    """The service an entry reaches, in the shape put_secret reads."""
+    """The service an entry reaches: host, header, variables, base path."""
     fields: dict[str, Any] = entry if "host" in entry else dict(CATALOG[name])
     return {"name": name, **{field: fields[field] for field in SERVICE_FIELDS}}

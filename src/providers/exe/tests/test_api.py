@@ -86,8 +86,7 @@ async def test_create_vm_exports_env_after_setup_script_shebang(respx_mock):
 
 @pytest.mark.asyncio
 async def test_create_vm_rejects_invalid_setup_env_name():
-    # Validation lives in the shared inject_env_exports helper now, which
-    # raises ValueError on bad shell-identifier env keys.
+    # environment.export raises for a key that is not a shell identifier.
     with pytest.raises(ValueError, match="invalid VM environment variable name"):
         await _api().create_vm(
             name="sb-1",

@@ -5,9 +5,9 @@ from typing import ClassVar, Self
 import httpx
 
 from core.settings import get_settings
+from providers import environment
 from providers.base import VMCreateResult, VMProvider
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
-from providers.setup_script import inject_env_exports
 from providers.ssh_keys import generate_ed25519_keypair
 
 from .api import AwsAPI
@@ -107,7 +107,7 @@ class AWSProvider(VMProvider):
                 await self.api.delete_key_pair(key_name)
                 raise ProviderTransportError(str(exc)) from exc
 
-        user_data = inject_env_exports(setup_script or "", env)
+        user_data = environment.cloud_init(setup_script or "", env)
         try:
             instance_id = await self.api.run_instance(
                 client_token=name,

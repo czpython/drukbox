@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 from typing import ClassVar, Self
 
+from providers import environment
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import TemplateCapability
 from providers.docker.api import DockerAPI
@@ -20,11 +21,6 @@ from .exceptions import DockerSbxNotFoundError, DockerSbxProviderError
 from .process import SbxExecProcess
 from .settings import DockerSbxSettings
 
-# The /etc/environment format has one entry on each line. A NUL or a newline
-# in a value can add unwanted entries. Thus these characters are not permitted
-# in a value. The schema (hosts.schemas) validates the keys before this point.
-_UNSAFE_ENV_VALUE_CHARS = frozenset("\x00\r\n")
-
 
 def _bootstrap_script(*, public_key: str, env: dict[str, str], ssh_username: str) -> str:
     """Make the root script that prepares SSH access to a new sandbox."""
@@ -37,12 +33,10 @@ def _bootstrap_script(*, public_key: str, env: dict[str, str], ssh_username: str
         f"chmod 600 {home}/.ssh/authorized_keys",
         f"chown {owner}:{owner} {home}/.ssh/authorized_keys",
     ]
-    # pam_env reads /etc/environment and gives the caller environment to SSH
-    # sessions. The sandbox runtime cannot receive environment variables at
-    # create time. This file is the only path.
-    for key, value in env.items():
-        lines.append(f"printf '%s\\n' {shlex.quote(f'{key}={value}')} >> /etc/environment")
-    return "\n".join(lines) + "\n"
+    # pam_env reads /etc/environment and gives the caller environment to
+    # every session. The sandbox runtime cannot receive environment variables
+    # at create time. This file is the only path.
+    return "\n".join([*lines, *environment.persist(env)]) + "\n"
 
 
 class DockerSbxProvider(VMProvider, TemplateCapability):
@@ -104,12 +98,10 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
             )
 
         caller_env = env or {}
-        if unsafe_keys := sorted(
-            key for key, value in caller_env.items() if _UNSAFE_ENV_VALUE_CHARS.intersection(value)
-        ):
-            raise ProviderCommandError(
-                f"env values must not contain NUL or newline characters: {', '.join(unsafe_keys)}"
-            )
+        try:
+            environment.persist(caller_env)
+        except ValueError as exc:
+            raise ProviderCommandError(str(exc)) from exc
 
         private_key, public_key = generate_ed25519_keypair()
         workspace = self._workspace(name)

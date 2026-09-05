@@ -1,20 +1,18 @@
 import pytest
 
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import SecretInjectionCapability, resolve_capability
+from providers.capabilities import TemplateCapability, resolve_capability
 from providers.exceptions import CapabilityUnsupportedError
-from providers.registry import get_vm_provider
 
 
-class StubInjectingProvider(SecretInjectionCapability, VMProvider):
-    """The smallest provider that injects secrets. These tests say nothing about
-    any real provider."""
+class StubProvider(VMProvider):
+    """The smallest provider. These tests say nothing about any real provider."""
 
-    name = "injecting-stub"
-    diagnose_hint = "check_injecting_stub"
+    name = "stub"
+    diagnose_hint = "check_stub"
 
     @classmethod
-    def from_settings(cls) -> "StubInjectingProvider":
+    def from_settings(cls) -> "StubProvider":
         return cls()
 
     @property
@@ -46,21 +44,20 @@ class StubInjectingProvider(SecretInjectionCapability, VMProvider):
     async def aclose(self) -> None:
         return
 
-    async def put_secret(self, *, vm: str, service: dict[str, str], value: str) -> dict[str, str]:
-        return {service["credential_var"]: value}
 
-    async def delete_secret(self, *, vm: str, name: str) -> None:
+class StubTemplateProvider(StubProvider, TemplateCapability):
+    async def build_template_image(self, *, base_image: str, setup_script: str, label: str) -> str:
+        return f"{base_image}:{label}"
+
+    async def delete_template_image(self, image: str) -> None:
         return
-
-    async def list_secrets(self, *, vm: str) -> list[str]:
-        return []
 
 
 def test_resolve_capability_returns_implementing_provider() -> None:
-    provider = StubInjectingProvider()
-    assert resolve_capability(provider, SecretInjectionCapability) is provider
+    provider = StubTemplateProvider()
+    assert resolve_capability(provider, TemplateCapability) is provider
 
 
 def test_resolve_capability_refuses_provider_without_capability() -> None:
-    with pytest.raises(CapabilityUnsupportedError, match="'docker-sbx' does not support"):
-        resolve_capability(get_vm_provider("docker-sbx"), SecretInjectionCapability)
+    with pytest.raises(CapabilityUnsupportedError, match="'stub' does not support"):
+        resolve_capability(StubProvider(), TemplateCapability)

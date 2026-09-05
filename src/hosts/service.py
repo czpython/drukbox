@@ -5,6 +5,7 @@ import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import EllipsisType
+from typing import Any
 
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +16,8 @@ from core.database import async_session_factory
 from core.exceptions import ResourceNotFoundError
 from core.settings import Settings, get_settings
 from gateway.settings import GatewaySettings
+from host_secrets.exceptions import SecretsExchangeNotConfiguredError
+from host_secrets.placeholder import issue_placeholders
 from hosts.exceptions import HostStateError, ProvisioningFailedError
 from hosts.models import Host, HostStatus, IdempotencyKey
 from networking.tailscale import (
@@ -93,6 +96,7 @@ class HostService:
         self,
         *,
         env: dict[str, str],
+        secrets: dict[str, dict[str, Any]] | None = None,
         image: str | None,
         template: uuid.UUID | None = None,
         expires_at: datetime | None | EllipsisType = ...,
@@ -120,10 +124,10 @@ class HostService:
         host: Host | None = None
         # Warm hosts are provider-specific, so the claim is scoped to the
         # requested provider's pool. A request is pool-eligible only when it
-        # does not customize the host: no image, template, env, or per-request
-        # sizing — pool members are warmed at the provider's defaults.
+        # does not customize the host: no image, template, env, secrets, or
+        # per-request sizing — pool members are warmed at the provider's defaults.
         requested_provider = provider or self.settings.default_host_provider
-        customized = env or image or template or instance_type or disk_gb
+        customized = env or secrets or image or template or instance_type or disk_gb
         if not customized and self.settings.get_pool_targets().get(requested_provider):
             host = await self._try_claim_pool_host(
                 provider=requested_provider, expires_at=expires_at
@@ -131,6 +135,7 @@ class HostService:
         if not host:
             host = await self.create_host(
                 env=env,
+                secrets=secrets,
                 image=image,
                 template=template,
                 expires_at=expires_at,
@@ -202,6 +207,7 @@ class HostService:
         self,
         *,
         env: dict[str, str],
+        secrets: dict[str, dict[str, Any]] | None = None,
         image: str | None,
         template: uuid.UUID | None = None,
         expires_at: datetime | None | EllipsisType = ...,
@@ -221,6 +227,10 @@ class HostService:
         if disk_gb and not vm.supports_disk_gb:
             raise UnsupportedSizingError(
                 f"provider {vm.name!r} does not support a per-request disk_gb"
+            )
+        if secrets and not self.settings.secrets_exchange_url:
+            raise SecretsExchangeNotConfiguredError(
+                "SECRETS_EXCHANGE_URL must name the secrets exchange"
             )
         if template and not image:
             image = await self._resolve_template_image(template_id=template, provider=vm.name)
@@ -242,6 +252,7 @@ class HostService:
         host = Host(
             id=uid,
             env=env,
+            secrets=secrets or {},
             name=name,
             provider=vm.name,
             image=host_image,
@@ -487,7 +498,11 @@ class HostService:
             join_env = dict(join_credentials.env)
             setup_script = _SANDBOX_BOOTSTRAP_SCRIPT
 
-        environment = {**host.env, **join_env}
+        environment = {
+            **host.env,
+            **join_env,
+            **issue_placeholders(host, self.settings.secrets_exchange_url),
+        }
 
         host.status = HostStatus.CREATING_VM.value
         host.updated_at = utc_now()

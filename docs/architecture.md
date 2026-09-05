@@ -30,7 +30,7 @@ that true:
 hosts.api          HTTP request/response concerns only
 hosts.service      host lifecycle behavior (HostService)
 host_secrets.api   host secret registration concerns only
-host_secrets       built-in catalog, placeholders, encrypted recipe persistence
+host_secrets       built-in catalog, placeholders, delivery at provisioning
 secrets_exchange   the secrets exchange process behind Caddy
 templates.api      template request/response concerns only
 templates.service  template build and delete behavior (TemplateService)
@@ -76,23 +76,12 @@ the core settings knowing any provider exists.
 
 Not every provider supports every feature. The host contract must not grow
 fields that only one provider uses. Optional features are capability mix-ins.
-`SecretInjectionCapability` declares the box-scoped secret lifecycle.
 `TemplateCapability` declares the template create and delete surface.
 
 `resolve_capability` narrows a provider instance to a capability. It raises
 `CapabilityUnsupportedError` when the provider does not implement that
 capability, and the routes return a clear error. A new provider-specific feature
 must use this pattern. It must not widen `VMProvider` or the host schema.
-
-Secret injection receives the box ID, the service to reach, and the secret that
-reaches it. It returns the environment that the box needs. Providers differ in
-what that environment holds.
-
-One provider gives the box a stand-in credential and leaves the address
-unchanged. Another gives the box a different address and no credential. A caller
-applies what comes back and never learns which provider ran. The service carries
-its own name, which is the provider resource identity. A secret listing contains
-those names only.
 
 The review question that guards the whole design: *does this change leak
 a provider into the contract?*
@@ -110,27 +99,27 @@ successful key returns the original host instead of a duplicate.
 Caller `env` is stored for provisioning and never returned by the API;
 keys in `hosts.schemas.RESERVED_HOST_ENV_KEYS` are rejected.
 
-`PUT /hosts/{id}/secrets/{name}` registers or replaces one secret for one
-service. The service handle `{name}` is the storage key. A built-in handle
+`POST /hosts` takes `secrets`, keyed by service handle. A built-in handle
 resolves through the catalog. A custom entry names its own `host` and
-`credential_var`. It can also set `credential_header`, `credential_prefix`, and
+`credential_var`. It can also set `credential_header`, `credential_prefix`,
 `endpoint_var`, and `base_path`, the part of the base URL after the host that
 the client expects. The defaults are a bearer token in `Authorization`, no base
 URL variable, and no base path. Drukbox does not consult the catalog for a
-custom entry.
+custom entry. A service must have a base URL variable, because the secrets
+exchange routes by base URL.
 
 A static entry stores `value`. A refreshable entry stores `source`: the URL,
 the request headers, and the refresh interval. Drukbox never stores a fetched
 token.
 
-Registration mints a placeholder for the sandbox. The placeholder names the
-host and the service, `drk.<host id>.<service>.<random>`. The entry keeps only
-a fingerprint of the random part. On an `active` host, a provider that uses the
-secrets exchange writes the placeholder and the exchange address into the
-sandbox through `put_secret`. The sandbox sends every request for that service
-to the exchange. Caddy asks the exchange process for the upstream host and the
-real credential with `forward_auth`. It swaps the header and forwards the
-request. A provider with its own edge, such as exe, takes the secret itself.
+Provisioning mints a placeholder per secret. The placeholder names the host
+and the service, `drk.<host id>.<service>.<random>`. The entry keeps only a
+fingerprint of the random part. The sandbox receives `<credential_var>` and
+`<endpoint_var>=<exchange>/<host><base_path>` in its boot environment, next to
+the caller's `env`. Nothing else is provider-specific. The sandbox sends every
+request for that service to the exchange. Caddy asks the exchange process for
+the upstream host and the real credential with `forward_auth`. It swaps the
+header and forwards the request.
 
 A template is a persistent provider image keyed by provider, base image,
 and setup-script hash. `POST /templates` creates a `building` record and

@@ -4,6 +4,10 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
+from host_secrets import catalog
+from host_secrets.schemas import SECRET_NAME_PATTERN, SecretEntry
+from providers import environment
+
 RESERVED_HOST_ENV_KEYS = frozenset({"TAILSCALE_AUTHKEY"})
 _ENV_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -25,6 +29,13 @@ class HostCreate(BaseModel):
         description="Template ID to fork from. Used only when the request has no image.",
     )
     env: dict[str, str] = Field(default_factory=dict)
+    secrets: dict[str, SecretEntry] = Field(
+        default_factory=dict,
+        description=(
+            "Secrets the sandbox reaches through the secrets exchange, keyed by "
+            "service handle. The sandbox receives a placeholder per entry, never the value."
+        ),
+    )
     expires_at: datetime | None = None
     provider: str | None = Field(
         default=None,
@@ -50,6 +61,23 @@ class HostCreate(BaseModel):
             raise ValueError(f"{info.field_name} must not be blank")
         return value
 
+    @field_validator("secrets")
+    @classmethod
+    def reject_secrets_the_exchange_cannot_route(
+        cls, secrets: dict[str, SecretEntry]
+    ) -> dict[str, SecretEntry]:
+        for name, registration in secrets.items():
+            if not re.fullmatch(SECRET_NAME_PATTERN, name):
+                raise ValueError(f"invalid secret service name {name!r}")
+            entry = registration.to_storage()
+            if "host" not in entry and name not in catalog.CATALOG:
+                raise ValueError(f"unknown secret service {name!r}")
+            if not catalog.service(name, entry)["endpoint_var"]:
+                raise ValueError(
+                    f"{name!r} has no base URL variable, so the exchange cannot route it"
+                )
+        return secrets
+
     @field_validator("env")
     @classmethod
     def reject_reserved_env_keys(cls, env: dict[str, str]) -> dict[str, str]:
@@ -64,6 +92,9 @@ class HostCreate(BaseModel):
         reserved_keys = sorted(RESERVED_HOST_ENV_KEYS.intersection(env))
         if reserved_keys:
             raise ValueError(f"reserved env keys are not allowed: {', '.join(reserved_keys)}")
+        # Every provider persists env through /etc/environment. persist raises
+        # for any entry pam_env would change or drop.
+        environment.persist(env)
         return env
 
     _validate_expires_at = field_validator("expires_at")(_expires_at_must_be_future_and_tz_aware)

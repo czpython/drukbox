@@ -653,6 +653,31 @@ async def test_create_host_rejects_malformed_env_keys(client):
         assert "valid environment variable names" in detail[0]["msg"]
 
 
+async def test_create_host_rejects_env_values_pam_would_change(client):
+    # Every provider persists env through /etc/environment. pam_env cuts a
+    # value at #, opens a quote it never closes, joins lines on a trailing
+    # backslash, and stops at a line of 8192 bytes.
+    for value, message in (
+        ("ab#cd", "env value must be printable ASCII"),
+        ('"abc', "env value must be printable ASCII"),
+        ("a\\", "env value must be printable ASCII"),
+        (" lead", "env value must be printable ASCII"),
+        ("a\nb", "env value must be printable ASCII"),
+        ("a" * 8187, "env entry is longer than 8191 bytes"),
+    ):
+        response = await client.post(
+            "/hosts",
+            headers={"Authorization": "Bearer service-token"},
+            json={"env": {"KEY": value}},
+        )
+
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert detail[0]["loc"] == ["body", "env"]
+        assert message in detail[0]["msg"]
+        assert detail[0]["msg"].endswith(": KEY")
+
+
 async def test_create_host_rejects_missing_or_bad_service_auth(client):
     missing_response = await client.post("/hosts")
     bad_response = await client.post(

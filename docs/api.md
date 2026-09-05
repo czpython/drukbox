@@ -13,8 +13,6 @@ Every endpoint except `GET /healthz` requires
 ## Endpoints
 
 - `POST /hosts` · `GET /hosts` · `GET /hosts/{id}` · `DELETE /hosts/{id}`
-- `PUT /hosts/{id}/secrets/{name}` — register or replace one secret, static
-  or refreshable
 - `POST /templates` · `GET /templates` · `GET /templates/{id}` ·
   `DELETE /templates/{id}`
 - `POST /http-proxies` · `DELETE /http-proxies/{name}` ·
