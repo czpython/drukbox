@@ -82,11 +82,16 @@ installs `--all-extras`, so the shipped image carries every provider.
 
 ## 6. Optional capabilities
 
-If the provider supports an optional feature surface (currently
-http-proxies), also inherit the capability mix-in from
-`providers.capabilities` and implement its methods. Do not add
-provider-specific fields to the host schema or new core endpoints —
-add a capability instead.
+If the provider supports secret injection, inherit `SecretInjectionCapability`
+from `providers.capabilities`. Then implement `put_secret`, `delete_secret`, and
+`list_secrets`. These three methods are the full provider contract.
+
+Do not add provider-specific fields to the host schema. Add a capability
+instead.
+
+`service` describes how a client of that service reads its configuration.
+`providers/capabilities.py` documents its keys. Read the keys that your
+mechanism needs. Ignore the others.
 
 ## 7. Tests
 
@@ -108,9 +113,8 @@ Point the black-box suite at a deployment running with
 SERVICE_URL=http://localhost:8780 SERVICE_TOKEN=... npm --prefix api-tests test
 ```
 
-It provisions a real host, waits for `active`, and tears it down —
-use disposable infrastructure. The http-proxy spec self-skips when the
-provider lacks the capability.
+It provisions a real host, waits for `active`, and tears it down. Use
+disposable infrastructure.
 
 ## 9. Document
 

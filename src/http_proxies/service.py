@@ -1,4 +1,5 @@
 import uuid
+from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,15 +14,14 @@ from http_proxies.exceptions import (
     HTTPProxyNotFoundError,
     HTTPProxyUnsupportedError,
 )
-from providers.capabilities import HttpProxyCapability, resolve_capability
 from providers.exceptions import (
-    CapabilityUnsupportedError,
     ProviderError,
     ProviderHttpProxyExistsError,
     ProviderHttpProxyNotFoundError,
     ProviderTargetVMNotFoundError,
     UnknownProviderError,
 )
+from providers.exe.provider import ExeProvider
 from providers.registry import get_vm_provider
 
 ATTACHABLE_HOST_STATUSES = frozenset(
@@ -42,14 +42,17 @@ class HTTPProxyService:
         self.settings = settings or get_settings()
         self.host_service = HostService(session, settings=self.settings)
 
-    def _http_proxy_capability(self, provider_name: str | None = None) -> HttpProxyCapability:
-        # Account-bound operations (create/delete) resolve the default
-        # provider; host-bound operations (attach/detach) resolve the provider
-        # that owns the host's VM.
+    def _exe_provider(self, provider_name: str | None = None) -> ExeProvider:
         try:
-            return resolve_capability(get_vm_provider(provider_name), HttpProxyCapability)
-        except (UnknownProviderError, CapabilityUnsupportedError) as exc:
+            provider = get_vm_provider(provider_name)
+        except UnknownProviderError as exc:
             raise HTTPProxyUnsupportedError(str(exc)) from exc
+
+        if provider.name != ExeProvider.name:
+            raise HTTPProxyUnsupportedError(
+                f"VM provider '{provider.name}' does not support account-bound HTTP proxies"
+            )
+        return cast(ExeProvider, provider)
 
     async def create_http_proxy(
         self,
@@ -58,20 +61,20 @@ class HTTPProxyService:
         target: str,
         headers: dict[str, str],
     ) -> None:
-        http_proxy = self._http_proxy_capability()
+        provider = self._exe_provider()
 
         try:
-            await http_proxy.create_http_proxy(name=name, target=target, headers=headers)
+            await provider.create_http_proxy(name=name, target=target, headers=headers)
         except ProviderHttpProxyExistsError as exc:
             raise HTTPProxyExistsError("http proxy already exists") from exc
         except ProviderError as exc:
             raise HTTPProxyError("http proxy could not be created") from exc
 
     async def delete_http_proxy(self, name: str) -> None:
-        http_proxy = self._http_proxy_capability()
+        provider = self._exe_provider()
 
         try:
-            await http_proxy.delete_http_proxy(name)
+            await provider.delete_http_proxy(name)
         except ProviderHttpProxyNotFoundError as exc:
             raise HTTPProxyNotFoundError("http proxy not found") from exc
         except ProviderError as exc:
@@ -86,10 +89,10 @@ class HTTPProxyService:
         if host.status not in ATTACHABLE_HOST_STATUSES:
             raise HostStateError("host does not have a backing VM")
 
-        http_proxy = self._http_proxy_capability(host.provider)
+        provider = self._exe_provider(host.provider)
 
         try:
-            await http_proxy.attach_http_proxy(name, attach_vm=host.name)
+            await provider.attach_http_proxy(name, attach_vm=host.name)
         except ProviderTargetVMNotFoundError as exc:
             raise HostStateError("host does not have a backing VM") from exc
         except ProviderHttpProxyNotFoundError as exc:
@@ -106,10 +109,10 @@ class HTTPProxyService:
         if host.status not in ATTACHABLE_HOST_STATUSES:
             raise HostStateError("host does not have a backing VM")
 
-        http_proxy = self._http_proxy_capability(host.provider)
+        provider = self._exe_provider(host.provider)
 
         try:
-            await http_proxy.detach_http_proxy(name, attach_vm=host.name)
+            await provider.detach_http_proxy(name, attach_vm=host.name)
         except ProviderTargetVMNotFoundError as exc:
             raise HostStateError("host does not have a backing VM") from exc
         except ProviderHttpProxyNotFoundError as exc:

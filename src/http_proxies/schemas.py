@@ -3,8 +3,8 @@ import uuid
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 # Proxy names become both an exe.dev CLI token and an integration identifier, so
-# they must start alphanumeric (no leading hyphen → no option injection) and stay
-# within a conservative charset. Shared with the {name} path params in api.py.
+# they must start alphanumeric and stay within a conservative charset. Shared
+# with the {name} path parameters in api.py.
 HTTP_PROXY_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]*$"
 
 
@@ -17,8 +17,6 @@ class HTTPProxyCreate(BaseModel):
     @classmethod
     def validate_target(cls, value: HttpUrl) -> HttpUrl:
         if value.username or value.password:
-            # Userinfo would be forwarded to the provider as part of its config
-            # and could leak into provider-side logs. Targets are origin-only.
             raise ValueError("target URL must not contain credentials")
         if value.path not in ("", "/"):
             raise ValueError("target URL must not contain a path")

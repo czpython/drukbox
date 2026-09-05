@@ -37,7 +37,7 @@ core/              settings, database, exception base
 diagnostics/       /doctor orchestration
 ```
 
-Provider-specific logic never lives in route imagers; HTTP decisions
+Provider-specific logic never lives in route handlers; HTTP decisions
 never live in service methods. Provider exceptions (`Exe*Error`,
 `Aws*Error`, `Hetzner*Error`, `Tailscale*Error`) are translated at the
 package boundary into neutral exceptions from `providers.exceptions` and
@@ -46,7 +46,7 @@ its exception types.
 
 ## The provider contract
 
-`providers.base.VMProvider` is the whole interface:
+`providers.base.VMProvider` is the base interface:
 
 - `name` / `diagnose_hint` class vars
 - `supports_instance_type` / `supports_disk_gb` class vars — which
@@ -71,20 +71,28 @@ the core settings knowing any provider exists.
 
 ## Capabilities, the pressure valve
 
-Not every provider supports every feature, and the host contract must
-not grow provider-shaped warts. Optional features are capability
-mix-ins: `HttpProxyCapability` declares the http-proxy surface, and
+Not every provider supports every feature. The host contract must not grow
+fields that only one provider uses. Optional features are capability mix-ins.
+`SecretInjectionCapability` declares the box-scoped secret lifecycle.
 `TemplateCapability` declares the template create and delete surface.
-`resolve_capability` narrows a specific provider instance
-to a capability — the default provider for account-bound operations,
-the host's own provider for host-bound ones — and raises the shared
-`CapabilityUnsupportedError` when that provider does not implement it,
-which the routes surface as a clear error. New provider-specific
-features must follow this pattern rather than widening `VMProvider`
-or the host schema.
 
-The review question that guards the whole design: *does this change
-leak a provider into the contract?*
+`resolve_capability` narrows a provider instance to a capability. It raises
+`CapabilityUnsupportedError` when the provider does not implement that
+capability, and the routes return a clear error. A new provider-specific feature
+must use this pattern. It must not widen `VMProvider` or the host schema.
+
+Secret injection receives the box ID, the service to reach, and the secret that
+reaches it. It returns the environment that the box needs. Providers differ in
+what that environment holds.
+
+One provider gives the box a stand-in credential and leaves the address
+unchanged. Another gives the box a different address and no credential. A caller
+applies what comes back and never learns which provider ran. The service carries
+its own name, which is the provider resource identity. A secret listing contains
+those names only.
+
+The review question that guards the whole design: *does this change leak
+a provider into the contract?*
 
 ## Lifecycle
 

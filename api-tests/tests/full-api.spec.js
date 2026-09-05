@@ -48,8 +48,8 @@ const UUID_PATTERN =
 
 const HTTP_PROXY_TARGET = "https://httpbin.org";
 
-// Providers that implement drukbox's HttpProxyCapability. Today only
-// exe.dev does; the http-proxy lifecycle test skips for anything else.
+// Account-bound HTTP proxies exist only on exe.dev. The lifecycle test skips
+// for all other providers.
 const HTTP_PROXY_PROVIDERS = new Set(["exe"]);
 
 test.describe.configure({ mode: "serial" });

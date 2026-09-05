@@ -317,6 +317,50 @@ async def test_create_http_proxy_accepts_empty_success_output(respx_mock):
 
 @pytest.mark.asyncio
 @respx.mock(base_url="https://exe.dev")
+async def test_update_http_proxy_uses_expected_command(respx_mock):
+    route = respx_mock.post("/exec").mock(return_value=httpx.Response(200, content=b""))
+
+    await _api().update_http_proxy(
+        name="mirror",
+        target="https://httpbin.org/",
+        headers={"Authorization": "Bearer next-token"},
+    )
+
+    assert route.calls.last.request.content == (
+        b"integrations edit mirror --target=https://httpbin.org/ "
+        b"--header='Authorization: Bearer next-token'"
+    )
+
+
+@pytest.mark.asyncio
+@respx.mock(base_url="https://exe.dev")
+async def test_list_http_proxies_uses_json_command(respx_mock):
+    route = respx_mock.post("/exec").mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"name": "sb-one--acme", "type": "http-proxy"}],
+        )
+    )
+
+    integrations = await _api().list_http_proxies()
+
+    assert integrations == ["sb-one--acme"]
+    assert route.calls.last.request.content == b"integrations list --json"
+
+
+@pytest.mark.asyncio
+@respx.mock(base_url="https://exe.dev")
+async def test_list_http_proxies_rejects_invalid_integration_name(respx_mock):
+    respx_mock.post("/exec").mock(
+        return_value=httpx.Response(200, json=[{"name": None, "type": "http-proxy"}])
+    )
+
+    with pytest.raises(ExeResponseError, match="invalid name"):
+        await _api().list_http_proxies()
+
+
+@pytest.mark.asyncio
+@respx.mock(base_url="https://exe.dev")
 async def test_delete_http_proxy_maps_not_found(respx_mock):
     respx_mock.post("/exec").mock(
         return_value=httpx.Response(400, content=b"integration not found"),

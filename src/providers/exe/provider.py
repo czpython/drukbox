@@ -2,7 +2,7 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import HttpProxyCapability, TemplateCapability
+from providers.capabilities import SecretInjectionCapability, TemplateCapability
 from providers.docker.api import DockerAPI
 from providers.docker.exceptions import DockerProviderError
 from providers.docker.images import build_derived_image, remove_derived_image
@@ -23,7 +23,7 @@ from providers.exe.exceptions import (
 from providers.exe.settings import ExeSettings
 
 
-class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
+class ExeProvider(VMProvider, TemplateCapability, SecretInjectionCapability):
     name: ClassVar[str] = "exe"
     diagnose_hint: ClassVar[str] = "check_exe_dev_api_token_and_url"
 
@@ -157,6 +157,54 @@ class ExeProvider(VMProvider, HttpProxyCapability, TemplateCapability):
     async def diagnose(self) -> str:
         payload = await self.api.whoami()
         return str(payload["email"])
+
+    async def put_secret(
+        self,
+        *,
+        vm: str,
+        service: dict[str, str],
+        value: str,
+    ) -> dict[str, str]:
+        # exe holds the credential at its own edge. The VM gets a different
+        # address and carries no credential.
+        integration_name = self._secret_integration_name(vm, service["name"])
+        target = f"https://{service['host']}"
+        headers = {service["credential_header"]: f"{service['credential_prefix']}{value}"}
+
+        try:
+            await self.create_http_proxy(name=integration_name, target=target, headers=headers)
+        except ProviderHttpProxyExistsError:
+            try:
+                await self.api.update_http_proxy(
+                    name=integration_name,
+                    target=target,
+                    headers=headers,
+                )
+            except ExeIntegrationNotFoundError as exc:
+                raise ProviderHttpProxyNotFoundError(str(exc)) from exc
+
+        await self.attach_http_proxy(integration_name, attach_vm=vm)
+        return {service["endpoint_var"]: f"https://{integration_name}.int.exe.xyz"}
+
+    async def delete_secret(self, *, vm: str, name: str) -> None:
+        await self.delete_http_proxy(self._secret_integration_name(vm, name))
+
+    async def list_secrets(self, *, vm: str) -> list[str]:
+        prefix = self._secret_integration_prefix(vm)
+        integration_names = await self.api.list_http_proxies()
+        return sorted(
+            integration_name[len(prefix) :]
+            for integration_name in integration_names
+            if integration_name.startswith(prefix)
+        )
+
+    @staticmethod
+    def _secret_integration_prefix(vm: str) -> str:
+        return f"{vm}--"
+
+    @classmethod
+    def _secret_integration_name(cls, vm: str, name: str) -> str:
+        return f"{cls._secret_integration_prefix(vm)}{name}"
 
     async def create_http_proxy(
         self,
