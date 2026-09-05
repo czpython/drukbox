@@ -56,6 +56,7 @@ def test_custom_entry_stores_the_whole_service_with_bearer_defaults() -> None:
         "credential_prefix": "Bearer ",
         "credential_var": "ACME_TOKEN",
         "endpoint_var": "",
+        "base_path": "",
         "value": "static-secret",
     }
 
@@ -78,6 +79,7 @@ def test_custom_entry_can_override_the_auth_shape() -> None:
         "credential_prefix": "",
         "credential_var": "ACME_TOKEN",
         "endpoint_var": "ACME_BASE_URL",
+        "base_path": "",
         "value": "static-secret",
     }
 

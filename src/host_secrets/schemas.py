@@ -11,7 +11,7 @@ from pydantic import (
     model_validator,
 )
 
-from host_secrets.catalog import BEARER_HEADER, BEARER_PREFIX
+from host_secrets.catalog import BEARER_HEADER, BEARER_PREFIX, SERVICE_FIELDS
 
 HOST_PATTERN = (
     r"^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
@@ -19,9 +19,6 @@ HOST_PATTERN = (
 )
 SECRET_NAME_PATTERN = r"^[a-z][a-z0-9_-]{0,63}$"
 REFRESH_PATTERN = r"^[1-9][0-9]*[smhd]$"
-SERVICE_FIELDS = frozenset(
-    {"host", "credential_header", "credential_prefix", "credential_var", "endpoint_var"}
-)
 
 SecretValue = Annotated[SecretStr, Field(min_length=1)]
 HeaderName = Annotated[str, StringConstraints(pattern=r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")]
@@ -63,6 +60,7 @@ class SecretRegistration(BaseModel):
     credential_prefix: str = BEARER_PREFIX
     # Empty when the client has no base URL variable.
     endpoint_var: str = Field(default="", pattern=r"^(?:[A-Za-z_][A-Za-z0-9_]*)?$")
+    base_path: str = Field(default="", pattern=r"^(?:/[A-Za-z0-9._~-]+)*$")
     value: SecretValue | None = None
     source: SecretSource | None = None
 

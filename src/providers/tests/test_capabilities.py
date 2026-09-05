@@ -62,5 +62,5 @@ def test_resolve_capability_returns_implementing_provider() -> None:
 
 
 def test_resolve_capability_refuses_provider_without_capability() -> None:
-    with pytest.raises(CapabilityUnsupportedError, match="'docker' does not support"):
-        resolve_capability(get_vm_provider("docker"), SecretInjectionCapability)
+    with pytest.raises(CapabilityUnsupportedError, match="'docker-sbx' does not support"):
+        resolve_capability(get_vm_provider("docker-sbx"), SecretInjectionCapability)
