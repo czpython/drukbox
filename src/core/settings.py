@@ -1,8 +1,9 @@
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import BeforeValidator, Field
+from pydantic import BeforeValidator, Field, SecretStr
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from sqlalchemy_encrypted_field import validate_keys
 
 
 def _split_csv(value: object) -> object:
@@ -12,6 +13,7 @@ def _split_csv(value: object) -> object:
 
 
 CsvTuple = Annotated[tuple[str, ...], NoDecode, BeforeValidator(_split_csv)]
+SecretsKey = Annotated[SecretStr, BeforeValidator(validate_keys)]
 
 
 class Settings(BaseSettings):
@@ -19,6 +21,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     database_url: str = Field(
@@ -29,6 +32,10 @@ class Settings(BaseSettings):
         min_length=1,
         validation_alias="SERVICE_TOKENS",
         description="Bearer tokens accepted from trusted service clients (comma-separated).",
+    )
+    secrets_key: SecretsKey = Field(
+        validation_alias="SECRETS_KEY",
+        description="Comma-separated base64 32-byte keys for encrypted host secrets.",
     )
     default_host_provider: str = Field(
         default="exe",
