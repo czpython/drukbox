@@ -80,7 +80,7 @@ Provider tokens (`EXE_API_TOKEN`, `EXE_REGISTRY_PASSWORD`,
 `HETZNER_API_TOKEN`, Tailscale OAuth) and AWS credentials are read from
 the environment / the AWS SDK default chain and never written to the
 database or returned by the API. Host secret recipes are encrypted in
-the database with AES-256-GCM. `DRUKBOX_SECRETS_KEY` stays in the process
+the database with AES-256-GCM. `SECRETS_KEY` stays in the process
 environment. Rotate it by prepending a new key, then remove an old key only
 after no stored row needs it. A database dump or backup contains ciphertext,
 but a process with the key can decrypt it.

@@ -10,7 +10,7 @@ from networking.tailscale_settings import TailscaleSettings
 def _base_env() -> dict[str, str]:
     return {
         "DATABASE_URL": "sqlite+aiosqlite:///./.drukbox-test.db",
-        "DRUKBOX_SECRETS_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+        "SECRETS_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
         "SERVICE_TOKENS": "tok",
     }
 
@@ -35,9 +35,9 @@ def test_service_tokens_must_contain_a_token(monkeypatch: pytest.MonkeyPatch, bl
 
 
 def test_secrets_key_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
-    env: dict[str, str | None] = {**_base_env(), "DRUKBOX_SECRETS_KEY": None}
+    env: dict[str, str | None] = {**_base_env(), "SECRETS_KEY": None}
 
-    with pytest.raises(ValueError, match="DRUKBOX_SECRETS_KEY"):
+    with pytest.raises(ValueError, match="SECRETS_KEY"):
         _settings_with(monkeypatch, env)
 
 
@@ -46,7 +46,7 @@ def test_secrets_key_accepts_a_rotation_list(monkeypatch: pytest.MonkeyPatch) ->
     second = "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE="
     env: dict[str, str | None] = {
         **_base_env(),
-        "DRUKBOX_SECRETS_KEY": f" {first}, {second} ",
+        "SECRETS_KEY": f" {first}, {second} ",
     }
 
     settings = _settings_with(monkeypatch, env)
@@ -59,7 +59,7 @@ def test_secrets_key_rejects_invalid_key_without_echoing_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     invalid_key = "not-a-secret-key"
-    env: dict[str, str | None] = {**_base_env(), "DRUKBOX_SECRETS_KEY": invalid_key}
+    env: dict[str, str | None] = {**_base_env(), "SECRETS_KEY": invalid_key}
 
     with pytest.raises(ValueError) as error:
         _settings_with(monkeypatch, env)

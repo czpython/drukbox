@@ -295,7 +295,7 @@ Core, required:
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | Async SQLAlchemy URL. |
-| `DRUKBOX_SECRETS_KEY` | Comma-separated base64 32-byte keys for encrypted host secret recipes. The first key encrypts and every key decrypts. |
+| `SECRETS_KEY` | Comma-separated base64 32-byte keys for encrypted host secret recipes. The first key encrypts and every key decrypts. |
 | `SERVICE_TOKENS` | Comma-separated bearer tokens accepted from trusted callers. |
 
 Core, optional:

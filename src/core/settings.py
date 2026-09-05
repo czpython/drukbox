@@ -34,7 +34,7 @@ class Settings(BaseSettings):
         description="Bearer tokens accepted from trusted service clients (comma-separated).",
     )
     secrets_key: SecretsKey = Field(
-        validation_alias="DRUKBOX_SECRETS_KEY",
+        validation_alias="SECRETS_KEY",
         description="Comma-separated base64 32-byte keys for encrypted host secrets.",
     )
     default_host_provider: str = Field(

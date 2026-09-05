@@ -27,7 +27,7 @@ local containers:
 ```bash
 git clone https://github.com/czpython/drukbox.git
 cd drukbox && uv sync
-export DRUKBOX_SECRETS_KEY="$(uv run python -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())')"
+export SECRETS_KEY="$(uv run python -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())')"
 make dev
 ```
 

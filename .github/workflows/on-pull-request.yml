@@ -140,7 +140,7 @@ jobs:
     # local containers on the runner, so this needs no cloud credentials.
     env:
       DATABASE_URL: sqlite+aiosqlite:////tmp/drukbox.db
-      DRUKBOX_SECRETS_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+      SECRETS_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
       SERVICE_TOKENS: ci-token
       DEFAULT_HOST_PROVIDER: docker
       DOCKER_DEFAULT_IMAGE: drukbox/sandbox:ci
@@ -163,7 +163,7 @@ jobs:
             --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
             --group-add "$(stat -c '%g' /var/run/docker.sock)" \
             --env DATABASE_URL \
-            --env DRUKBOX_SECRETS_KEY \
+            --env SECRETS_KEY \
             --env SERVICE_TOKENS \
             --env DEFAULT_HOST_PROVIDER \
             --env DOCKER_DEFAULT_IMAGE \
