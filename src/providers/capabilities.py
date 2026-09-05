@@ -16,27 +16,26 @@ def resolve_capability(provider: VMProvider, capability: type[CapabilityT]) -> C
 
 
 class SecretInjectionCapability(abc.ABC):
-    """Mix-in declaring that a VMProvider can keep secrets outside its VMs.
+    """Mix-in that declares that a VMProvider can keep secrets outside its VMs.
 
-    ``put_secret`` takes the service being reached and the secret to reach it
-    with, and returns the environment the VM should be given. Providers differ
-    in what that environment is: one hands the VM a stand-in credential and
-    leaves the address alone, another hands it a different address and no
-    credential. Callers apply whatever comes back without knowing which.
+    ``put_secret`` takes the service to reach and the secret that reaches it.
+    It returns the environment that the VM needs. Providers differ in what that
+    environment holds. One provider gives the VM a stand-in credential and leaves
+    the address unchanged. Another gives the VM a different address and no
+    credential. A caller applies what comes back and never learns which ran.
 
-    A service describes how a client of it is configured:
+    A service describes how a client of it reads its configuration:
 
-    ``name``                the service handle, unique per VM
-    ``host``                the real upstream, without a scheme
-    ``credential_header``   the header the service authenticates with
-    ``credential_prefix``   what precedes the value in that header, often empty
-    ``credential_var``      the variable a client reads the credential from
-    ``endpoint_var``        the variable a client reads the base URL from
+    ``name``                The service handle, unique per VM
+    ``host``                The real upstream, without a scheme
+    ``credential_header``   The header that the service authenticates with
+    ``credential_prefix``   What comes before the value in that header
+    ``credential_var``      The variable that a client reads the credential from
+    ``endpoint_var``        The variable that a client reads the base URL from
 
-    Modeled as an ABC (not a Protocol) so isinstance() really checks the
-    inheritance chain. Runtime-checkable protocols would let any object that
-    happens to expose the three method names pass the check, including MagicMock
-    instances and providers with mismatched signatures.
+    This is an ABC and not a Protocol, so isinstance() tests the inheritance
+    chain. A runtime-checkable Protocol accepts any object with these three
+    method names. That includes a MagicMock and a provider with wrong signatures.
     """
 
     @abc.abstractmethod
@@ -56,10 +55,10 @@ class SecretInjectionCapability(abc.ABC):
 
 
 class TemplateCapability(abc.ABC):
-    """Mix-in declaring a VMProvider can build and delete template images.
+    """Mix-in that declares that a VMProvider can build and delete template images.
 
-    Modeled as an ABC so resolve_capability checks the inheritance chain
-    instead of accepting any object that has these method names.
+    This is an ABC so that resolve_capability tests the inheritance chain. A
+    Protocol accepts any object that has these method names.
     """
 
     @abc.abstractmethod

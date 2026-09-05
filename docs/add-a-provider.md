@@ -82,13 +82,16 @@ installs `--all-extras`, so the shipped image carries every provider.
 
 ## 6. Optional capabilities
 
-If the provider supports secret injection, inherit
-`SecretInjectionCapability` from `providers.capabilities` and implement
-`put_secret`, `delete_secret`, and `list_secrets`. Do not add
-provider-specific fields to the host schema. Add a capability instead.
-The three methods are the full provider contract. `service` describes how a
-client of that service is configured, and `providers/capabilities.py` documents
-its keys. Read the ones your mechanism needs and ignore the rest.
+If the provider supports secret injection, inherit `SecretInjectionCapability`
+from `providers.capabilities`. Then implement `put_secret`, `delete_secret`, and
+`list_secrets`. These three methods are the full provider contract.
+
+Do not add provider-specific fields to the host schema. Add a capability
+instead.
+
+`service` describes how a client of that service reads its configuration.
+`providers/capabilities.py` documents its keys. Read the keys that your
+mechanism needs. Ignore the others.
 
 ## 7. Tests
 

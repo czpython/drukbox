@@ -7,8 +7,8 @@ from providers.registry import get_vm_provider
 
 
 class StubInjectingProvider(SecretInjectionCapability, VMProvider):
-    """The smallest provider that injects, so these tests say nothing about any
-    real one."""
+    """The smallest provider that injects secrets. These tests say nothing about
+    any real provider."""
 
     name = "injecting-stub"
     diagnose_hint = "check_injecting_stub"

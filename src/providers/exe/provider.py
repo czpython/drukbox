@@ -165,8 +165,8 @@ class ExeProvider(VMProvider, TemplateCapability, SecretInjectionCapability):
         service: dict[str, str],
         value: str,
     ) -> dict[str, str]:
-        # exe holds the credential at its own edge and gives the VM a different
-        # address instead, so the VM carries no credential at all.
+        # exe holds the credential at its own edge. The VM gets a different
+        # address and carries no credential.
         integration_name = self._secret_integration_name(vm, service["name"])
         target = f"https://{service['host']}"
         headers = {service["credential_header"]: f"{service['credential_prefix']}{value}"}

@@ -71,24 +71,25 @@ the core settings knowing any provider exists.
 
 ## Capabilities, the pressure valve
 
-Not every provider supports every feature, and the host contract must
-not grow provider-shaped warts. Optional features are capability
-mix-ins: `SecretInjectionCapability` declares the box-scoped secret
-lifecycle, and `TemplateCapability` declares the template create and delete
-surface. `resolve_capability` narrows a specific provider instance to a
-capability and raises the shared
-`CapabilityUnsupportedError` when that provider does not implement it,
-which the routes surface as a clear error. New provider-specific
-features must follow this pattern rather than widening `VMProvider`
-or the host schema.
+Not every provider supports every feature. The host contract must not grow
+fields that only one provider uses. Optional features are capability mix-ins.
+`SecretInjectionCapability` declares the box-scoped secret lifecycle.
+`TemplateCapability` declares the template create and delete surface.
 
-Secret injection receives the box ID, the service being reached, and the secret
-to reach it with. It returns the environment that the box needs. Providers differ
-in what that environment holds: one gives the box a stand-in credential and
-leaves the address alone, another gives it a different address and no credential
-at all. Callers apply whatever comes back without knowing which ran. The service
-carries its own name, which is the provider resource identity, and secret
-listings contain those names only.
+`resolve_capability` narrows a provider instance to a capability. It raises
+`CapabilityUnsupportedError` when the provider does not implement that
+capability, and the routes return a clear error. A new provider-specific feature
+must use this pattern. It must not widen `VMProvider` or the host schema.
+
+Secret injection receives the box ID, the service to reach, and the secret that
+reaches it. It returns the environment that the box needs. Providers differ in
+what that environment holds.
+
+One provider gives the box a stand-in credential and leaves the address
+unchanged. Another gives the box a different address and no credential. A caller
+applies what comes back and never learns which provider ran. The service carries
+its own name, which is the provider resource identity. A secret listing contains
+those names only.
 
 The review question that guards the whole design: *does this change leak
 a provider into the contract?*
