@@ -21,6 +21,7 @@ const EXPECTED_OPENAPI_OPERATIONS = [
   "POST /hosts",
   "POST /hosts/{host_id}/renew",
   "POST /templates",
+  "PUT /hosts/{host_id}/secrets/{name}",
 ];
 
 const HOST_KEYS = [
@@ -166,6 +167,15 @@ test.describe("Drukbox API", () => {
     expect(createdHost.provider).toBe(config.expectedProvider);
     expect(createdHost.activated_at).not.toBeNull();
     expect(createdHost).not.toHaveProperty("env");
+  });
+
+  test("PUT /hosts/{host_id}/secrets/{name} registers a secret", async () => {
+    const path = `/hosts/${createdHost.id}/secrets/github`;
+    const data = { value: "black-box-static-secret" };
+
+    await expectStatus(await publicApi.put(path, { data }), 401);
+    await expectStatus(await badTokenApi.put(path, { data }), 403);
+    await expectStatus(await api.put(path, { data }), 204);
   });
 
   test("GET /hosts/{host_id} returns host details and 404 for missing hosts", async () => {

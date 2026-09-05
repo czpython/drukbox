@@ -90,6 +90,12 @@ delivered to the VM, but it is never echoed in any
 response, and reserved keys (`TAILSCALE_AUTHKEY`) are rejected at the
 schema.
 
+Secret registration returns no body. A validation response omits the rejected
+input, so a bad value or a bad source header does not reach the caller. A
+source URL must use HTTPS. It must not carry user credentials or a fragment.
+Drukbox stores the URL path and query as a readable address. Put credentials
+only in the source headers, which Drukbox encrypts.
+
 Two pieces of material reach the VM through its provider's user-data /
 setup-script mechanism, and that channel is the relevant exposure:
 

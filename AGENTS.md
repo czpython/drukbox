@@ -47,6 +47,7 @@ src/
   api/               # FastAPI app and global handlers
   core/              # Settings, database, exception base
   hosts/             # Host API, models, schemas, service, janitor, pool, auth
+  host_secrets/      # Secret catalog, registration API, encrypted recipes
   gateway/           # SSH gateway for gateway-provider hosts
   http_proxies/      # HTTP proxy API, schemas, service, deps
   janitor/           # Cron entry point that runs the host and template reapers
@@ -105,6 +106,7 @@ uv run alembic upgrade head
 
 - `hosts.api` owns HTTP request and response concerns.
 - `hosts.service.HostService` owns host lifecycle behavior.
+- `host_secrets.service.HostSecretService` owns secret recipe registration.
 - `http_proxies.service.HTTPProxyService` owns HTTP proxy behavior.
 - VM provider implementations live in `providers/<name>/`.
 - Network provider implementations live in `networking/<name>/`.

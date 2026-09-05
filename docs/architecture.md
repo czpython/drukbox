@@ -29,6 +29,8 @@ that true:
 ```text
 hosts.api          HTTP request/response concerns only
 hosts.service      host lifecycle behavior (HostService)
+host_secrets.api   host secret registration concerns only
+host_secrets       built-in catalog and encrypted recipe persistence
 templates.api      template request/response concerns only
 templates.service  template build and delete behavior (TemplateService)
 providers/<name>   one package per VM provider
@@ -106,6 +108,17 @@ Retry safety is the caller's `Idempotency-Key` header — a repeated
 successful key returns the original host instead of a duplicate.
 Caller `env` is stored for provisioning and never returned by the API;
 keys in `hosts.schemas.RESERVED_HOST_ENV_KEYS` are rejected.
+
+`PUT /hosts/{id}/secrets/{name}` registers or replaces one secret for one
+service. The service handle `{name}` is the storage key. A built-in handle
+resolves through the catalog. A custom entry names its own `host` and
+`credential_var`. It can also set `credential_header`, `credential_prefix`, and
+`endpoint_var`. The defaults are a bearer token in `Authorization` and no base
+URL variable. Drukbox does not consult the catalog for a custom entry.
+
+A static entry stores `value`. A refreshable entry stores `source`: the URL,
+the request headers, and the refresh interval. Drukbox never stores a fetched
+token. The provider derives the placeholder, so no caller supplies one.
 
 A template is a persistent provider image keyed by provider, base image,
 and setup-script hash. `POST /templates` creates a `building` record and

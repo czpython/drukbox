@@ -13,7 +13,7 @@ from hosts.auth import require_service_auth
 from networking.tailscale import Tailscale
 from providers.registry import get_default_vm_provider
 
-router = APIRouter(prefix="/doctor", tags=["doctor"])
+router = APIRouter(prefix="/doctor", tags=["doctor"], dependencies=[Depends(require_service_auth)])
 
 
 class CheckOut(BaseModel):
@@ -31,11 +31,7 @@ class DoctorOut(BaseModel):
     checks: list[CheckOut]
 
 
-@router.get(
-    "",
-    response_model=DoctorOut,
-    dependencies=[Depends(require_service_auth)],
-)
+@router.get("", response_model=DoctorOut)
 async def doctor(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],

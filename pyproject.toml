@@ -8,6 +8,7 @@ packages = [
     "src/core",
     "src/diagnostics",
     "src/gateway",
+    "src/host_secrets",
     "src/hosts",
     "src/http_proxies",
     "src/janitor",

@@ -16,17 +16,12 @@ from providers.exceptions import ProviderError, UnknownProviderError, Unsupporte
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/hosts", tags=["hosts"])
+router = APIRouter(prefix="/hosts", tags=["hosts"], dependencies=[Depends(require_service_auth)])
 
 HostServiceDep = Annotated[HostService, Depends(get_host_service)]
 
 
-@router.post(
-    "",
-    response_model=HostOut,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_service_auth)],
-)
+@router.post("", response_model=HostOut, status_code=status.HTTP_201_CREATED)
 async def create_host(
     service: HostServiceDep,
     payload: HostCreate | None = None,
@@ -71,31 +66,19 @@ async def create_host(
         ) from exc
 
 
-@router.get(
-    "",
-    response_model=list[HostOut],
-    dependencies=[Depends(require_service_auth)],
-)
+@router.get("", response_model=list[HostOut])
 async def list_hosts(service: HostServiceDep) -> list[Host]:
     return await service.list_hosts()
 
 
-@router.get(
-    "/{host_id}",
-    response_model=HostOut,
-    dependencies=[Depends(require_service_auth)],
-)
+@router.get("/{host_id}", response_model=HostOut)
 async def get_host(host_id: uuid.UUID, service: HostServiceDep) -> Host:
     if host := await service.get_host(host_id):
         return host
     raise HTTPException(status_code=404, detail="host not found")
 
 
-@router.post(
-    "/{host_id}/renew",
-    response_model=HostOut,
-    dependencies=[Depends(require_service_auth)],
-)
+@router.post("/{host_id}/renew", response_model=HostOut)
 async def renew_host(
     host_id: uuid.UUID,
     service: HostServiceDep,
@@ -105,11 +88,7 @@ async def renew_host(
     return await service.renew_host(host_id, expires_at=host_renew.expires_at)
 
 
-@router.delete(
-    "/{host_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_service_auth)],
-)
+@router.delete("/{host_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_host(host_id: uuid.UUID, service: HostServiceDep) -> Response:
     try:
         await service.delete_host(host_id)
