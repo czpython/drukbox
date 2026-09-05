@@ -116,14 +116,29 @@ class DockerAPI:
         *,
         username: str | None = None,
         password: str | None = None,
-    ) -> None:
+    ) -> str:
         # Credentials travel per call as an X-Registry-Auth header; the
         # global docker credential store is never touched.
         auth = {"username": username, "password": password} if username and password else None
         try:
             await self._get_client().images.push(image, auth=auth)
+            metadata = await self._get_client().images.inspect(image)
         except (aiodocker.DockerError, aiohttp.ClientError) as exc:
             raise DockerTransportError(_detail(exc)) from exc
+
+        repository = image.rpartition(":")[0]
+        # Docker omits docker.io and its library namespace in RepoDigests.
+        digest_repository = repository
+        if repository.startswith("docker.io/"):
+            digest_repository = repository.removeprefix("docker.io/").removeprefix("library/")
+        digests = [
+            digest.partition("@")[2]
+            for digest in metadata.get("RepoDigests") or []
+            if digest.startswith((f"{repository}@sha256:", f"{digest_repository}@sha256:"))
+        ]
+        if len(digests) != 1:
+            raise DockerTransportError(f"Pushed image {image!r} has no unique repository digest")
+        return f"{image}@{digests[0]}"
 
     async def server_version(self) -> str:
         try:

@@ -5,7 +5,6 @@ import pytest
 from providers import registry as registry_module
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import TemplateCapability
-from providers.docker.images import derive_image_name
 from providers.exceptions import ProviderError
 
 
@@ -62,7 +61,7 @@ class StubTemplateProvider(TemplateCapability, VMProvider):
         self.built.append((base_image, setup_script, label))
         if self.build_error:
             raise self.build_error
-        return derive_image_name(base_image=base_image, setup_script=setup_script)
+        return "registry.example/templates@sha256:" + "a" * 64
 
     async def delete_template_image(self, image: str) -> None:
         self.deleted.append(image)

@@ -1,7 +1,7 @@
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Self
 
-from pydantic import BeforeValidator, Field, SecretStr
+from pydantic import BeforeValidator, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy_encrypted_field import validate_keys
 
@@ -77,6 +77,30 @@ class Settings(BaseSettings):
         validation_alias="PROVISIONING_GRACE_SECONDS",
         description="Safety TTL on the host row while provisioning is in flight.",
     )
+    registry_host: str = Field(
+        default="",
+        validation_alias="REGISTRY_HOST",
+        pattern=r"^$|^[a-z0-9.-]+(?::[0-9]+)?$",
+        description="Registry host for private images, such as ghcr.io or docker.io.",
+    )
+    template_repository: str = Field(
+        default="",
+        validation_alias="TEMPLATE_REPOSITORY",
+        pattern=(
+            r"^$|^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*"
+            r"(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$"
+        ),
+        description="Template repository path within REGISTRY_HOST, without a tag.",
+    )
+    registry_username: str = Field(
+        default="",
+        validation_alias="REGISTRY_USERNAME",
+    )
+    registry_password: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias="REGISTRY_PASSWORD",
+    )
+
     template_build_timeout: int = Field(
         default=3600,
         gt=0,
@@ -134,6 +158,18 @@ class Settings(BaseSettings):
         validation_alias="POOL_MAX_CREATES_PER_TICK",
         description="Upper bound on pool-maintainer provisions per tick, across all providers.",
     )
+
+    @model_validator(mode="after")
+    def validate_registry(self) -> Self:
+        values = {
+            "REGISTRY_HOST": self.registry_host,
+            "REGISTRY_USERNAME": self.registry_username,
+            "REGISTRY_PASSWORD": self.registry_password.get_secret_value(),
+        }
+        if (self.template_repository or any(values.values())) and not all(values.values()):
+            missing = ", ".join(name for name, value in values.items() if not value)
+            raise ValueError(f"Registry is incomplete. Set: {missing}")
+        return self
 
     def get_pool_targets(self) -> dict[str, int]:
         # POOL_SIZE seeds the default provider's target and POOL_SIZES
