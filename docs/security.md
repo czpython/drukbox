@@ -96,6 +96,15 @@ source URL must use HTTPS. It must not carry user credentials or a fragment.
 Drukbox stores the URL path and query as a readable address. Put credentials
 only in the source headers, which Drukbox encrypts.
 
+A sandbox holds a placeholder, never the credential. The placeholder is only
+useful at the secrets exchange, and only for the one host and service it
+names. The entry stores a digest of it, so a database read cannot replay it.
+The exchange refuses with `403` on any mismatch and never answers `401`,
+because git retries a `401` with its own credential store. The exchange, not
+the sandbox, decides the upstream host: a forged upstream header from the
+sandbox is dropped. Bind the exchange process where only Caddy can reach it:
+its answer is the real credential.
+
 Two pieces of material reach the VM through its provider's user-data /
 setup-script mechanism, and that channel is the relevant exposure:
 

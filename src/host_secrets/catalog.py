@@ -1,7 +1,10 @@
-from typing import TypedDict
+from typing import Any, TypedDict
 
 BEARER_HEADER = "Authorization"
 BEARER_PREFIX = "Bearer "
+SERVICE_FIELDS = frozenset(
+    {"host", "credential_header", "credential_prefix", "credential_var", "endpoint_var"}
+)
 
 
 class Service(TypedDict):
@@ -29,3 +32,9 @@ CATALOG: dict[str, Service] = {
     "github": bearer("api.github.com", "GH_TOKEN"),
     "openai": bearer("api.openai.com", "OPENAI_API_KEY", "OPENAI_BASE_URL"),
 }
+
+
+def describe(name: str, entry: dict[str, Any]) -> dict[str, str]:
+    """The service an entry reaches, in the shape put_secret reads."""
+    fields: dict[str, Any] = entry if "host" in entry else dict(CATALOG[name])
+    return {"name": name, **{field: fields[field] for field in SERVICE_FIELDS}}

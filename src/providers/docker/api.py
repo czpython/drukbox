@@ -125,6 +125,33 @@ class DockerAPI:
         except (aiodocker.DockerError, aiohttp.ClientError) as exc:
             raise DockerTransportError(_detail(exc)) from exc
 
+    async def run_shell(self, name: str, script: str) -> str:
+        """Run ``script`` with ``sh -c`` inside the container and return its output."""
+        try:
+            execution = (
+                await self._get_client()
+                .containers.container(name)
+                .exec(["sh", "-c", script], stdout=True, stderr=True)
+            )
+            chunks: list[bytes] = []
+            async with execution.start(detach=False) as stream:
+                while message := await stream.read_out():
+                    chunks.append(message.data)
+            status = await execution.inspect()
+        except aiodocker.DockerError as exc:
+            if exc.status == 404:
+                raise DockerVMNotFoundError(str(exc)) from exc
+            raise DockerTransportError(_detail(exc)) from exc
+        except aiohttp.ClientError as exc:
+            raise DockerTransportError(str(exc)) from exc
+        output = b"".join(chunks).decode(errors="replace")
+        if status["ExitCode"]:
+            raise DockerTransportError(
+                f"command in container {name!r} exited {status['ExitCode']}: "
+                f"{output[-_MAX_ERROR_DETAIL_CHARS:]}"
+            )
+        return output
+
     async def server_version(self) -> str:
         try:
             version = await self._get_client().version()

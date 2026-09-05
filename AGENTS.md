@@ -17,6 +17,7 @@ It owns:
 - Tailscale auth key creation, device discovery, and cleanup
 - SSH host key scanning and `known_hosts` material
 - An SSH gateway for hosts of gateway providers (`python -m gateway.server`)
+- The secrets exchange process behind Caddy (`python -m secrets_exchange`)
 - Account-bound exe.dev HTTP proxy resources
 
 Periodic maintenance runs as cron jobs: `python -m janitor` reaps expired
@@ -48,6 +49,7 @@ src/
   core/              # Settings, database, exception base
   hosts/             # Host API, models, schemas, service, janitor, pool, auth
   host_secrets/      # Secret catalog, registration API, encrypted recipes
+  secrets_exchange/  # The secrets exchange process behind Caddy
   gateway/           # SSH gateway for gateway-provider hosts
   http_proxies/      # HTTP proxy API, schemas, service, deps
   janitor/           # Cron entry point that runs the host and template reapers

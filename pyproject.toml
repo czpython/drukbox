@@ -7,6 +7,7 @@ packages = [
     "src/api",
     "src/core",
     "src/diagnostics",
+    "src/secrets_exchange",
     "src/gateway",
     "src/host_secrets",
     "src/hosts",

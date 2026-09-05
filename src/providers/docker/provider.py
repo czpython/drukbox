@@ -1,9 +1,11 @@
 import contextlib
+import re
+import shlex
 from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import TemplateCapability
+from providers.capabilities import SecretInjectionCapability, TemplateCapability
 from providers.exceptions import (
     ProviderCommandError,
     ProviderNotFoundError,
@@ -16,12 +18,18 @@ from .exceptions import DockerProviderError, DockerVMNotFoundError
 from .images import build_derived_image, remove_derived_image
 from .settings import DockerSettings
 
+# pam_env gives every SSH session what /etc/environment holds, so a secret
+# reaches a running sandbox as lines in that file, the same way the
+# entrypoint delivers caller env at boot.
+_ENVIRONMENT_FILE = "/etc/environment"
+_PLACEHOLDER_LINE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=drk\.[0-9a-f]{32}\.([a-z0-9_-]+)\.", re.M)
+
 _AUTHORIZED_KEY_ENV = "DRUKBOX_AUTHORIZED_KEY"
 _ENV_KEYS_ENV = "DRUKBOX_ENV_KEYS"
 _RESERVED_ENV_KEYS = frozenset({_AUTHORIZED_KEY_ENV, _ENV_KEYS_ENV})
 
 
-class DockerProvider(VMProvider, TemplateCapability):
+class DockerProvider(VMProvider, TemplateCapability, SecretInjectionCapability):
     name: ClassVar[str] = "docker"
     diagnose_hint: ClassVar[str] = "check_docker_daemon_is_running"
     # A local container has no path onto the tailnet; its hosts keep the
@@ -34,10 +42,12 @@ class DockerProvider(VMProvider, TemplateCapability):
         settings: DockerSettings,
         *,
         service_label: str = "drukbox",
+        secrets_exchange_url: str = "",
     ) -> None:
         self.api = api
         self.settings = settings
         self._service_label = service_label
+        self._secrets_exchange_url = secrets_exchange_url
 
     @classmethod
     def from_settings(cls) -> Self:
@@ -46,6 +56,7 @@ class DockerProvider(VMProvider, TemplateCapability):
             DockerAPI(),
             DockerSettings(),  # pyright: ignore[reportCallIssue]
             service_label=core.service_label,
+            secrets_exchange_url=core.secrets_exchange_url,
         )
 
     @property
@@ -128,6 +139,52 @@ class DockerProvider(VMProvider, TemplateCapability):
             raise ProviderNotFoundError(f"docker container '{name}' was not found") from exc
         except DockerProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
+
+    async def put_secret(
+        self,
+        *,
+        vm: str,
+        service: dict[str, str],
+        value: str,
+    ) -> dict[str, str]:
+        if not self._secrets_exchange_url:
+            raise ProviderCommandError("SECRETS_EXCHANGE_URL must name the secrets exchange")
+        env = {service["credential_var"]: value}
+        if service["endpoint_var"]:
+            env[service["endpoint_var"]] = f"{self._secrets_exchange_url}/{service['host']}"
+        lines = " && ".join(
+            f"sed -i '/^{key}=/d' {_ENVIRONMENT_FILE}"
+            f" && printf '%s\\n' {shlex.quote(f'{key}={val}')} >> {_ENVIRONMENT_FILE}"
+            for key, val in env.items()
+        )
+        try:
+            await self.api.run_shell(vm, lines)
+        except DockerVMNotFoundError as exc:
+            raise ProviderNotFoundError(f"docker container '{vm}' was not found") from exc
+        except DockerProviderError as exc:
+            raise ProviderTransportError(str(exc)) from exc
+        return env
+
+    async def delete_secret(self, *, vm: str, name: str) -> None:
+        # The placeholder line names its service. The endpoint line stays:
+        # a base URL without a credential fails closed at the edge.
+        try:
+            await self.api.run_shell(
+                vm, f"sed -i -E '/=drk\\.[0-9a-f]{{32}}\\.{name}\\./d' {_ENVIRONMENT_FILE}"
+            )
+        except DockerVMNotFoundError as exc:
+            raise ProviderNotFoundError(f"docker container '{vm}' was not found") from exc
+        except DockerProviderError as exc:
+            raise ProviderTransportError(str(exc)) from exc
+
+    async def list_secrets(self, *, vm: str) -> list[str]:
+        try:
+            environment = await self.api.run_shell(vm, f"cat {_ENVIRONMENT_FILE}")
+        except DockerVMNotFoundError as exc:
+            raise ProviderNotFoundError(f"docker container '{vm}' was not found") from exc
+        except DockerProviderError as exc:
+            raise ProviderTransportError(str(exc)) from exc
+        return sorted(set(_PLACEHOLDER_LINE.findall(environment)))
 
     async def build_template_image(
         self,
