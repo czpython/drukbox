@@ -16,7 +16,9 @@ from templates.service import TemplateService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/templates", tags=["templates"])
+router = APIRouter(
+    prefix="/templates", tags=["templates"], dependencies=[Depends(require_service_auth)]
+)
 
 
 async def get_template_service(
@@ -28,12 +30,7 @@ async def get_template_service(
 TemplateServiceDep = Annotated[TemplateService, Depends(get_template_service)]
 
 
-@router.post(
-    "",
-    response_model=TemplateOut,
-    status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_service_auth)],
-)
+@router.post("", response_model=TemplateOut, status_code=status.HTTP_202_ACCEPTED)
 async def create_template(
     payload: TemplateCreate,
     background_tasks: BackgroundTasks,
@@ -60,31 +57,19 @@ async def create_template(
     return template
 
 
-@router.get(
-    "",
-    response_model=list[TemplateOut],
-    dependencies=[Depends(require_service_auth)],
-)
+@router.get("", response_model=list[TemplateOut])
 async def list_templates(service: TemplateServiceDep) -> list[Template]:
     return await service.list()
 
 
-@router.get(
-    "/{template_id}",
-    response_model=TemplateOut,
-    dependencies=[Depends(require_service_auth)],
-)
+@router.get("/{template_id}", response_model=TemplateOut)
 async def get_template(template_id: uuid.UUID, service: TemplateServiceDep) -> Template:
     if template := await service.get(template_id):
         return template
     raise HTTPException(status_code=404, detail="template not found")
 
 
-@router.delete(
-    "/{template_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_service_auth)],
-)
+@router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_template(template_id: uuid.UUID, service: TemplateServiceDep) -> Response:
     try:
         await service.delete(template_id)
