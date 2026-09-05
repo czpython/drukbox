@@ -159,6 +159,16 @@ async def test_http_proxy_methods_delegate_to_api(method_name: str, kwargs: dict
     getattr(api, method_name).assert_awaited_once_with(*positional, **proxy_kwargs)
 
 
+_ACME = {
+    "name": "acme",
+    "host": "api.acme.test",
+    "credential_header": "Authorization",
+    "credential_prefix": "Bearer ",
+    "credential_var": "ACME_TOKEN",
+    "endpoint_var": "ACME_BASE_URL",
+}
+
+
 async def test_put_secret_creates_and_attaches_box_scoped_integration() -> None:
     api = SimpleNamespace(
         create_http_proxy=AsyncMock(),
@@ -166,15 +176,7 @@ async def test_put_secret_creates_and_attaches_box_scoped_integration() -> None:
     )
     provider = _make_provider(api)
 
-    env = await provider.put_secret(
-        vm="sb-one",
-        name="acme",
-        host="api.acme.test",
-        auth_var="ACME_TOKEN",
-        base_url_var="ACME_BASE_URL",
-        placeholder="acme-proxy-managed",
-        value="secret-value",
-    )
+    env = await provider.put_secret(vm="sb-one", service=_ACME, value="secret-value")
 
     api.create_http_proxy.assert_awaited_once_with(
         name="sb-one--acme",
@@ -193,15 +195,7 @@ async def test_put_secret_updates_existing_box_scoped_integration() -> None:
     )
     provider = _make_provider(api)
 
-    await provider.put_secret(
-        vm="sb-one",
-        name="acme",
-        host="api.acme.test",
-        auth_var="ACME_TOKEN",
-        base_url_var="ACME_BASE_URL",
-        placeholder="acme-proxy-managed",
-        value="new-value",
-    )
+    await provider.put_secret(vm="sb-one", service=_ACME, value="new-value")
 
     api.update_http_proxy.assert_awaited_once_with(
         name="sb-one--acme",
@@ -209,6 +203,20 @@ async def test_put_secret_updates_existing_box_scoped_integration() -> None:
         headers={"Authorization": "Bearer new-value"},
     )
     api.attach_http_proxy.assert_awaited_once_with("sb-one--acme", attach_vm="sb-one")
+
+
+async def test_put_secret_uses_the_service_auth_shape() -> None:
+    """A service that authenticates with its own header gets that header, not a bearer."""
+    api = SimpleNamespace(create_http_proxy=AsyncMock(), attach_http_proxy=AsyncMock())
+    provider = _make_provider(api)
+
+    await provider.put_secret(
+        vm="sb-one",
+        service={**_ACME, "credential_header": "x-api-key", "credential_prefix": ""},
+        value="secret-value",
+    )
+
+    assert api.create_http_proxy.await_args.kwargs["headers"] == {"x-api-key": "secret-value"}
 
 
 async def test_delete_secret_deletes_only_box_scoped_integration() -> None:

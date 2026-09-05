@@ -18,6 +18,21 @@ def resolve_capability(provider: VMProvider, capability: type[CapabilityT]) -> C
 class SecretInjectionCapability(abc.ABC):
     """Mix-in declaring that a VMProvider can keep secrets outside its VMs.
 
+    ``put_secret`` takes the service being reached and the secret to reach it
+    with, and returns the environment the VM should be given. Providers differ
+    in what that environment is: one hands the VM a stand-in credential and
+    leaves the address alone, another hands it a different address and no
+    credential. Callers apply whatever comes back without knowing which.
+
+    A service describes how a client of it is configured:
+
+    ``name``                the service handle, unique per VM
+    ``host``                the real upstream, without a scheme
+    ``credential_header``   the header the service authenticates with
+    ``credential_prefix``   what precedes the value in that header, often empty
+    ``credential_var``      the variable a client reads the credential from
+    ``endpoint_var``        the variable a client reads the base URL from
+
     Modeled as an ABC (not a Protocol) so isinstance() really checks the
     inheritance chain. Runtime-checkable protocols would let any object that
     happens to expose the three method names pass the check, including MagicMock
@@ -29,11 +44,7 @@ class SecretInjectionCapability(abc.ABC):
         self,
         *,
         vm: str,
-        name: str,
-        host: str,
-        auth_var: str,
-        base_url_var: str,
-        placeholder: str,
+        service: dict[str, str],
         value: str,
     ) -> dict[str, str]: ...
 

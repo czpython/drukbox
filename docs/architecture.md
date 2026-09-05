@@ -82,11 +82,13 @@ which the routes surface as a clear error. New provider-specific
 features must follow this pattern rather than widening `VMProvider`
 or the host schema.
 
-Secret injection receives the box ID, service name, target host, auth variable,
-base-URL variable, placeholder, and secret value. It returns the environment
-that the box needs. The service name is the provider resource identity. A
-provider can give the box a placeholder, an alternate endpoint, or both without
-exposing its mechanism to the caller. Secret listings contain service names only.
+Secret injection receives the box ID, the service being reached, and the secret
+to reach it with. It returns the environment that the box needs. Providers differ
+in what that environment holds: one gives the box a stand-in credential and
+leaves the address alone, another gives it a different address and no credential
+at all. Callers apply whatever comes back without knowing which ran. The service
+carries its own name, which is the provider resource identity, and secret
+listings contain those names only.
 
 The review question that guards the whole design: *does this change leak
 a provider into the contract?*

@@ -86,8 +86,9 @@ If the provider supports secret injection, inherit
 `SecretInjectionCapability` from `providers.capabilities` and implement
 `put_secret`, `delete_secret`, and `list_secrets`. Do not add
 provider-specific fields to the host schema. Add a capability instead.
-The three methods are the full provider contract. The `name` argument is the
-service identity. `auth_var` and `base_url_var` are environment variable names.
+The three methods are the full provider contract. `service` describes how a
+client of that service is configured, and `providers/capabilities.py` documents
+its keys. Read the ones your mechanism needs and ignore the rest.
 
 ## 7. Tests
 

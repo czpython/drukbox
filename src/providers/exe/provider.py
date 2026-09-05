@@ -162,34 +162,29 @@ class ExeProvider(VMProvider, TemplateCapability, SecretInjectionCapability):
         self,
         *,
         vm: str,
-        name: str,
-        host: str,
-        auth_var: str,
-        base_url_var: str,
-        placeholder: str,
+        service: dict[str, str],
         value: str,
     ) -> dict[str, str]:
-        integration_name = self._secret_integration_name(vm, name)
-        headers = {"Authorization": f"Bearer {value}"}
+        # exe holds the credential at its own edge and gives the VM a different
+        # address instead, so the VM carries no credential at all.
+        integration_name = self._secret_integration_name(vm, service["name"])
+        target = f"https://{service['host']}"
+        headers = {service["credential_header"]: f"{service['credential_prefix']}{value}"}
 
         try:
-            await self.create_http_proxy(
-                name=integration_name,
-                target=f"https://{host}",
-                headers=headers,
-            )
+            await self.create_http_proxy(name=integration_name, target=target, headers=headers)
         except ProviderHttpProxyExistsError:
             try:
                 await self.api.update_http_proxy(
                     name=integration_name,
-                    target=f"https://{host}",
+                    target=target,
                     headers=headers,
                 )
             except ExeIntegrationNotFoundError as exc:
                 raise ProviderHttpProxyNotFoundError(str(exc)) from exc
 
         await self.attach_http_proxy(integration_name, attach_vm=vm)
-        return {base_url_var: f"https://{integration_name}.int.exe.xyz"}
+        return {service["endpoint_var"]: f"https://{integration_name}.int.exe.xyz"}
 
     async def delete_secret(self, *, vm: str, name: str) -> None:
         await self.delete_http_proxy(self._secret_integration_name(vm, name))
