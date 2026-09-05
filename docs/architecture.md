@@ -125,6 +125,9 @@ and setup-script hash. `POST /templates` creates a `building` record and
 returns `202 Accepted`. Callers poll until the template becomes
 `available` or `failed`. Templates outlive hosts. Each provider builds
 and deletes its own templates behind `TemplateCapability`.
+OCI builds use one shared image repository when configured. Labels describe
+purpose; unique build tags identify publications. Published template images
+use repository digests. See [registry configuration](deploy.md#shared-template-image-repository).
 
 A host request can name an available template by its ID — the ID that
 the create returned. The template's image becomes the host image. An

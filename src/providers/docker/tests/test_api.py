@@ -30,6 +30,9 @@ def _fake_docker(**overrides: object) -> SimpleNamespace:
             build=AsyncMock(),
             delete=AsyncMock(),
             push=AsyncMock(),
+            inspect=AsyncMock(
+                return_value={"RepoDigests": ["ghcr.io/acme/template@sha256:" + "a" * 64]}
+            ),
         ),
         version=AsyncMock(return_value={"Version": "29.6.2"}),
         close=AsyncMock(),
@@ -137,10 +140,12 @@ async def test_missing_image_maps_to_not_found() -> None:
 async def test_push_image_sends_per_call_credentials() -> None:
     fake = _fake_docker()
 
-    await _api(fake).push_image(
+    image = await _api(fake).push_image(
         "ghcr.io/acme/template:tag", username="builder", password="registry-secret"
     )
 
+    assert image == "ghcr.io/acme/template:tag@sha256:" + "a" * 64
+    fake.images.inspect.assert_awaited_once_with("ghcr.io/acme/template:tag")
     fake.images.push.assert_awaited_once_with(
         "ghcr.io/acme/template:tag",
         auth={"username": "builder", "password": "registry-secret"},
@@ -178,3 +183,41 @@ async def test_aclose_closes_the_client_once_created() -> None:
     await api.aclose()
 
     fake.close.assert_awaited_once_with()
+
+
+@pytest.mark.parametrize("digests", [None, [], ["ghcr.io/other/template@sha256:" + "a" * 64]])
+async def test_push_rejects_missing_repository_digest(digests):
+    fake = _fake_docker()
+    fake.images.inspect.return_value = {"RepoDigests": digests}
+
+    with pytest.raises(DockerTransportError, match="no unique repository digest"):
+        await _api(fake).push_image("ghcr.io/acme/template:tag")
+
+
+async def test_push_selects_digest_for_the_pushed_repository():
+    fake = _fake_docker()
+    expected = "ghcr.io/acme/template@sha256:" + "a" * 64
+    fake.images.inspect.return_value = {
+        "RepoDigests": ["ghcr.io/other/template@sha256:" + "b" * 64, expected]
+    }
+
+    assert await _api(fake).push_image("ghcr.io/acme/template:tag") == expected.replace(
+        "@", ":tag@"
+    )
+
+
+@pytest.mark.parametrize(
+    ("repository", "stored_repository"),
+    [
+        ("docker.io/acme/templates", "acme/templates"),
+        ("docker.io/library/template", "template"),
+        ("registry.example:5000/acme/templates", "registry.example:5000/acme/templates"),
+    ],
+)
+async def test_push_returns_full_repository_with_engine_digest(repository, stored_repository):
+    fake = _fake_docker()
+    fake.images.inspect.return_value = {"RepoDigests": [f"{stored_repository}@sha256:" + "a" * 64]}
+
+    assert (
+        await _api(fake).push_image(f"{repository}:tag") == f"{repository}:tag@sha256:" + "a" * 64
+    )

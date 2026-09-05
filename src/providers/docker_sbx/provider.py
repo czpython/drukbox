@@ -190,6 +190,7 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
             self.docker,
             base_image=base_image,
             setup_script=setup_script,
+            label=label,
         )
 
     async def delete_template_image(self, image: str) -> None:

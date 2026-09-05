@@ -147,7 +147,7 @@ async def test_build_template_image_builds_and_returns_the_derived_tag():
     )
 
     assert image.startswith("drukbox-template:")
-    assert len(image.removeprefix("drukbox-template:")) == 12
+    assert image.startswith("drukbox-template:node-tools-")
     assert api.build_image.await_args.args[0] == image
 
 

@@ -4,7 +4,6 @@ from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import SecretInjectionCapability, TemplateCapability
 from providers.docker.api import DockerAPI
-from providers.docker.exceptions import DockerProviderError
 from providers.docker.images import build_derived_image, remove_derived_image
 from providers.exceptions import (
     ProviderCommandError,
@@ -12,7 +11,6 @@ from providers.exceptions import (
     ProviderHttpProxyNotFoundError,
     ProviderNotFoundError,
     ProviderTargetVMNotFoundError,
-    ProviderTransportError,
 )
 from providers.exe.api import ExeAPI
 from providers.exe.exceptions import (
@@ -68,19 +66,11 @@ class ExeProvider(VMProvider, TemplateCapability, SecretInjectionCapability):
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
-        # exe.dev assumes a public image. A template pushed to the configured
-        # registry is private, so its pull gets --registry-auth (see
-        # https://exe.dev/docs/private-image). The credentials go only to
-        # the registry that they belong to.
         registry_auth = None
-        registry = self.settings.image_registry
-        if (
-            registry
-            and self.settings.registry_username
-            and self.settings.registry_password
-            and image.partition("/")[0] == registry.partition("/")[0]
-        ):
-            registry_auth = f"{self.settings.registry_username}:{self.settings.registry_password}"
+        settings = get_settings()
+        if settings.registry_host and image.partition("/")[0] == settings.registry_host:
+            password = settings.registry_password.get_secret_value()
+            registry_auth = f"{settings.registry_username}:{password}"
 
         # Tags are operator-facing: `exe ls --tag=managed-by-<env>` shows what this deployment owns.
         payload = await self.api.create_vm(
@@ -115,35 +105,17 @@ class ExeProvider(VMProvider, TemplateCapability, SecretInjectionCapability):
         setup_script: str,
         label: str,
     ) -> str:
-        registry = self.settings.image_registry
-        username = self.settings.registry_username
-        password = self.settings.registry_password
-
-        if not (registry and username and password):
-            missing_settings = [
-                name
-                for name, value in (
-                    ("EXE_IMAGE_REGISTRY", registry),
-                    ("EXE_REGISTRY_USERNAME", username),
-                    ("EXE_REGISTRY_PASSWORD", password),
-                )
-                if not value
-            ]
+        if not get_settings().template_repository:
             raise ProviderCommandError(
-                f"exe template registry is not configured. Set: {', '.join(missing_settings)}"
+                "Template destination is not configured. Set TEMPLATE_REPOSITORY. "
+                "Configure REGISTRY_HOST, REGISTRY_USERNAME, and REGISTRY_PASSWORD for access."
             )
-
-        image = await build_derived_image(
+        return await build_derived_image(
             self.docker,
             base_image=base_image,
             setup_script=setup_script,
-            repository=registry,
+            label=label,
         )
-        try:
-            await self.docker.push_image(image, username=username, password=password)
-        except DockerProviderError as exc:
-            raise ProviderTransportError(str(exc)) from exc
-        return image
 
     async def delete_template_image(self, image: str) -> None:
         # Registry deletion is registry-specific. This provider only removes

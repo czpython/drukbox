@@ -3,7 +3,9 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import SecretStr
 
+from core.settings import get_settings
 from providers.docker.api import DockerAPI
 from providers.docker.exceptions import DockerImageNotFoundError, DockerTransportError
 from providers.exceptions import ProviderCommandError, ProviderNotFoundError, ProviderTransportError
@@ -22,7 +24,7 @@ def _docker_mock() -> SimpleNamespace:
     return SimpleNamespace(
         build_image=AsyncMock(),
         remove_image=AsyncMock(),
-        push_image=AsyncMock(),
+        push_image=AsyncMock(return_value="ghcr.io/acme/templates@sha256:" + "a" * 64),
         aclose=AsyncMock(),
     )
 
@@ -69,30 +71,41 @@ def _vm_payload() -> dict[str, str]:
     return {"vm_name": "sb-1", "ssh_port": "22", "ssh_dest": "sb-1.public.exe.dev"}
 
 
-async def test_create_vm_sends_registry_auth_for_configured_registry_images() -> None:
-    api = SimpleNamespace(create_vm=AsyncMock(return_value=_vm_payload()))
-    settings = _settings(
-        image_registry="ghcr.io/acme/templates",
-        registry_username="bot",
-        registry_password="secret",
-    )
-    provider = ExeProvider(api, settings, docker=_docker_mock())  # type: ignore[arg-type]
+@pytest.fixture
+def registry_settings(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "registry_host", "ghcr.io")
+    monkeypatch.setattr(settings, "template_repository", "")
+    monkeypatch.setattr(settings, "registry_username", "bot")
+    monkeypatch.setattr(settings, "registry_password", SecretStr("secret"))
 
-    await provider.create_vm(name="sb-1", image="ghcr.io/acme/templates:abc123")
+
+@pytest.mark.parametrize("suffix", [":abc123", "@sha256:" + "a" * 64, ":build@sha256:" + "a" * 64])
+async def test_create_vm_sends_registry_auth_without_template_configuration(
+    registry_settings, suffix
+):
+    api = SimpleNamespace(create_vm=AsyncMock(return_value=_vm_payload()))
+    provider = _make_provider(api)
+
+    await provider.create_vm(name="sb-1", image=f"ghcr.io/acme/private-base{suffix}")
 
     assert api.create_vm.await_args.kwargs["registry_auth"] == "bot:secret"
 
 
-async def test_create_vm_keeps_credentials_off_other_registries() -> None:
+@pytest.mark.parametrize(
+    "image",
+    [
+        "docker.io/library/ubuntu:24.04",
+        "ghcr.io.evil.example/acme/templates:tag",
+        "other.example/acme/templates:tag",
+        "ghcr.io:5000/acme/templates:tag",
+    ],
+)
+async def test_create_vm_keeps_credentials_off_other_registry_hosts(registry_settings, image):
     api = SimpleNamespace(create_vm=AsyncMock(return_value=_vm_payload()))
-    settings = _settings(
-        image_registry="ghcr.io/acme/templates",
-        registry_username="bot",
-        registry_password="secret",
-    )
-    provider = ExeProvider(api, settings, docker=_docker_mock())  # type: ignore[arg-type]
+    provider = _make_provider(api)
 
-    await provider.create_vm(name="sb-1", image="docker.io/library/ubuntu:24.04")
+    await provider.create_vm(name="sb-1", image=image)
 
     assert api.create_vm.await_args.kwargs["registry_auth"] is None
 
@@ -252,15 +265,14 @@ def test_from_settings_constructs_with_exeapi() -> None:
     assert isinstance(provider.docker, DockerAPI)
 
 
-async def test_build_template_image_builds_logs_in_and_pushes() -> None:
+async def test_build_template_image_builds_and_returns_digest(
+    registry_settings, monkeypatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "template_repository", "acme/templates")
     docker = _docker_mock()
     provider = ExeProvider(
         SimpleNamespace(),  # type: ignore[arg-type]
-        _settings(
-            image_registry="ghcr.io/acme/drukbox-templates",
-            registry_username="builder",
-            registry_password="registry-secret",
-        ),
+        _settings(),
         docker=docker,  # type: ignore[arg-type]
     )
 
@@ -270,12 +282,10 @@ async def test_build_template_image_builds_logs_in_and_pushes() -> None:
         label="Node tools",
     )
 
-    assert image.startswith("ghcr.io/acme/drukbox-templates:")
-    assert len(image.rpartition(":")[2]) == 12
-    assert docker.build_image.await_args.args[0] == image
-    docker.push_image.assert_awaited_once_with(
-        image, username="builder", password="registry-secret"
-    )
+    assert image == "ghcr.io/acme/templates@sha256:" + "a" * 64
+    tag = docker.build_image.await_args.args[0]
+    assert tag.startswith("ghcr.io/acme/templates:node-tools-")
+    docker.push_image.assert_awaited_once_with(tag, username="bot", password="secret")
 
 
 async def test_build_template_image_names_each_missing_registry_setting() -> None:
@@ -293,22 +303,19 @@ async def test_build_template_image_names_each_missing_registry_setting() -> Non
             label="Node tools",
         )
 
-    assert "EXE_IMAGE_REGISTRY" in str(error.value)
-    assert "EXE_REGISTRY_USERNAME" in str(error.value)
-    assert "EXE_REGISTRY_PASSWORD" in str(error.value)
+    assert "TEMPLATE_REPOSITORY" in str(error.value)
+    assert "REGISTRY_USERNAME" in str(error.value)
+    assert "REGISTRY_PASSWORD" in str(error.value)
     docker.build_image.assert_not_awaited()
 
 
-async def test_build_template_image_translates_push_failure() -> None:
+async def test_build_template_image_translates_push_failure(registry_settings, monkeypatch) -> None:
+    monkeypatch.setattr(get_settings(), "template_repository", "acme/templates")
     docker = _docker_mock()
     docker.push_image.side_effect = DockerTransportError("push log tail")
     provider = ExeProvider(
         SimpleNamespace(),  # type: ignore[arg-type]
-        _settings(
-            image_registry="ghcr.io/acme/drukbox-templates",
-            registry_username="builder",
-            registry_password="registry-secret",
-        ),
+        _settings(),
         docker=docker,  # type: ignore[arg-type]
     )
 

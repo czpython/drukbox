@@ -306,6 +306,10 @@ Core, optional:
 | `SERVICE_LABEL` | `drukbox` | Label stamped onto provider resources (VM tags, SG tags). |
 | `UVICORN_HOST` | `0.0.0.0` | API bind address. Set `127.0.0.1` to restrict to loopback. |
 | `PROVISIONING_GRACE_SECONDS` | `600` | Safety TTL on in-flight hosts so the janitor reaps row + VM if the client disconnects mid-provision. Must exceed the worst-case provision duration. |
+| `REGISTRY_HOST` | — | Registry host for private images, such as `ghcr.io` or `docker.io`. |
+| `TEMPLATE_REPOSITORY` | — | Shared template repository path within `REGISTRY_HOST`, with no tag or digest. |
+| `REGISTRY_USERNAME` | — | Registry user for template pushes and private exe pulls. |
+| `REGISTRY_PASSWORD` | — | Registry password or token. |
 | `TEMPLATE_BUILD_TIMEOUT` | `3600` | Max age in seconds of an unfinished template build before the janitor marks it failed. |
 | `TEMPLATE_FAILED_RETENTION` | `86400` | Seconds that failed template records and diagnostics remain before the janitor deletes them. |
 | `TEMPLATE_UNUSED_TTL` | `1209600` | Seconds that an available template remains after its last use, or creation when never used. |
@@ -334,9 +338,6 @@ exe.dev provider:
 | --- | --- | --- |
 | `EXE_API_TOKEN` | — (required) | Bearer token for the exe.dev exec API. |
 | `EXE_DEFAULT_IMAGE` | — (required) | Image used when the caller omits `image`. |
-| `EXE_IMAGE_REGISTRY` | — | Repository prefix for derived template images. A VM created from this registry gets `--registry-auth` so exe.dev can pull a private image. |
-| `EXE_REGISTRY_USERNAME` | — | Username for the derived-template image registry. |
-| `EXE_REGISTRY_PASSWORD` | — | Password or token for the derived-template image registry. |
 | `EXE_API_URL` | `https://exe.dev` | API base URL. |
 | `EXE_API_TIMEOUT` | `30.0` | Timeout for exe.dev API calls. |
 | `EXE_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `30.0` | ssh-keyscan retry budget for a fresh exe.dev sandbox. |
@@ -422,3 +423,51 @@ The published image does not contain the `sbx` CLI. Mount the binary and
 the auth store of the host, as
 [Local microVMs with Docker Sandboxes](#local-microvms-with-docker-sandboxes)
 shows. Set `DOCKER_SANDBOXES_API` to the mounted daemon socket.
+
+## Shared template image repository
+
+Registry access applies to private images, including boot images that are
+not templates. Set the registry host and credentials together. Set a template
+repository separately when this installation must publish template images:
+
+```dotenv
+REGISTRY_HOST=ghcr.io
+TEMPLATE_REPOSITORY=acme/sandbox-templates
+REGISTRY_USERNAME=builder
+REGISTRY_PASSWORD=<registry-token>
+```
+
+For Docker Hub, set `REGISTRY_HOST=docker.io`. Registry access does not
+require `TEMPLATE_REPOSITORY`. Publishing templates requires a repository
+and a credential that can push to it. Keep the credentials in
+the service environment. Do not send them in a template request.
+
+The caller supplies a descriptive `label`, such as `site-builder-build`.
+Drukbox converts it to lowercase letters, digits, and hyphens. Each build
+gets a unique UUID suffix. A tag has this form:
+
+```text
+ghcr.io/acme/sandbox-templates:site-builder-build-01992000123470008000123456789abc
+```
+
+After the push, Drukbox stores the tag and digest together in the template's
+`image` field: `ghcr.io/acme/sandbox-templates:<purpose>-<build-id>@sha256:<digest>`.
+Hosts use that digest. The tag identifies the build for local image cleanup.
+The label does not change template identity: the provider, base image, and setup script hash
+still determine reuse. A repeated request returns the existing record.
+To retry a failed build, delete its template record, then create it again.
+
+The `exe` provider sends pull credentials for boot images on `REGISTRY_HOST`,
+including images outside the template repository. Credentials never go to a
+different registry host. Template builds also require `TEMPLATE_REPOSITORY`. `docker` and
+`docker-sbx` publish to it when configured. Without a template destination,
+they keep their template images local. Native VM image providers do not use
+this OCI destination. The `docker-sbx` daemon has its own image store and
+registry access. Configure its private pulls or load the template as described
+in [local microVM setup](#local-microvms-with-docker-sandboxes).
+Shared push credentials do not configure that daemon.
+
+All templates share repository access and retention policy. The janitor
+removes template records and local images. It does not delete remote registry
+manifests. Configure registry retention separately, and retain images that
+active templates still reference.

@@ -76,7 +76,7 @@ covered in [Networking](networking.md). The security-relevant summary:
 
 ## Secrets and in-VM metadata
 
-Provider tokens (`EXE_API_TOKEN`, `EXE_REGISTRY_PASSWORD`,
+Provider tokens (`EXE_API_TOKEN`, `REGISTRY_PASSWORD`,
 `HETZNER_API_TOKEN`, Tailscale OAuth) and AWS credentials are read from
 the environment / the AWS SDK default chain and never written to the
 database or returned by the API. Host secret recipes are encrypted in
