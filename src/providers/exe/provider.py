@@ -26,6 +26,7 @@ from providers.exe.settings import ExeSettings
 class ExeProvider(VMProvider, TemplateCapability, SecretInjectionCapability):
     name: ClassVar[str] = "exe"
     diagnose_hint: ClassVar[str] = "check_exe_dev_api_token_and_url"
+    uses_secrets_exchange = False
 
     def __init__(
         self,

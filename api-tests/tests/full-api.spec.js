@@ -170,7 +170,7 @@ test.describe("Drukbox API", () => {
   });
 
   test("PUT /hosts/{host_id}/secrets/{name} registers a secret", async () => {
-    const path = `/hosts/${createdHost.id}/secrets/github`;
+    const path = `/hosts/${createdHost.id}/secrets/anthropic`;
     const data = { value: "black-box-static-secret" };
 
     await expectStatus(await publicApi.put(path, { data }), 401);

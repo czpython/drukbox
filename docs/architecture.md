@@ -30,7 +30,8 @@ that true:
 hosts.api          HTTP request/response concerns only
 hosts.service      host lifecycle behavior (HostService)
 host_secrets.api   host secret registration concerns only
-host_secrets       built-in catalog and encrypted recipe persistence
+host_secrets       built-in catalog, placeholders, encrypted recipe persistence
+secrets_exchange   the secrets exchange process behind Caddy
 templates.api      template request/response concerns only
 templates.service  template build and delete behavior (TemplateService)
 providers/<name>   one package per VM provider
@@ -113,12 +114,23 @@ keys in `hosts.schemas.RESERVED_HOST_ENV_KEYS` are rejected.
 service. The service handle `{name}` is the storage key. A built-in handle
 resolves through the catalog. A custom entry names its own `host` and
 `credential_var`. It can also set `credential_header`, `credential_prefix`, and
-`endpoint_var`. The defaults are a bearer token in `Authorization` and no base
-URL variable. Drukbox does not consult the catalog for a custom entry.
+`endpoint_var`, and `base_path`, the part of the base URL after the host that
+the client expects. The defaults are a bearer token in `Authorization`, no base
+URL variable, and no base path. Drukbox does not consult the catalog for a
+custom entry.
 
 A static entry stores `value`. A refreshable entry stores `source`: the URL,
 the request headers, and the refresh interval. Drukbox never stores a fetched
-token. The provider derives the placeholder, so no caller supplies one.
+token.
+
+Registration mints a placeholder for the sandbox. The placeholder names the
+host and the service, `drk.<host id>.<service>.<random>`. The entry keeps only
+a fingerprint of the random part. On an `active` host, a provider that uses the
+secrets exchange writes the placeholder and the exchange address into the
+sandbox through `put_secret`. The sandbox sends every request for that service
+to the exchange. Caddy asks the exchange process for the upstream host and the
+real credential with `forward_auth`. It swaps the header and forwards the
+request. A provider with its own edge, such as exe, takes the secret itself.
 
 A template is a persistent provider image keyed by provider, base image,
 and setup-script hash. `POST /templates` creates a `building` record and

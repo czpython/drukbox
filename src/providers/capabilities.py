@@ -1,5 +1,5 @@
 import abc
-from typing import TypeVar
+from typing import ClassVar, TypeVar
 
 from providers.base import VMProvider
 from providers.exceptions import CapabilityUnsupportedError
@@ -18,11 +18,15 @@ def resolve_capability(provider: VMProvider, capability: type[CapabilityT]) -> C
 class SecretInjectionCapability(abc.ABC):
     """Mix-in that declares that a VMProvider can keep secrets outside its VMs.
 
-    ``put_secret`` takes the service to reach and the secret that reaches it.
-    It returns the environment that the VM needs. Providers differ in what that
-    environment holds. One provider gives the VM a stand-in credential and leaves
-    the address unchanged. Another gives the VM a different address and no
-    credential. A caller applies what comes back and never learns which ran.
+    ``put_secret`` takes the service to reach and the value the VM sends. A
+    provider that uses the secrets exchange (``uses_secrets_exchange``)
+    receives a placeholder, and the exchange swaps it for the secret. A
+    provider with its own edge receives the secret itself. It returns the
+    environment that the VM needs. Providers differ in what that environment
+    holds. One provider gives the VM
+    a stand-in credential and leaves the address unchanged. Another gives the
+    VM a different address and no credential. A caller applies what comes back
+    and never learns which ran.
 
     A service describes how a client of it reads its configuration:
 
@@ -32,11 +36,14 @@ class SecretInjectionCapability(abc.ABC):
     ``credential_prefix``   What comes before the value in that header
     ``credential_var``      The variable that a client reads the credential from
     ``endpoint_var``        The variable that a client reads the base URL from
+    ``base_path``           What the client expects after the host in that base URL
 
     This is an ABC and not a Protocol, so isinstance() tests the inheritance
     chain. A runtime-checkable Protocol accepts any object with these three
     method names. That includes a MagicMock and a provider with wrong signatures.
     """
+
+    uses_secrets_exchange: ClassVar[bool] = True
 
     @abc.abstractmethod
     async def put_secret(

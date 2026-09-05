@@ -143,6 +143,8 @@ jobs:
       SECRETS_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
       SERVICE_TOKENS: ci-token
       DEFAULT_HOST_PROVIDER: docker
+      # The sandbox reaches the secrets exchange on the Docker bridge; the API test only checks delivery.
+      SECRETS_EXCHANGE_URL: http://172.17.0.1:8080
       DOCKER_DEFAULT_IMAGE: drukbox/sandbox:ci
       UVICORN_HOST: 127.0.0.1
 
@@ -166,6 +168,7 @@ jobs:
             --env SECRETS_KEY \
             --env SERVICE_TOKENS \
             --env DEFAULT_HOST_PROVIDER \
+            --env SECRETS_EXCHANGE_URL \
             --env DOCKER_DEFAULT_IMAGE \
             --env UVICORN_HOST \
             drukbox:api-test \
