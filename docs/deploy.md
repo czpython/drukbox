@@ -268,6 +268,45 @@ settings. The policy needs `ec2:RunInstances`,
 Drukbox tags everything it creates with `managed-by=<SERVICE_LABEL>`,
 so write permissions can be tag-scoped.
 
+## The secrets exchange
+
+A sandbox never holds a real third-party credential. It holds a placeholder,
+and it sends every request for a registered service to the secrets exchange.
+The exchange swaps the placeholder for the real value and forwards the request
+to the service. Two pieces run it:
+
+- **Caddy**, unmodified, with the snippet in `deploy/caddy/secrets_exchange.caddy`.
+  Import the file before the site that uses it, then import the snippet into
+  the site with the address of the exchange process as the argument.
+- **The exchange process**, `python -m secrets_exchange`, from this image.
+  Caddy asks it on every request with `forward_auth`. It answers with the
+  upstream host, the header that host reads, and the real credential, or it
+  refuses. Bind it where only Caddy can reach it: its answer is the credential.
+
+```
+import /etc/caddy/secrets_exchange.caddy
+
+secrets.example.com {
+    import secrets_exchange http://127.0.0.1:8781
+}
+```
+
+The snippet has one route, `/<host>/*`, for every service, built in or
+custom. Nothing in it is generated and nothing in it changes when a service is
+registered. Real credentials exist in three places only: encrypted in
+Postgres, in the exchange process for one request, and in Caddy for one
+request. Caddy does not log them.
+
+`SECRETS_EXCHANGE_URL` is the address a sandbox dials. For local containers
+that is Caddy on the Docker bridge, for example `http://172.17.0.1:8080`, with
+Caddy listening there without TLS. A public deployment uses a public name with
+automatic HTTPS. A private network works the same way with its own address.
+
+Registering a secret on an `active` sandbox delivers the placeholder at once.
+A sandbox that is still provisioning receives nothing until a later release.
+Refreshable secrets, those registered with `source`, answer `503` at the
+exchange until the refresh loop lands.
+
 ## Verify
 
 ```bash
@@ -315,6 +354,14 @@ Core, optional:
 | `POOL_SIZE` | `0` | Warm hosts to keep ready for the default provider. `0` disables its pool. |
 | `POOL_HOST_MAX_AGE_HOURS` | `4` | Max age before the janitor reaps an unclaimed pool host. |
 | `POOL_MAX_CREATES_PER_TICK` | `2` | Upper bound on pool provisions per tick, across all providers; caps over-provision blast radius when ticks overlap. |
+
+Secrets exchange:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SECRETS_EXCHANGE_URL` | — | Base URL a sandbox dials to reach the secrets exchange. Required to register a secret on an `active` host. |
+| `SECRETS_EXCHANGE_BIND_HOST` | `127.0.0.1` | Interface the exchange process binds. Only Caddy must reach it. |
+| `SECRETS_EXCHANGE_PORT` | `8781` | Port the exchange process listens on. |
 
 Tailscale (required when `TAILSCALE_ENABLED=true`):
 

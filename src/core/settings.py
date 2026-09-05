@@ -48,6 +48,15 @@ class Settings(BaseSettings):
         description="Name of the network provider used when callers don't specify one.",
     )
 
+    secrets_exchange_url: str = Field(
+        default="",
+        validation_alias="SECRETS_EXCHANGE_URL",
+        description=(
+            "Base URL a sandbox dials to reach the secrets exchange, for example "
+            "https://secrets.example.com or http://172.17.0.1:8080."
+        ),
+    )
+
     service_label: str = Field(
         default="drukbox",
         validation_alias="SERVICE_LABEL",

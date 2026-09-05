@@ -29,6 +29,7 @@ def _api_mock() -> MagicMock:
     api.build_image = AsyncMock()
     api.remove_image = AsyncMock()
     api.server_version = AsyncMock(return_value="27.0.3")
+    api.run_shell = AsyncMock(return_value="")
     return api
 
 
@@ -196,3 +197,83 @@ async def test_diagnose_returns_server_version():
 def test_default_image_reads_from_settings():
     provider = DockerProvider(_api_mock(), _settings(default_image="my/sandbox:v2"))
     assert provider.default_image == "my/sandbox:v2"
+
+
+_GITHUB = {
+    "name": "github",
+    "host": "api.github.com",
+    "credential_header": "Authorization",
+    "credential_prefix": "Bearer ",
+    "credential_var": "GH_TOKEN",
+    "endpoint_var": "",
+}
+_ANTHROPIC = {
+    **_GITHUB,
+    "name": "anthropic",
+    "host": "api.anthropic.com",
+    "credential_var": "ANTHROPIC_AUTH_TOKEN",
+    "endpoint_var": "ANTHROPIC_BASE_URL",
+}
+
+
+@pytest.mark.asyncio
+async def test_put_secret_writes_the_placeholder_and_the_edge_address_into_the_box():
+    api = _api_mock()
+    provider = DockerProvider(api, _settings(), secrets_exchange_url="http://172.17.0.1:8080")
+
+    env = await provider.put_secret(vm="sb-one", service=_ANTHROPIC, value="drk.abc.anthropic.x")
+
+    assert env == {
+        "ANTHROPIC_AUTH_TOKEN": "drk.abc.anthropic.x",
+        "ANTHROPIC_BASE_URL": "http://172.17.0.1:8080/api.anthropic.com",
+    }
+    name, script = api.run_shell.await_args.args
+    assert name == "sb-one"
+    assert "sed -i '/^ANTHROPIC_AUTH_TOKEN=/d' /etc/environment" in script
+    assert "ANTHROPIC_AUTH_TOKEN=drk.abc.anthropic.x" in script
+    assert "ANTHROPIC_BASE_URL=http://172.17.0.1:8080/api.anthropic.com" in script
+
+
+@pytest.mark.asyncio
+async def test_put_secret_writes_no_endpoint_for_a_service_without_a_base_url_variable():
+    api = _api_mock()
+    provider = DockerProvider(api, _settings(), secrets_exchange_url="http://172.17.0.1:8080")
+
+    env = await provider.put_secret(vm="sb-one", service=_GITHUB, value="drk.abc.github.x")
+
+    assert env == {"GH_TOKEN": "drk.abc.github.x"}
+
+
+@pytest.mark.asyncio
+async def test_put_secret_needs_the_edge_address():
+    provider = DockerProvider(_api_mock(), _settings())
+
+    with pytest.raises(ProviderCommandError, match="SECRETS_EXCHANGE_URL"):
+        await provider.put_secret(vm="sb-one", service=_GITHUB, value="drk.abc.github.x")
+
+
+@pytest.mark.asyncio
+async def test_list_and_delete_secrets_read_the_placeholders_back():
+    api = _api_mock()
+    host_hex = "0" * 32
+    api.run_shell.return_value = (
+        f"GH_TOKEN=drk.{host_hex}.github.abc\nANTHROPIC_AUTH_TOKEN=drk.{host_hex}.anthropic.def\n"
+        "ANTHROPIC_BASE_URL=http://172.17.0.1:8080/api.anthropic.com\nOTHER=value\n"
+    )
+    provider = DockerProvider(api, _settings(), secrets_exchange_url="http://172.17.0.1:8080")
+
+    assert await provider.list_secrets(vm="sb-one") == ["anthropic", "github"]
+
+    await provider.delete_secret(vm="sb-one", name="github")
+    _, script = api.run_shell.await_args.args
+    assert script.startswith("sed -i -E") and ".github\\./d" in script
+
+
+@pytest.mark.asyncio
+async def test_put_secret_on_a_missing_container_is_a_not_found_error():
+    api = _api_mock()
+    api.run_shell = AsyncMock(side_effect=DockerVMNotFoundError("gone"))
+    provider = DockerProvider(api, _settings(), secrets_exchange_url="http://172.17.0.1:8080")
+
+    with pytest.raises(ProviderNotFoundError):
+        await provider.put_secret(vm="sb-one", service=_GITHUB, value="drk.abc.github.x")

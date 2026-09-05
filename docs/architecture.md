@@ -30,7 +30,8 @@ that true:
 hosts.api          HTTP request/response concerns only
 hosts.service      host lifecycle behavior (HostService)
 host_secrets.api   host secret registration concerns only
-host_secrets       built-in catalog and encrypted recipe persistence
+host_secrets       built-in catalog, placeholders, encrypted recipe persistence
+secrets_exchange   the secrets exchange process behind Caddy
 templates.api      template request/response concerns only
 templates.service  template build and delete behavior (TemplateService)
 providers/<name>   one package per VM provider
@@ -118,7 +119,17 @@ URL variable. Drukbox does not consult the catalog for a custom entry.
 
 A static entry stores `value`. A refreshable entry stores `source`: the URL,
 the request headers, and the refresh interval. Drukbox never stores a fetched
-token. The provider derives the placeholder, so no caller supplies one.
+token.
+
+Registration mints a placeholder for the sandbox. The placeholder names the
+host and the service, `drk.<host id>.<service>.<random>`, and the entry keeps
+only the digest of the random part. On an `active` host, a provider that does
+not hold secrets at its own edge writes the placeholder and the exchange
+address into the sandbox through `put_secret`. The sandbox sends every request
+for that service to the secrets exchange. Caddy asks the exchange process for
+the upstream host and the real credential with `forward_auth`, swaps the
+header, and forwards the request. A provider with its own edge, such as exe,
+takes the secret itself instead.
 
 A template is a persistent provider image keyed by provider, base image,
 and setup-script hash. `POST /templates` creates a `building` record and

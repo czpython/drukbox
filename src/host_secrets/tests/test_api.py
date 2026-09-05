@@ -1,9 +1,11 @@
 import uuid
+from unittest.mock import AsyncMock
 
 from sqlalchemy import select, text
 
 from core.database import async_session_factory
-from hosts.models import Host
+from host_secrets.placeholder import digest, parse
+from hosts.models import Host, HostStatus
 from hosts.service import utc_now
 
 AUTH_HEADERS = {"Authorization": "Bearer service-token"}
@@ -86,6 +88,72 @@ async def test_registers_a_refreshable_custom_secret(client) -> None:
 
     assert response.status_code == 204
     assert await _stored_secrets(host.id) == {"acme": entry}
+
+
+async def test_registration_records_the_placeholder_digest(client) -> None:
+    host = await _create_host_record()
+
+    await client.put(
+        f"/hosts/{host.id}/secrets/github", headers=AUTH_HEADERS, json={"value": "secret"}
+    )
+
+    assert len(await _placeholder_digest(host.id, "github")) == 64
+
+
+async def test_registration_on_an_active_host_delivers_the_placeholder(client, monkeypatch) -> None:
+    put_secret = AsyncMock(return_value={})
+    monkeypatch.setattr("providers.docker.provider.DockerProvider.put_secret", put_secret)
+    host = await _create_host_record(provider="docker", status=HostStatus.ACTIVE.value)
+
+    response = await client.put(
+        f"/hosts/{host.id}/secrets/github", headers=AUTH_HEADERS, json={"value": "secret"}
+    )
+
+    assert response.status_code == 204
+    call = put_secret.await_args_list[0].kwargs
+    assert call["vm"] == host.name
+    assert call["service"] == {
+        "name": "github",
+        "host": "api.github.com",
+        "credential_header": "Authorization",
+        "credential_prefix": "Bearer ",
+        "credential_var": "GH_TOKEN",
+        "endpoint_var": "",
+    }
+    placeholder_host, service, secret = parse(call["value"])
+    assert (placeholder_host, service) == (host.id, "github")
+    assert digest(secret) == await _placeholder_digest(host.id, "github")
+
+
+async def test_a_provider_with_its_own_edge_takes_no_placeholder(client, monkeypatch) -> None:
+    put_secret = AsyncMock(return_value={})
+    monkeypatch.setattr("providers.exe.provider.ExeProvider.put_secret", put_secret)
+    host = await _create_host_record(provider="exe", status=HostStatus.ACTIVE.value)
+
+    response = await client.put(
+        f"/hosts/{host.id}/secrets/github", headers=AUTH_HEADERS, json={"value": "secret"}
+    )
+
+    assert response.status_code == 204
+    put_secret.assert_not_awaited()
+
+
+async def test_registration_on_an_active_host_that_cannot_deliver_is_refused(
+    client, monkeypatch
+) -> None:
+    class BareProvider:
+        name = "bare"
+
+    monkeypatch.setattr("host_secrets.service.get_vm_provider", lambda name: BareProvider())
+    host = await _create_host_record(provider="bare", status=HostStatus.ACTIVE.value)
+
+    response = await client.put(
+        f"/hosts/{host.id}/secrets/github", headers=AUTH_HEADERS, json={"value": "secret"}
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "SECRET_DELIVERY_UNSUPPORTED"
+    assert await _stored_secrets(host.id) == {}
 
 
 async def test_register_replaces_one_service_without_changing_others(client) -> None:
@@ -207,11 +275,18 @@ async def test_registered_secret_is_ciphertext_at_rest(client) -> None:
     assert b"registered-secret-at-rest" not in bytes(stored)
 
 
-async def _create_host_record(*, secrets: dict[str, object] | None = None) -> Host:
+async def _create_host_record(
+    *,
+    secrets: dict[str, object] | None = None,
+    provider: str = "exe",
+    status: str = HostStatus.PROVISIONING.value,
+) -> Host:
     now = utc_now()
     host = Host(
         name=f"sb-{uuid.uuid4().hex[:12]}",
         image="sandbox:latest",
+        provider=provider,
+        status=status,
         secrets=secrets or {},
         created_at=now,
         updated_at=now,
@@ -223,6 +298,16 @@ async def _create_host_record(*, secrets: dict[str, object] | None = None) -> Ho
 
 
 async def _stored_secrets(host_id: uuid.UUID) -> dict[str, object]:
+    """The stored entries as the caller registered them, without the placeholder digest."""
     async with async_session_factory() as session:
         host = (await session.execute(select(Host).where(Host.id == host_id))).scalar_one()
-        return dict(host.secrets)
+        return {
+            name: {key: value for key, value in entry.items() if key != "placeholder_sha256"}
+            for name, entry in host.secrets.items()
+        }
+
+
+async def _placeholder_digest(host_id: uuid.UUID, name: str) -> str:
+    async with async_session_factory() as session:
+        host = (await session.execute(select(Host).where(Host.id == host_id))).scalar_one()
+        return host.secrets[name]["placeholder_sha256"]
