@@ -59,7 +59,7 @@ src/
   conftest.py        # Test env defaults and database reset fixture
 alembic/             # Database migrations
 deploy/proxy/        # The secrets proxy: a mitmproxy addon, mounted into the official image
-api-tests/           # Playwright black-box API tests
+api-tests/           # Playwright black-box API tests, and the acceptance kit for the secrets path
 docs/                # Architecture, networking, deploy, add-a-provider
 Dockerfile           # Single image: API + cron commands + migrations
 ```

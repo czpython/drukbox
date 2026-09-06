@@ -1,0 +1,3 @@
+# Token files. Never in the repository.
+*.json
+*.token
