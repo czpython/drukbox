@@ -21,7 +21,7 @@ async def test_a_host_is_created_with_its_secrets_and_never_returns_them(
             "host": "api.github.com",
             "credential_var": "GH_TOKEN",
             "endpoint_var": "GH_API_URL",
-            "source": {
+            "issuer": {
                 "url": "https://mint.example.test/boxes/box-1/github",
                 "headers": {"Authorization": "Bearer mint-credential"},
                 "refresh": "50m",
@@ -67,10 +67,10 @@ async def test_secrets_are_ciphertext_at_rest(client, monkeypatch) -> None:
             {
                 "anthropic": {
                     "value": "one",
-                    "source": {"url": "https://m.test", "headers": {"A": "b"}, "refresh": "5m"},
+                    "issuer": {"url": "https://m.test", "headers": {"A": "b"}, "refresh": "5m"},
                 }
             },
-            "exactly one of value or source",
+            "exactly one of value or issuer",
         ),
     ],
 )
