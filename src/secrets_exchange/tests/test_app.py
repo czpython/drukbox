@@ -248,6 +248,29 @@ async def test_the_timer_pushes_issuer_values_to_a_provider_that_holds_them(edge
 
 @respx.mock
 @pytest.mark.usefixtures("stub_provider")
+async def test_the_timer_forgets_a_deleted_host(edge) -> None:
+    injection = MagicMock(holds_value=True)
+    injection.push_secret = AsyncMock()
+    get_vm_provider("stub").secret_injection = injection
+    host_id = uuid.uuid4()
+    await _create_host(
+        host_id, {"anthropic": {"issuer": ISSUER, "placeholder_fingerprint": "a"}}, provider="stub"
+    )
+    respx.get(ISSUER["url"]).respond(json={"value": "sk-ant-fresh"})
+    await push_held(app.state.secrets)
+    assert (host_id, "anthropic") in app.state.secrets._refreshable
+
+    async with async_session_factory() as session:
+        await session.delete(await session.get(Host, host_id))
+        await session.commit()
+    await push_held(app.state.secrets)
+
+    assert (host_id, "anthropic") not in app.state.secrets._refreshable
+    injection.push_secret.assert_awaited_once()
+
+
+@respx.mock
+@pytest.mark.usefixtures("stub_provider")
 async def test_one_host_in_trouble_costs_no_other_host_its_value(edge, caplog) -> None:
     injection = MagicMock(holds_value=True)
     injection.push_secret = AsyncMock()

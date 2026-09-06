@@ -1,5 +1,5 @@
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from uuid6 import uuid7
 
@@ -7,6 +7,7 @@ from core.database import async_session_factory
 from hosts.janitor import reap_expired_hosts
 from hosts.models import Host, HostStatus
 from hosts.service import HostService, utc_now
+from hosts.tests.conftest import StubVMProvider
 from providers.exe.settings import ExeSettings
 
 
@@ -16,13 +17,14 @@ async def _create_host(
     status: str,
     expires_at: datetime | None,
     tailscale_device_id: str | None = None,
+    provider: str = "exe",
 ) -> Host:
     now = utc_now()
     host = Host(
         id=uuid7(),
         name=name,
         status=status,
-        provider="exe",
+        provider=provider,
         image=ExeSettings().default_image,  # pyright: ignore[reportCallIssue]
         env={},
         internal_ssh_host=f"{name}.example.ts.net",
@@ -58,6 +60,25 @@ async def test_janitor_deletes_host_past_expires_at(monkeypatch):
 
     async with async_session_factory() as session:
         assert await session.get(Host, host.id) is None
+
+
+async def test_janitor_removes_the_secrets_of_an_expired_host_before_its_vm(
+    stub_provider: StubVMProvider,
+) -> None:
+    injection = MagicMock(holds_value=True)
+    injection.delete_secrets = AsyncMock()
+    stub_provider.secret_injection = injection
+    host = await _create_host(
+        name="sb-expired",
+        status=HostStatus.ACTIVE.value,
+        expires_at=datetime.now(UTC) - timedelta(minutes=1),
+        provider="stub",
+    )
+
+    assert await reap_expired_hosts() == [host.id]
+
+    injection.delete_secrets.assert_awaited_once_with(vm="sb-expired")
+    assert stub_provider.deleted == ["sb-expired"]
 
 
 async def test_janitor_leaves_unexpired_hosts_alone(monkeypatch):
