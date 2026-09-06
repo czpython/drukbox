@@ -106,6 +106,44 @@ async def test_set_custom_secret_names_every_host_of_the_service(monkeypatch):
     )
 
 
+LISTING = """SCOPE  TYPE  NAME  SECRET
+sb-test  service  github  (stored)
+
+CUSTOM SECRETS
+SCOPE  TARGETS  ENV  PLACEHOLDER  SECRET
+sb-test  api.anthropic.com  ANTHROPIC_AUTH_TOKEN  drk.0123.anthropic.abc  cmd (on-demand)
+sb-test  api.acme.test, acme.example  ACME_TOKEN  drk.0123.acme.def  cmd (on-demand)
+"""
+
+
+@pytest.mark.asyncio
+async def test_custom_placeholders_reads_the_placeholder_of_each_custom_row(
+    monkeypatch,
+):
+    captured: dict = {}
+
+    async def fake_exec(*args, **kwargs):
+        captured["args"] = args
+        return _process(stdout=LISTING.encode())
+
+    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", fake_exec)
+
+    placeholders = await SbxCLI().custom_placeholders(sandbox="sb-test")
+
+    assert captured["args"] == ("sbx", "secret", "ls", "--sandbox", "sb-test")
+    assert placeholders == ["drk.0123.anthropic.abc", "drk.0123.acme.def"]
+
+
+@pytest.mark.asyncio
+async def test_custom_placeholders_of_an_empty_scope(monkeypatch):
+    async def fake_exec(*args, **kwargs):
+        return _process(stdout=b'No secrets found for scope "sb-test".\n')
+
+    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", fake_exec)
+
+    assert await SbxCLI().custom_placeholders(sandbox="sb-test") == []
+
+
 @pytest.mark.asyncio
 async def test_sandbox_count_reads_the_listing(monkeypatch):
     listing = b'{"sandboxes": [{"name": "sb-a"}, {"name": "sb-b"}]}'

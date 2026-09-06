@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from host_secrets.catalog import CATALOG
+from host_secrets.catalog import CATALOG, Service, Upstream
 from host_secrets.placeholder import Placeholder
 from providers.docker_sbx.exceptions import DockerSbxTransportError
 from providers.docker_sbx.secrets import SbxInjection
@@ -18,6 +18,7 @@ def _api_mock() -> MagicMock:
     api.set_custom_secret = AsyncMock()
     api.remove_secret = AsyncMock()
     api.remove_custom_secret = AsyncMock()
+    api.custom_placeholders = AsyncMock(return_value=[])
     return api
 
 
@@ -76,35 +77,58 @@ async def test_a_new_value_replaces_the_file_and_the_secret(tmp_path: Path) -> N
     assert api.set_custom_secret.await_count == 2
 
 
-async def test_delete_removes_a_custom_secret_by_placeholder_and_its_file(tmp_path: Path) -> None:
+async def test_a_custom_entry_named_github_is_a_custom_secret_on_its_host(tmp_path: Path) -> None:
     api = _api_mock()
-    injection = SbxInjection(api, tmp_path)
-    placeholder = Placeholder.mint(uuid.uuid4(), "anthropic")
-    await injection.put_secret(
-        vm="sb-one", service=CATALOG["anthropic"], placeholder=placeholder, value="sk-ant-real"
-    )
-
-    await injection.delete_secret(vm="sb-one", placeholder=placeholder)
-
-    api.remove_custom_secret.assert_awaited_once_with(
-        sandbox="sb-one", placeholder=str(placeholder)
-    )
-    assert not (tmp_path / "sb-one" / "anthropic").exists()
-
-
-async def test_delete_removes_a_github_secret_by_service_name_and_its_file(tmp_path: Path) -> None:
-    api = _api_mock()
-    injection = SbxInjection(api, tmp_path)
     placeholder = Placeholder.mint(uuid.uuid4(), "github")
-    await injection.put_secret(
-        vm="sb-one", service=CATALOG["github"], placeholder=placeholder, value="ghs_real"
+    enterprise = Service("GH_ENTERPRISE_TOKEN", (Upstream("github.enterprise.example"),))
+
+    environment = await SbxInjection(api, tmp_path).put_secret(
+        vm="sb-one", service=enterprise, placeholder=placeholder, value="ghe_real"
     )
 
-    await injection.delete_secret(vm="sb-one", placeholder=placeholder)
+    api.set_custom_secret.assert_awaited_once_with(
+        sandbox="sb-one",
+        hosts=["github.enterprise.example"],
+        env="GH_ENTERPRISE_TOKEN",
+        placeholder=str(placeholder),
+        command=f"cat {tmp_path / 'sb-one' / 'github'}",
+    )
+    api.set_secret.assert_not_awaited()
+    assert environment == {"GH_ENTERPRISE_TOKEN": str(placeholder)}
+
+
+async def test_delete_secrets_removes_the_scope_and_the_files(tmp_path: Path) -> None:
+    api = _api_mock()
+    injection = SbxInjection(api, tmp_path)
+    anthropic = Placeholder.mint(uuid.uuid4(), "anthropic")
+    github = Placeholder.mint(uuid.uuid4(), "github")
+    await injection.put_secret(
+        vm="sb-one", service=CATALOG["anthropic"], placeholder=anthropic, value="sk-ant-real"
+    )
+    await injection.put_secret(
+        vm="sb-one", service=CATALOG["github"], placeholder=github, value="ghs_real"
+    )
+    api.custom_placeholders.return_value = [str(anthropic), "drk.x.other.y"]
+
+    await injection.delete_secrets(vm="sb-one")
+
+    api.remove_secret.assert_awaited_once_with("github", sandbox="sb-one")
+    api.custom_placeholders.assert_awaited_once_with(sandbox="sb-one")
+    assert [call.kwargs for call in api.remove_custom_secret.await_args_list] == [
+        {"sandbox": "sb-one", "placeholder": str(anthropic)},
+        {"sandbox": "sb-one", "placeholder": "drk.x.other.y"},
+    ]
+    assert not (tmp_path / "sb-one").exists()
+
+
+async def test_delete_secrets_can_run_again_after_a_partial_teardown(tmp_path: Path) -> None:
+    api = _api_mock()
+
+    await SbxInjection(api, tmp_path).delete_secrets(vm="sb-one")
 
     api.remove_secret.assert_awaited_once_with("github", sandbox="sb-one")
     api.remove_custom_secret.assert_not_awaited()
-    assert not (tmp_path / "sb-one" / "github").exists()
+    assert not (tmp_path / "sb-one").exists()
 
 
 @pytest.mark.parametrize("service", ["github", "anthropic"])
@@ -113,7 +137,6 @@ async def test_a_cli_failure_is_a_provider_error(tmp_path: Path, service: str) -
     api.set_secret.side_effect = DockerSbxTransportError("daemon unavailable")
     api.set_custom_secret.side_effect = DockerSbxTransportError("daemon unavailable")
     api.remove_secret.side_effect = DockerSbxTransportError("daemon unavailable")
-    api.remove_custom_secret.side_effect = DockerSbxTransportError("daemon unavailable")
     injection = SbxInjection(api, tmp_path)
     placeholder = Placeholder.mint(uuid.uuid4(), service)
 
@@ -122,4 +145,6 @@ async def test_a_cli_failure_is_a_provider_error(tmp_path: Path, service: str) -
             vm="sb-one", service=CATALOG[service], placeholder=placeholder, value="v"
         )
     with pytest.raises(ProviderTransportError, match="daemon unavailable"):
-        await injection.delete_secret(vm="sb-one", placeholder=placeholder)
+        await injection.delete_secrets(vm="sb-one")
+    # The value file stays for the retry.
+    assert (tmp_path / "sb-one" / service).exists()

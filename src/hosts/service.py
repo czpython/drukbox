@@ -461,8 +461,11 @@ class HostService:
                 host.tailscale_device_id = None
                 host.updated_at = utc_now()
                 await self.session.commit()
+            # Secrets go before the VM. A provider failure keeps the row for a retry.
+            vm = get_vm_provider(host.provider)
+            await vm.secrets.delete_secrets(vm=host.name)
             try:
-                await get_vm_provider(host.provider).delete_vm(host.name)
+                await vm.delete_vm(host.name)
             except ProviderNotFoundError:
                 # VM already absent at the provider — exe.dev may have evicted
                 # it, or a previous delete partially succeeded. Treat as done
