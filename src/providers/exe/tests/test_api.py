@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 import respx
@@ -79,9 +81,46 @@ async def test_create_vm_exports_env_after_setup_script_shebang(respx_mock):
 
     body = route.calls.last.request.content.decode()
     assert "--env 'FOO=bar baz' --env EMPTY=" in body
-    assert (
-        "--setup-script=\"#!/bin/bash\\nexport FOO='bar baz'\\nexport EMPTY=''\\necho ready\""
-    ) in body
+    assert _setup_script(body) == [
+        "#!/bin/bash",
+        "export FOO='bar baz'",
+        "export EMPTY=''",
+        "cat > ~/.bashrc.new <<'DRUKBOX_ENV'",
+        "export FOO='bar baz'",
+        "export EMPTY=''",
+        "DRUKBOX_ENV",
+        "cat ~/.bashrc >> ~/.bashrc.new && mv ~/.bashrc.new ~/.bashrc",
+        "echo ready",
+    ]
+
+
+@pytest.mark.asyncio
+@respx.mock(base_url="https://exe.dev")
+async def test_create_vm_sends_a_setup_script_for_env_alone(respx_mock):
+    # exe puts --env where only a login shell reads it. The setup script
+    # writes the exports to ~/.bashrc, which every bash session reads.
+    route = respx_mock.post("/exec").mock(
+        return_value=httpx.Response(200, content=b'{"vm_name": "sb-1", "ssh_port": 22}'),
+    )
+
+    await _api().create_vm(name="sb-1", image="ubuntu:22.04", env={"FOO": "bar"})
+
+    body = route.calls.last.request.content.decode()
+    assert "--env FOO=bar" in body
+    assert _setup_script(body) == [
+        "#!/bin/bash",
+        "export FOO=bar",
+        "cat > ~/.bashrc.new <<'DRUKBOX_ENV'",
+        "export FOO=bar",
+        "DRUKBOX_ENV",
+        "cat ~/.bashrc >> ~/.bashrc.new && mv ~/.bashrc.new ~/.bashrc",
+    ]
+
+
+def _setup_script(body: str) -> list[str]:
+    """The setup script exe receives, as lines."""
+    quoted = body.split("--setup-script=", 1)[1].split(" --", 1)[0]
+    return json.loads(quoted).split("\n")
 
 
 @pytest.mark.asyncio

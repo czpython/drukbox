@@ -49,6 +49,18 @@ def persist(env: dict[str, str]) -> list[str]:
     return lines
 
 
+def bashrc(env: dict[str, str]) -> str:
+    """Shell that puts the exports at the top of ~/.bashrc. Every bash session reads them."""
+    return "\n".join(
+        [
+            "cat > ~/.bashrc.new <<'DRUKBOX_ENV'",
+            *export(env),
+            "DRUKBOX_ENV",
+            "cat ~/.bashrc >> ~/.bashrc.new && mv ~/.bashrc.new ~/.bashrc",
+        ]
+    )
+
+
 def cloud_init(setup_script: str, env: dict[str, str] | None) -> str:
     """The user-data for a cloud VM: a shebang, ``env`` for the setup script
     and for every later session, then the setup script."""

@@ -123,6 +123,10 @@ the host:
 2. Sign in one time with `sbx login`. Headless hosts use a device-code
    flow.
 3. Start the daemon: `sbx daemon start -d --policy balanced`.
+4. Allow the secrets exchange. The daemon sends every sandbox through
+   its own egress proxy, and the default policy denies what it does not
+   list. One rule for the exchange address serves every sandbox:
+   `sbx policy allow network secrets.example.com:443`.
 
 Docker documents `sbx` as a tool for the daemon owner's own user on the
 host. Thus the simplest deployment runs drukbox directly on the host, as
@@ -304,6 +308,22 @@ set it to Caddy on the Docker bridge, for example `http://172.17.0.1:8080`, and
 let Caddy listen there without TLS. A public deployment uses a public name with
 automatic HTTPS. A private network works the same way with its own address.
 
+The exchange is the first flow that runs from a sandbox to drukbox. Every
+other flow runs the other way. So the network between them needs one rule
+for it, one address and one port, for every sandbox. On a tailnet that is a
+grant from the sandbox tag to the exchange host:
+
+```json
+"hosts":  { "secrets-exchange": "100.64.0.10" },
+"grants": [
+    { "src": ["tag:sandbox"], "dst": ["secrets-exchange"], "ip": ["tcp:443"] }
+]
+```
+
+A sandbox then reaches that port on that host and nothing else there. On
+Docker Sandboxes the same rule is the `sbx policy allow network` line in
+[the docker-sbx section](#local-microvms-with-docker-sandboxes).
+
 Give secrets to `POST /hosts`. Provisioning delivers the placeholders in the
 sandbox's boot environment, on every provider, the same way as `env`. The
 service must have a base URL variable, because the exchange routes by base
@@ -381,7 +401,12 @@ Tailscale (required when `TAILSCALE_ENABLED=true`):
 | `TAILSCALE_API_TIMEOUT` | `30.0` | Timeout for Tailscale API calls. |
 | `DEVICE_DISCOVERY_TIMEOUT_SECONDS` | `180.0` | How long provisioning waits for a sandbox to appear in the tailnet. |
 
+exe.dev provider. exe puts `--env` where only a login shell reads it, so
+the setup script also writes the exports to `~/.bashrc`, which every bash
+session on the box reads.
+
 exe.dev provider:
+
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
