@@ -1,0 +1,3 @@
+# The operator's token files and the stub's state. Never in the repository.
+*.json
+*.token
