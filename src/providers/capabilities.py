@@ -30,8 +30,9 @@ def resolve_capability(provider, capability: type[CapabilityT]) -> CapabilityT:
 
 class SecretInjectionCapability(abc.ABC):
     """How a secret reaches one provider's boxes. ``put_secret`` returns the
-    environment the box needs. ``delete_secrets`` gets the box alone, so
-    teardown never reads the host row."""
+    environment the box needs. ``push_secret`` hands a provider that needs the
+    value a fresh one. ``delete_secrets`` gets the box alone, so teardown never
+    reads the host row."""
 
     # sbx keeps the value in its own store. The proxy needs only the placeholder.
     needs_value: ClassVar[bool]
@@ -45,6 +46,9 @@ class SecretInjectionCapability(abc.ABC):
         placeholder: Placeholder,
         value: str,
     ) -> dict[str, str]: ...
+
+    @abc.abstractmethod
+    async def push_secret(self, *, vm: str, name: str, value: str) -> None: ...
 
     @abc.abstractmethod
     async def delete_secrets(self, *, vm: str) -> None: ...
@@ -76,6 +80,9 @@ class ProxyInjection(SecretInjectionCapability):
             "CURL_CA_BUNDLE": SYSTEM_CA_BUNDLE,
             "NODE_EXTRA_CA_CERTS": environment.PROXY_CA_PATH,
         }
+
+    async def push_secret(self, *, vm: str, name: str, value: str) -> None:
+        return
 
     async def delete_secrets(self, *, vm: str) -> None:
         return

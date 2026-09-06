@@ -2,12 +2,16 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Self
 
 import httpx
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
+
+from providers.capabilities import SecretInjectionCapability
+from providers.exceptions import ProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +71,11 @@ class Secret(BaseModel):
 
 @dataclass
 class RefreshableSecret:
-    """The latest value, the fetch that runs now, and the next permitted attempt."""
+    """The latest value, the value the provider has, the fetch that runs now,
+    and the next permitted attempt."""
 
     latest: Secret | None = None
+    pushed: Secret | None = None
     fetching: asyncio.Task[None] | None = None
     next_attempt: datetime = field(default_factory=lambda: datetime.now(UTC))
     wait: timedelta = FIRST_RETRY
@@ -80,10 +86,41 @@ class RefreshableSecret:
                 self.latest = await Secret.fetch(issuer, client)
             except IssuerError as exc:
                 logger.warning("issuer %s failed: %s", issuer["url"], exc)
-                self.next_attempt = datetime.now(UTC) + self.wait
-                self.wait = min(self.wait * 2, LONGEST_RETRY)
+                self.retry_later()
             else:
                 self.wait = FIRST_RETRY
+
+    def retry_later(self) -> None:
+        self.next_attempt = datetime.now(UTC) + self.wait
+        self.wait = min(self.wait * 2, LONGEST_RETRY)
+
+    def is_due(self, at: datetime) -> bool:
+        """The provider has no value, or one near its end, and the wait is over."""
+        return at >= self.next_attempt and (not self.pushed or self.pushed.is_stale(at))
+
+    async def push(
+        self,
+        issuer: dict[str, Any],
+        client: httpx.AsyncClient,
+        deliver: Callable[[str], Awaitable[None]],
+    ) -> bool:
+        """Fetch a value the provider does not have, and hand it over. A push
+        that fails waits like a fetch that fails."""
+        now = datetime.now(UTC)
+        latest = self.latest
+        if latest is self.pushed or not (latest and latest.is_valid(now)):
+            await self.refresh(issuer, client)
+            latest = self.latest
+        if latest and latest is not self.pushed and latest.is_valid(now):
+            try:
+                await deliver(latest.value)
+            except ProviderError:
+                self.retry_later()
+                raise
+            self.pushed = latest
+            self.wait = FIRST_RETRY
+            return True
+        return False
 
     def refresh_in_background(self, issuer: dict[str, Any], client: httpx.AsyncClient) -> None:
         if not self.fetching:
@@ -93,7 +130,8 @@ class RefreshableSecret:
 
 class Secrets:
     """The current secret per entry. A fetched value is kept in memory, served
-    stale while a refresh runs or fails, and never written back."""
+    stale while a refresh runs or fails, and never written back. A provider
+    that holds the value never asks, so ``push`` hands it a fresh one."""
 
     def __init__(self, client: httpx.AsyncClient) -> None:
         self._client = client
@@ -112,3 +150,27 @@ class Secrets:
         if refreshable.latest and refreshable.latest.is_valid(datetime.now(UTC)):
             return refreshable.latest
         raise IssuerUnavailableError(f"no valid secret for {host_id}/{service}")
+
+    async def push(
+        self,
+        host_id: uuid.UUID,
+        vm: str,
+        service: str,
+        entry: dict[str, Any],
+        injection: SecretInjectionCapability,
+    ) -> None:
+        """The first push comes at first sight, since the boot value came from
+        the API process."""
+        refreshable = self._refreshable.setdefault((host_id, service), RefreshableSecret())
+        if refreshable.is_due(datetime.now(UTC)):
+            try:
+                pushed = await refreshable.push(
+                    entry["issuer"],
+                    self._client,
+                    lambda value: injection.push_secret(vm=vm, name=service, value=value),
+                )
+            except ProviderError as exc:
+                logger.warning("push of %s to %s failed: %s", service, vm, exc)
+            else:
+                if pushed:
+                    logger.info("pushed %s to %s", service, vm)

@@ -70,6 +70,27 @@ async def test_run_bootstrap_feeds_the_script_over_stdin_never_argv(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_set_secret_runs_the_command_at_each_use(monkeypatch):
+    create = AsyncMock(return_value=_process())
+    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", create)
+
+    await SbxCLI().set_secret("github", sandbox="sb-test", command="cat /v")
+
+    assert create.await_args and create.await_args.args == (
+        "sbx",
+        "secret",
+        "set",
+        "github",
+        "--sandbox",
+        "sb-test",
+        "--command",
+        "cat /v",
+        "--refresh",
+        "on-demand",
+    )
+
+
+@pytest.mark.asyncio
 async def test_set_custom_secret_names_every_host_of_the_service(monkeypatch):
     captured: dict = {}
 
