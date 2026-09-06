@@ -74,16 +74,55 @@ covered in [Networking](networking.md). The security-relevant summary:
   trust-on-first-use window. Enable Tailscale to run the scan over the
   authenticated overlay.
 
-## Secrets and in-VM metadata
+## Secrets: which field to use
+
+`POST /hosts` takes two fields that reach the box. `env` is ordinary
+configuration. It is plaintext, delivered into the box on purpose, and
+readable by whatever runs inside. `secrets` is for a credential. The box gets
+a placeholder, never the value. Put a token in `secrets`, never in `env`.
+
+A `secrets` entry names a service from the catalog, or a custom host of its
+own. It holds a static `value`, or an `issuer` that mints the value on demand.
+Drukbox encrypts the entry in the database with AES-256-GCM under
+`SECRETS_KEY`. A database dump holds ciphertext, and a process with the key
+can decrypt it. Rotate the key by prepending a new one. Remove an old key only
+after no stored row needs it.
 
 Provider tokens (`EXE_API_TOKEN`, `EXE_REGISTRY_PASSWORD`,
-`HETZNER_API_TOKEN`, Tailscale OAuth) and AWS credentials are read from
-the environment / the AWS SDK default chain and never written to the
-database or returned by the API. Host secret recipes are encrypted in
-the database with AES-256-GCM. `SECRETS_KEY` stays in the process
-environment. Rotate it by prepending a new key, then remove an old key only
-after no stored row needs it. A database dump or backup contains ciphertext,
-but a process with the key can decrypt it.
+`HETZNER_API_TOKEN`, Tailscale OAuth) and AWS credentials are read from the
+environment or the AWS SDK default chain. They are never written to the
+database and never returned by the API.
+
+## What the proxy protects
+
+The placeholder, `drk.<host id>.<service>.<random>`, works only at the secrets
+proxy, and only for the host and the service it names. The entry stores a
+fingerprint of it, so a database read cannot replay it. The proxy swaps that
+one header, on HTTPS to a registered host, and touches nothing else. Plain
+HTTP is forwarded unchanged. The proxy refuses a loopback, private, link-local,
+or metadata destination, so a box cannot reach the exchange or the API through
+it. It logs no credential.
+
+The real value is encrypted in the database. It passes through the exchange
+and the proxy for one request, and the exchange keeps an issuer's value in
+memory. On docker-sbx it lives in sbx's own store, scoped to that sandbox, and
+drukbox runs no proxy there. Host deletion removes the sandbox's secrets and
+value files before the VM goes. The lease in `expires_at` schedules that
+deletion and does not revoke the credential. Revoke it at its source when a
+box must lose it at once.
+
+A box with secrets trusts the proxy's CA for the registered hosts. Whoever
+holds the CA key can impersonate any host to that box. The key lives in the
+proxy's volume. Guard it like `SECRETS_KEY`. The API reads only the public
+certificate, from `SECRETS_PROXY_CA_FILE`.
+
+`POST /hosts` never returns a secret. A validation response omits the rejected
+input, so a bad value or a bad issuer header does not reach the caller. An
+issuer URL must use HTTPS. It must not carry user credentials or a fragment.
+Put credentials only in the issuer headers, which Drukbox encrypts. The value
+an issuer returns is never stored.
+
+## What `env` is and is not
 
 Caller `env` stays plaintext by design. It is ordinary configuration. Each
 provider writes it to `/etc/environment` on the VM, and PAM hands it to every
@@ -92,32 +131,10 @@ session at login. No response echoes it. The schema rejects the reserved key
 value at `#`, treats a quote as the start of a quoted value, and joins the
 next line after a trailing backslash. It also stops at a line of 8192 bytes
 and loses every entry after it. So a value must be printable ASCII without
-`#`, quotes, or backslashes, and without a space at either end, and the whole
-`KEY=VALUE` line must stay under 8191 bytes.
+`#`, quotes, or backslashes, and without a space at either end. The whole
+`KEY=VALUE` line must stay under 8191 bytes. No secrets in `env`, ever.
 
-`POST /hosts` never returns a secret. A validation response omits the rejected
-input, so a bad value or a bad issuer header does not reach the caller. An
-issuer URL must use HTTPS. It must not carry user credentials or a fragment.
-Drukbox stores the URL path and query as a readable address. Put credentials
-only in the issuer headers, which Drukbox encrypts. The value an issuer returns
-is never stored. The exchange process keeps it in memory and fetches it again
-whenever it needs to, on first use and after a restart.
-
-A sandbox holds a placeholder, never the credential. The placeholder works
-only at the secrets proxy, and only for the host and the service it names.
-The entry stores a fingerprint of it, so a database read cannot replay it. The
-exchange refuses with `403` on any mismatch. It never answers `401`, because
-git answers a `401` with a retry through its own credential store. The
-exchange decides the header and the credential, and the proxy swaps that one
-header on the host the exchange approved. The proxy refuses a destination
-that resolves to a loopback, private, link-local, or metadata address, so a
-sandbox cannot reach the exchange or the API through it. Bind the exchange
-process where only the proxy can reach it, because its answer is the real
-credential. A sandbox with secrets installs the proxy's CA at boot, so whoever
-holds the CA key can impersonate any host to that sandbox. The key lives in
-the proxy's volume. The API reads the public certificate only. A sandbox with
-a `github` secret sends git through gh and rewrites SSH remotes to HTTPS, so
-the usual clone and push go through the proxy.
+## Provider material in the VM
 
 Two pieces of material reach the VM through its provider's user-data /
 setup-script mechanism, and that channel is the relevant exposure:
