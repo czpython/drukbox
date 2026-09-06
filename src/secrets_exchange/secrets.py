@@ -53,10 +53,11 @@ class Secret(BaseModel):
             raise IssuerError(f"status {exc.response.status_code}") from exc
         except httpx.HTTPError as exc:
             raise IssuerError(type(exc).__name__) from exc
-        except json.JSONDecodeError as exc:
-            raise IssuerError("answer is not JSON") from exc
-        except ValidationError as exc:
-            raise IssuerError("answer has the wrong shape") from exc
+        except json.JSONDecodeError:
+            raise IssuerError("answer is not JSON") from None
+        except ValidationError:
+            # The chain would carry the answer, and a token under a wrong key with it.
+            raise IssuerError("answer has the wrong shape") from None
         if not secret.expires_at:
             interval = issuer["refresh"]
             lifetime = timedelta(seconds=int(interval[:-1]) * _UNITS[interval[-1]])

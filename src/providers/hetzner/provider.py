@@ -3,6 +3,7 @@ from typing import ClassVar, Self
 from core.settings import get_settings
 from providers import environment
 from providers.base import VMCreateResult, VMProvider
+from providers.capabilities import ProxyInjection
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
 from providers.ssh_keys import generate_ed25519_keypair
 
@@ -13,6 +14,7 @@ from .settings import HetznerSettings
 
 class HetznerProvider(VMProvider):
     name: ClassVar[str] = "hetzner"
+    secret_injection = ProxyInjection()
     diagnose_hint: ClassVar[str] = "check_hetzner_api_token_and_location"
     # instance_type maps onto Hetzner's server type; root disk size is fixed
     # by the server type, so disk_gb stays unsupported.

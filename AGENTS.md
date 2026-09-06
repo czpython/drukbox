@@ -48,7 +48,7 @@ src/
   api/               # FastAPI app and global handlers
   core/              # Settings, database, exception base
   hosts/             # Host API, models, schemas, service, janitor, pool, auth
-  host_secrets/      # Secret catalog, placeholders, delivery at provisioning
+  host_secrets/      # Secret catalog and placeholders
   secrets_exchange/  # The secrets exchange process behind Caddy
   gateway/           # SSH gateway for gateway-provider hosts
   http_proxies/      # HTTP proxy API, schemas, service, deps
@@ -108,7 +108,8 @@ uv run alembic upgrade head
 
 - `hosts.api` owns HTTP request and response concerns.
 - `hosts.service.HostService` owns host lifecycle behavior.
-- `host_secrets.placeholder.issue_placeholders` mints placeholders when a host provisions.
+- `hosts.service.HostService.put_secrets` mints a placeholder per secret when a host provisions and hands each secret to the provider's `secret_injection`.
+- Each provider declares `secret_injection`, how a secret reaches its boxes: `ProxyInjection` on every provider but docker-sbx, `SbxInjection` on docker-sbx.
 - `secrets_exchange.secrets.Secrets` holds the current secret per entry. It fetches from an `issuer` on demand and keeps the value in memory.
 - `http_proxies.service.HTTPProxyService` owns HTTP proxy behavior.
 - VM provider implementations live in `providers/<name>/`.

@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from types import EllipsisType
 from typing import Any
 
+import httpx
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,8 +17,9 @@ from core.database import async_session_factory
 from core.exceptions import ResourceNotFoundError
 from core.settings import Settings, get_settings
 from gateway.settings import GatewaySettings
-from host_secrets.exceptions import SecretsExchangeNotConfiguredError
-from host_secrets.placeholder import issue_placeholders
+from host_secrets import catalog
+from host_secrets.exceptions import SecretsProxyNotConfiguredError
+from host_secrets.placeholder import Placeholder
 from hosts.exceptions import HostStateError, ProvisioningFailedError
 from hosts.models import Host, HostStatus, IdempotencyKey
 from networking.tailscale import (
@@ -25,14 +27,17 @@ from networking.tailscale import (
     NetworkError,
     Tailscale,
 )
+from providers.base import SecretInjectionCapability
 from providers.exceptions import (
     ProviderCommandError,
+    ProviderError,
     ProviderNotFoundError,
     ProviderTransportError,
     UnknownProviderError,
     UnsupportedSizingError,
 )
 from providers.registry import get_provider_names, get_vm_provider
+from secrets_exchange.secrets import IssuerError, Secret
 from templates.exceptions import TemplateNotAvailableError, UnknownTemplateError
 from templates.models import Template, TemplateStatus
 
@@ -228,9 +233,9 @@ class HostService:
             raise UnsupportedSizingError(
                 f"provider {vm.name!r} does not support a per-request disk_gb"
             )
-        if secrets and not self.settings.secrets_exchange_url:
-            raise SecretsExchangeNotConfiguredError(
-                "SECRETS_EXCHANGE_URL must name the secrets exchange"
+        if secrets and not vm.secret_injection.holds_value and not self.settings.secrets_proxy_url:
+            raise SecretsProxyNotConfiguredError(
+                "SECRETS_PROXY_URL must name the proxy that sandboxes dial"
             )
         if template and not image:
             image = await self._resolve_template_image(template_id=template, provider=vm.name)
@@ -481,11 +486,12 @@ class HostService:
         host.updated_at = utc_now()
         await self.session.commit()
 
+        vm = get_vm_provider(host.provider)
         tailscale: Tailscale | None = None
-        if get_vm_provider(host.provider).supports_tailnet:
+        if vm.supports_tailnet:
             tailscale = self.tailscale
 
-        join_env: dict[str, str] = {}
+        environment = dict(host.env)
         setup_script: str | None = None
         if tailscale:
             # The bootstrap script hard-requires TAILSCALE_AUTHKEY; only
@@ -495,20 +501,19 @@ class HostService:
             except NetworkError as exc:
                 await self.mark_failed(host, exc)
                 return
-            join_env = dict(join_credentials.env)
+            environment.update(join_credentials.env)
             setup_script = _SANDBOX_BOOTSTRAP_SCRIPT
 
-        environment = {
-            **host.env,
-            **join_env,
-            **issue_placeholders(host, self.settings.secrets_exchange_url),
-        }
+        try:
+            environment.update(await self.put_secrets(host, vm.secret_injection))
+        except (IssuerError, ProviderError) as exc:
+            await self.mark_failed(host, exc)
+            return
 
         host.status = HostStatus.CREATING_VM.value
         host.updated_at = utc_now()
         await self.session.commit()
 
-        vm = get_vm_provider(host.provider)
         gateway = GatewaySettings()
         if vm.gateway_process_class and not gateway.ssh_host:
             # A gateway-provider host is reachable only through the gateway;
@@ -581,6 +586,36 @@ class HostService:
         host.activated_at = utc_now()
         host.updated_at = utc_now()
         await self.session.commit()
+
+    async def put_secrets(self, host: Host, injection: SecretInjectionCapability) -> dict[str, str]:
+        """Mint a placeholder per secret, keep its fingerprint, and put the
+        secret within the box's reach. Returns the environment the box needs.
+
+        Raises ``IssuerError`` when an issuer gives no value, and a
+        ``ProviderError`` when the provider cannot take the secret.
+        """
+        environment: dict[str, str] = {}
+        for name, entry in host.secrets.items():
+            placeholder = Placeholder.mint(host.id, name)
+            host.secrets[name] = {**entry, "placeholder_fingerprint": placeholder.fingerprint}
+            value = await self.current_value(entry) if injection.holds_value else ""
+            environment.update(
+                await injection.put_secret(
+                    vm=host.name,
+                    service=catalog.service(name, entry),
+                    placeholder=placeholder,
+                    value=value,
+                )
+            )
+        return environment
+
+    @staticmethod
+    async def current_value(entry: dict[str, Any]) -> str:
+        """The value of an entry now: the static one, or a fresh one from its issuer."""
+        if "value" in entry:
+            return entry["value"]
+        async with httpx.AsyncClient(timeout=10) as client:
+            return (await Secret.fetch(entry["issuer"], client)).value
 
     async def mark_failed(self, host: Host, exc: Exception) -> None:
         logger.exception(

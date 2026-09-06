@@ -2,6 +2,9 @@ import abc
 from dataclasses import dataclass
 from typing import ClassVar, NamedTuple, Self
 
+from host_secrets.catalog import Service
+from host_secrets.placeholder import Placeholder
+
 
 @dataclass(frozen=True)
 class VMCreateResult:
@@ -64,8 +67,40 @@ class SandboxProcess(abc.ABC):
     async def aclose(self) -> None: ...  # pragma: no cover
 
 
+class SecretInjectionCapability(abc.ABC):
+    """How a secret reaches the boxes of one provider.
+
+    ``put_secret`` puts one secret within reach of a box and returns the
+    environment the box needs. Provisioning calls it once per secret, and a
+    refresh calls it again with the new value. ``delete_secret`` removes
+    what ``put_secret`` put anywhere. The box only ever holds the placeholder.
+    """
+
+    # True when the implementation keeps the real value itself, as sbx's own
+    # secret store does. Provisioning then hands ``put_secret`` the current
+    # value, and a refresh pushes a fresh one. False when the value stays in
+    # the exchange and our proxy swaps the placeholder per request. Such an
+    # implementation never reads ``value``, and provisioning passes none.
+    holds_value: ClassVar[bool]
+
+    @abc.abstractmethod
+    async def put_secret(
+        self,
+        *,
+        vm: str,
+        service: Service,
+        placeholder: Placeholder,
+        value: str,
+    ) -> dict[str, str]: ...
+
+    @abc.abstractmethod
+    async def delete_secret(self, *, vm: str, placeholder: Placeholder) -> None: ...
+
+
 class VMProvider(abc.ABC):
     name: ClassVar[str]
+    # How a secret reaches this provider's boxes. Each provider declares one.
+    secret_injection: SecretInjectionCapability
     # The process class that serves this provider's hosts through the SSH
     # gateway. None means the hosts have their own dialable sshd and the
     # gateway plays no part.

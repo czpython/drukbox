@@ -44,7 +44,14 @@ CATALOG: dict[str, Service] = {
 }
 
 
-def service(name: str, entry: dict[str, Any]) -> dict[str, str]:
+def service(name: str, entry: dict[str, Any]) -> Service:
     """The service an entry reaches: host, header, variables, base path."""
-    fields: dict[str, Any] = entry if "host" in entry else dict(CATALOG[name])
-    return {"name": name, **{field: fields[field] for field in SERVICE_FIELDS}}
+    fields = entry if "host" in entry else CATALOG[name]
+    return {
+        "host": fields["host"],
+        "credential_header": fields["credential_header"],
+        "credential_prefix": fields["credential_prefix"],
+        "credential_var": fields["credential_var"],
+        "endpoint_var": fields["endpoint_var"],
+        "base_path": fields["base_path"],
+    }

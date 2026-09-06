@@ -3,6 +3,7 @@ from typing import ClassVar, Self
 from core.settings import get_settings
 from providers import environment
 from providers.base import VMCreateResult, VMProvider
+from providers.capabilities import ProxyInjection
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
 from providers.ssh_keys import generate_ed25519_keypair
 
@@ -13,6 +14,7 @@ from .settings import ExoscaleSettings
 
 class ExoscaleProvider(VMProvider):
     name: ClassVar[str] = "exoscale"
+    secret_injection = ProxyInjection()
     diagnose_hint: ClassVar[str] = "check_exoscale_api_credentials_and_zone"
     supports_instance_type = True
     supports_disk_gb = True

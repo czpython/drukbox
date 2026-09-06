@@ -78,6 +78,16 @@ Not every provider supports every feature. The host contract must not grow
 fields that only one provider uses. Optional features are capability mix-ins.
 `TemplateCapability` declares the template create and delete surface.
 
+`SecretInjectionCapability` is how a secret reaches a provider's boxes. It is
+not a mix-in. Each provider declares its implementation in `secret_injection`,
+and the host service calls `put_secret` for each secret when a host provisions.
+`ProxyInjection` serves every provider but docker-sbx: the box gets the
+placeholder and the address of our proxy, and the real value stays in the
+exchange. `SbxInjection` serves docker-sbx: drukbox puts the value in sbx's own
+secret store for that sandbox, and sbx does the swap. `holds_value` says which
+of the two an implementation is, so provisioning fetches an issuer's value only
+for an implementation that keeps it.
+
 `resolve_capability` narrows a provider instance to a capability. It raises
 `CapabilityUnsupportedError` when the provider does not implement that
 capability, and the routes return a clear error. A new provider-specific feature
@@ -105,8 +115,7 @@ resolves through the catalog. A custom entry names its own `host` and
 `endpoint_var`, and `base_path`, the part of the base URL after the host that
 the client expects. The defaults are a bearer token in `Authorization`, no base
 URL variable, and no base path. Drukbox does not consult the catalog for a
-custom entry. A service must have a base URL variable, because the secrets
-exchange routes by base URL.
+custom entry.
 
 A static entry stores `value`. A refreshable entry stores `issuer`: the URL,
 the request headers, and the refresh interval. Drukbox never stores a fetched
@@ -119,12 +128,15 @@ value is still valid. With nothing valid in memory it answers `503`.
 
 Provisioning mints a placeholder per secret. The placeholder names the host
 and the service, `drk.<host id>.<service>.<random>`. The entry keeps only a
-fingerprint of the random part. The sandbox receives `<credential_var>` and
-`<endpoint_var>=<exchange>/<host><base_path>` in its boot environment, next to
-the caller's `env`. Nothing else is provider-specific. The sandbox sends every
-request for that service to the exchange. Caddy asks the exchange process for
-the upstream host and the real credential with `forward_auth`. It swaps the
-header and forwards the request.
+fingerprint of the random part. The sandbox receives `<credential_var>` with
+the placeholder in its boot environment, next to the caller's `env`. On every
+provider but docker-sbx it also receives `HTTPS_PROXY`, `https_proxy`, and
+`NO_PROXY`, so it sends its HTTPS through the proxy at `SECRETS_PROXY_URL`.
+The proxy asks the exchange process, with the placeholder, for the upstream
+host, the header, and the real credential. It swaps the header and forwards
+the request. On docker-sbx the sandbox gets only the placeholder. Drukbox
+puts the value in sbx's own secret store for that sandbox, and sbx's proxy
+swaps the placeholder on the way out.
 
 A template is a persistent provider image keyed by provider, base image,
 and setup-script hash. `POST /templates` creates a `building` record and

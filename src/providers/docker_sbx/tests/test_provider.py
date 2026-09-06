@@ -10,6 +10,7 @@ from providers.docker_sbx.exceptions import (
     DockerSbxTransportError,
 )
 from providers.docker_sbx.provider import DockerSbxProvider
+from providers.docker_sbx.secrets import SbxInjection
 from providers.docker_sbx.settings import DockerSbxSettings
 from providers.exceptions import (
     ProviderCommandError,
@@ -134,12 +135,17 @@ async def test_create_vm_cleans_up_when_the_sandbox_cannot_be_created(tmp_path):
     api.create_sandbox.side_effect = DockerSbxTransportError("daemon unavailable")
     provider = _provider(api, _settings(tmp_path))
 
+    value = tmp_path / "secrets" / "sb-test" / "anthropic"
+    value.parent.mkdir(parents=True)
+    value.write_text("sk-ant-real")
+
     with pytest.raises(ProviderTransportError):
         await provider.create_vm(name="sb-test", image="img", env={})
     # The CLI can stop after the daemon makes the sandbox. A failed create
-    # also tries the removal.
+    # also tries the removal, and drops the value files put before it.
     api.remove_sandbox.assert_awaited_once_with("sb-test")
     assert not (tmp_path / "sb-test").exists()
+    assert not value.parent.exists()
 
 
 @pytest.mark.asyncio
@@ -171,45 +177,64 @@ async def test_create_vm_tears_down_after_a_failed_bootstrap_and_keeps_the_first
     assert not (tmp_path / "sb-test").exists()
 
 
-@pytest.mark.asyncio
-async def test_delete_vm_removes_the_sandbox_and_its_workspace(tmp_path):
-    api = _api_mock()
-    workspace = tmp_path / "sb-test"
+def _sandbox_files(root: Path) -> tuple[Path, Path]:
+    """The workspace and the value file of sandbox sb-test, both on disk."""
+    workspace = root / "sb-test"
     workspace.mkdir(parents=True)
+    value = root / "secrets" / "sb-test" / "anthropic"
+    value.parent.mkdir(parents=True)
+    value.write_text("sk-ant-real")
+    return workspace, value
+
+
+def test_the_value_files_live_beside_the_workspaces(tmp_path):
+    # A workspace is mounted into its box. The value files must not be in one.
+    provider = _provider(_api_mock(), _settings(tmp_path))
+
+    injection = provider.secret_injection
+    assert isinstance(injection, SbxInjection)
+    assert injection.secrets_root == provider.secrets_root == tmp_path / "secrets"
+
+
+@pytest.mark.asyncio
+async def test_delete_vm_removes_the_sandbox_its_workspace_and_its_value_files(tmp_path):
+    api = _api_mock()
+    workspace, value = _sandbox_files(tmp_path)
     provider = _provider(api, _settings(tmp_path))
 
     await provider.delete_vm("sb-test")
 
     api.remove_sandbox.assert_awaited_once_with("sb-test")
     assert not workspace.exists()
+    assert not value.parent.exists()
 
 
 @pytest.mark.asyncio
-async def test_delete_vm_drops_the_workspace_of_a_sandbox_that_never_existed(tmp_path):
+async def test_delete_vm_drops_the_files_of_a_sandbox_that_never_existed(tmp_path):
     api = _api_mock()
     api.remove_sandbox.side_effect = DockerSbxNotFoundError("sandbox 'sb-test' not found")
-    workspace = tmp_path / "sb-test"
-    workspace.mkdir(parents=True)
+    workspace, value = _sandbox_files(tmp_path)
     provider = _provider(api, _settings(tmp_path))
 
     with pytest.raises(ProviderNotFoundError):
         await provider.delete_vm("sb-test")
     assert not workspace.exists()
+    assert not value.parent.exists()
 
 
 @pytest.mark.asyncio
-async def test_delete_vm_keeps_the_workspace_when_teardown_fails(tmp_path):
+async def test_delete_vm_keeps_the_files_when_teardown_fails(tmp_path):
     # The sandbox may still be running on the workspace, and HostService keeps
     # the row so deletion can be retried.
     api = _api_mock()
     api.remove_sandbox.side_effect = DockerSbxTransportError("daemon unavailable")
-    workspace = tmp_path / "sb-test"
-    workspace.mkdir(parents=True)
+    workspace, value = _sandbox_files(tmp_path)
     provider = _provider(api, _settings(tmp_path))
 
     with pytest.raises(ProviderTransportError):
         await provider.delete_vm("sb-test")
     assert workspace.is_dir()
+    assert value.is_file()
 
 
 @pytest.mark.asyncio

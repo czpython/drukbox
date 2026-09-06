@@ -70,6 +70,42 @@ class SbxCLI:
         # sandbox that has an open SSH session.
         await self._run("rm", "--force", name)
 
+    async def set_secret(self, service: str, *, sandbox: str, command: str) -> None:
+        # --token puts the value in argv, which every process can read. The
+        # command runs on the host, under sandboxd, and its output is the value.
+        await self._run("secret", "set", service, "--sandbox", sandbox, "--command", command)
+
+    async def set_custom_secret(
+        self,
+        *,
+        sandbox: str,
+        host: str,
+        env: str,
+        placeholder: str,
+        command: str,
+    ) -> None:
+        await self._run(
+            "secret",
+            "set-custom",
+            "--sandbox",
+            sandbox,
+            "--host",
+            host,
+            "--env",
+            env,
+            "--placeholder",
+            placeholder,
+            "--command",
+            command,
+        )
+
+    async def remove_secret(self, service: str, *, sandbox: str) -> None:
+        # Without -f the CLI asks for confirmation and waits forever.
+        await self._run("secret", "rm", "-f", service, "--sandbox", sandbox)
+
+    async def remove_custom_secret(self, *, sandbox: str, placeholder: str) -> None:
+        await self._run("secret", "rm", "-f", "--placeholder", placeholder, "--sandbox", sandbox)
+
     async def sandbox_count(self) -> int:
         output = await self._run("ls", "--json")
         try:
