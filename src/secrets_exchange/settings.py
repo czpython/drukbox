@@ -14,6 +14,8 @@ class SecretsExchangeSettings(BaseSettings):
 
     bind_host: str = Field(
         default="127.0.0.1",
-        description="Interface the exchange process binds. Bind it where only Caddy can reach it.",
+        description=(
+            "Interface the exchange process binds. Bind it where only the proxy can reach it."
+        ),
     )
     port: int = Field(default=8781, description="Port the exchange process listens on.")

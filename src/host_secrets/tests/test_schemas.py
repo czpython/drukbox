@@ -55,8 +55,6 @@ def test_custom_entry_stores_the_whole_service_with_bearer_defaults() -> None:
         "credential_header": "Authorization",
         "credential_prefix": "Bearer ",
         "credential_var": "ACME_TOKEN",
-        "endpoint_var": "",
-        "base_path": "",
         "value": "static-secret",
     }
 
@@ -68,7 +66,6 @@ def test_custom_entry_can_override_the_auth_shape() -> None:
             "credential_header": "x-api-key",
             "credential_prefix": "",
             "credential_var": "ACME_TOKEN",
-            "endpoint_var": "ACME_BASE_URL",
             "value": "static-secret",
         }
     )
@@ -78,8 +75,6 @@ def test_custom_entry_can_override_the_auth_shape() -> None:
         "credential_header": "x-api-key",
         "credential_prefix": "",
         "credential_var": "ACME_TOKEN",
-        "endpoint_var": "ACME_BASE_URL",
-        "base_path": "",
         "value": "static-secret",
     }
 
@@ -92,7 +87,6 @@ def test_custom_entry_can_override_the_auth_shape() -> None:
         {"host": "api.acme.test", "value": "one"},
         {"credential_var": "ACME_TOKEN", "value": "one"},
         {"credential_prefix": "", "value": "one"},
-        {"endpoint_var": "", "value": "one"},
         {"placeholder": "managed", "value": "one"},
         {"host": "api.acme.test", "credential_var": "not a variable", "value": "one"},
     ],

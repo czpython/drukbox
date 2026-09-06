@@ -20,7 +20,6 @@ async def test_a_host_is_created_with_its_secrets_and_never_returns_them(
         "github": {
             "host": "api.github.com",
             "credential_var": "GH_TOKEN",
-            "endpoint_var": "GH_API_URL",
             "issuer": {
                 "url": "https://mint.example.test/boxes/box-1/github",
                 "headers": {"Authorization": "Bearer mint-credential"},
@@ -40,7 +39,6 @@ async def test_a_host_is_created_with_its_secrets_and_never_returns_them(
             **secrets["github"],
             "credential_header": "Authorization",
             "credential_prefix": "Bearer ",
-            "base_path": "",
         },
     }
 
