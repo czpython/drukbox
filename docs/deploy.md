@@ -346,8 +346,9 @@ encrypted in Postgres, they pass through the exchange process for one
 request, and they pass through the proxy for one request.
 
 The proxy is opt in. A deployment with only docker-sbx starts none, since
-sbx does the swap itself. The exchange process runs there too, because it
-fetches issuer values.
+sbx does the swap itself. The exchange process runs there too. It fetches a
+fresh issuer value before the old one expires and writes it into the value
+file, so it needs the api's environment and its workspace root mount.
 
 `SECRETS_PROXY_URL` is the proxy a sandbox sends its HTTPS through. Every
 provider but docker-sbx sets `HTTPS_PROXY` in the sandbox to it. For local
@@ -373,19 +374,21 @@ secret store for that sandbox, and sbx's proxy swaps the placeholder. The
 other service, and a custom entry that names a host of its own, is a custom
 secret on its hosts. The value files that sbx reads live in a `secrets`
 directory under `DOCKER_SBX_WORKSPACE_ROOT`, beside the workspaces and never
-inside one. sbx keeps a sandbox's secrets after the sandbox is removed, so
+inside one. sbx reads a value file at each use, so a fresh value is a
+rewritten file. sbx keeps a sandbox's secrets after the sandbox is removed, so
 host deletion removes every secret in the sandbox's scope and the files. Do
 not set a global sbx secret for a destination drukbox manages. sbx applies
 the global one first, and drukbox's value never reaches the sandbox.
 
 Give secrets to `POST /hosts`. Provisioning delivers the placeholders in the
 sandbox's boot environment, on every provider, the same way as `env`. A
-refreshable secret, one given with `issuer`, is
-fetched by the exchange process on first use and kept in memory until shortly
-before it expires. The exchange process must reach the issuer URL. On
-docker-sbx the API process fetches it once at provisioning, since sbx holds
-the value. A pool host takes no secrets: a request with secrets always
-provisions a new sandbox.
+refreshable secret, one given with `issuer`, is fetched by the exchange
+process on first use and kept in memory until shortly before it expires. The
+exchange process must reach the issuer URL. On docker-sbx the API process
+fetches it once at provisioning, since sbx holds the value. From then on the
+exchange process fetches a fresh value before the old one expires and pushes
+it to sbx, and logs each push. A pool host takes no secrets: a request with
+secrets always provisions a new sandbox.
 
 ## Verify
 

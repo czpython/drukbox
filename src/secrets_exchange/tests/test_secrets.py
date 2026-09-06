@@ -2,11 +2,13 @@ import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 import respx
 
+from providers.exceptions import ProviderTransportError
 from secrets_exchange.secrets import (
     IssuerError,
     IssuerUnavailableError,
@@ -20,6 +22,13 @@ ISSUER = {
     "refresh": "1h",
 }
 ENTRY = {"issuer": ISSUER, "placeholder_fingerprint": "abc"}
+VM = "sb-one"
+
+
+def _holding_injection() -> MagicMock:
+    injection = MagicMock(holds_value=True)
+    injection.push_secret = AsyncMock()
+    return injection
 
 
 @pytest.fixture
@@ -192,3 +201,66 @@ async def _eventually(check) -> None:
     async with asyncio.timeout(1):
         while not check():
             await asyncio.sleep(0.01)
+
+
+@respx.mock
+async def test_a_held_value_is_fetched_and_pushed_once_while_it_lasts(secrets) -> None:
+    injection = _holding_injection()
+    host_id = uuid.uuid4()
+    route = respx.get(ISSUER["url"]).respond(json={"value": "ghs_one"})
+
+    await secrets.push(host_id, VM, "github", ENTRY, injection)
+    await secrets.push(host_id, VM, "github", ENTRY, injection)
+
+    injection.push_secret.assert_awaited_once_with(vm=VM, name="github", value="ghs_one")
+    assert route.call_count == 1
+
+
+@respx.mock
+async def test_a_held_value_that_nears_its_end_is_fetched_and_pushed_again(secrets) -> None:
+    injection = _holding_injection()
+    host_id = uuid.uuid4()
+    soon = (datetime.now(UTC) + timedelta(seconds=59)).isoformat()
+    route = respx.get(ISSUER["url"]).respond(json={"value": "ghs_one", "expires_at": soon})
+
+    await secrets.push(host_id, VM, "github", ENTRY, injection)
+    route.respond(json={"value": "ghs_two", "expires_at": soon})
+    await secrets.push(host_id, VM, "github", ENTRY, injection)
+
+    assert [call.kwargs["value"] for call in injection.push_secret.await_args_list] == [
+        "ghs_one",
+        "ghs_two",
+    ]
+    assert route.call_count == 2
+
+
+@respx.mock
+async def test_a_push_that_fails_waits_then_goes_again_without_a_new_fetch(secrets, caplog) -> None:
+    injection = _holding_injection()
+    injection.push_secret.side_effect = [ProviderTransportError("sbx is down"), None]
+    host_id = uuid.uuid4()
+    route = respx.get(ISSUER["url"]).respond(json={"value": "ghs_one"})
+
+    with caplog.at_level(logging.WARNING):
+        await secrets.push(host_id, VM, "github", ENTRY, injection)
+    await secrets.push(host_id, VM, "github", ENTRY, injection)
+    assert injection.push_secret.await_count == 1, "a failed push waits"
+    assert "github" in caplog.text and VM in caplog.text and "sbx is down" in caplog.text
+    assert "ghs_one" not in caplog.text
+
+    secrets._refreshable[(host_id, "github")].next_attempt = datetime.now(UTC)
+    await secrets.push(host_id, VM, "github", ENTRY, injection)
+
+    assert injection.push_secret.await_count == 2
+    assert injection.push_secret.await_args.kwargs["value"] == "ghs_one"
+    assert route.call_count == 1
+
+
+@respx.mock
+async def test_a_fetch_that_fails_pushes_nothing(secrets) -> None:
+    injection = _holding_injection()
+    respx.get(ISSUER["url"]).respond(status_code=500)
+
+    await secrets.push(uuid.uuid4(), VM, "github", ENTRY, injection)
+
+    injection.push_secret.assert_not_awaited()

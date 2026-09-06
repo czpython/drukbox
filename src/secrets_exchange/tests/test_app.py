@@ -1,7 +1,9 @@
 import base64
+import logging
 import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -10,10 +12,14 @@ from httpx import ASGITransport, AsyncClient
 
 from core.database import async_session_factory
 from host_secrets.placeholder import Placeholder
-from hosts.models import Host
+from hosts.models import Host, HostStatus
 from hosts.service import utc_now
-from secrets_exchange.app import UPSTREAM_CREDENTIAL, UPSTREAM_HEADER, app
+from hosts.tests.conftest import stub_provider  # noqa: F401
+from providers.registry import get_vm_provider
+from secrets_exchange.app import UPSTREAM_CREDENTIAL, UPSTREAM_HEADER, app, push_held
 from secrets_exchange.secrets import Secrets
+
+ISSUER = {"url": "https://mint.test/box/anthropic", "headers": {}, "refresh": "1h"}
 
 
 @pytest.fixture
@@ -196,7 +202,9 @@ def _headers(placeholder: str, host: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {placeholder}", "X-Forwarded-Host": host}
 
 
-async def _create_host(host_id: uuid.UUID, secrets: dict[str, object]) -> None:
+async def _create_host(
+    host_id: uuid.UUID, secrets: dict[str, object], provider: str = "exe"
+) -> None:
     now = utc_now()
     async with async_session_factory() as session:
         session.add(
@@ -204,9 +212,56 @@ async def _create_host(host_id: uuid.UUID, secrets: dict[str, object]) -> None:
                 id=host_id,
                 name=f"sb-{host_id.hex[:12]}",
                 image="sandbox:latest",
+                provider=provider,
+                status=HostStatus.ACTIVE.value,
                 secrets=secrets,
                 created_at=now,
                 updated_at=now,
             )
         )
         await session.commit()
+
+
+@respx.mock
+@pytest.mark.usefixtures("stub_provider")
+async def test_the_timer_pushes_issuer_values_to_a_provider_that_holds_them(edge) -> None:
+    injection = MagicMock(holds_value=True)
+    injection.push_secret = AsyncMock()
+    get_vm_provider("stub").secret_injection = injection
+    host_id = uuid.uuid4()
+    await _create_host(
+        host_id,
+        {
+            "anthropic": {"issuer": ISSUER, "placeholder_fingerprint": "a"},
+            "github": {"value": "ghs_real", "placeholder_fingerprint": "b"},
+        },
+        provider="stub",
+    )
+    respx.get(ISSUER["url"]).respond(json={"value": "sk-ant-fresh"})
+
+    await push_held(app.state.secrets)
+
+    injection.push_secret.assert_awaited_once_with(
+        vm=f"sb-{host_id.hex[:12]}", name="anthropic", value="sk-ant-fresh"
+    )
+
+
+@respx.mock
+@pytest.mark.usefixtures("stub_provider")
+async def test_one_host_in_trouble_costs_no_other_host_its_value(edge, caplog) -> None:
+    injection = MagicMock(holds_value=True)
+    injection.push_secret = AsyncMock()
+    get_vm_provider("stub").secret_injection = injection
+    troubled, healthy = uuid.uuid4(), uuid.uuid4()
+    entry = {"issuer": ISSUER, "placeholder_fingerprint": "a"}
+    await _create_host(troubled, {"anthropic": entry}, provider="gone")
+    await _create_host(healthy, {"anthropic": entry}, provider="stub")
+    respx.get(ISSUER["url"]).respond(json={"value": "sk-ant-fresh"})
+
+    with caplog.at_level(logging.ERROR):
+        await push_held(app.state.secrets)
+
+    injection.push_secret.assert_awaited_once_with(
+        vm=f"sb-{healthy.hex[:12]}", name="anthropic", value="sk-ant-fresh"
+    )
+    assert f"sb-{troubled.hex[:12]}" in caplog.text

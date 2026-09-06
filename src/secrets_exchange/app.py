@@ -1,5 +1,8 @@
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from typing import Annotated
 
 import httpx
@@ -7,18 +10,63 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.database import get_session
+from core.database import async_session_factory, get_session
 from host_secrets import catalog
 from host_secrets.placeholder import Placeholder
-from hosts.models import Host
+from hosts.models import Host, HostStatus
+from providers.registry import get_vm_provider
 from secrets_exchange.secrets import IssuerUnavailableError, Secrets
+
+logger = logging.getLogger(__name__)
+
+# How often the timer looks for a held value that nears its end.
+TICK = timedelta(seconds=5)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with httpx.AsyncClient(timeout=10) as client:
         app.state.secrets = Secrets(client)
-        yield
+        timer = asyncio.create_task(push_on_expiry(app.state.secrets))
+        try:
+            yield
+        finally:
+            timer.cancel()
+
+
+async def push_on_expiry(secrets: Secrets) -> None:
+    """Providers that hold the value get each issuer-backed one again before it expires.
+
+    Proxy providers are not visited. Their value lives here and refreshes on request.
+    """
+    while True:
+        try:
+            await push_held(secrets)
+        except Exception:
+            # A timer that dies would let every held value expire. Log, keep the timer.
+            logger.exception("push timer failed")
+        await asyncio.sleep(TICK.total_seconds())
+
+
+async def push_held(secrets: Secrets) -> None:
+    """One pass over the active hosts, side by side, so one slow issuer delays no other host."""
+    async with async_session_factory() as session:
+        active = select(Host).where(Host.status == HostStatus.ACTIVE.value)
+        hosts = (await session.execute(active)).scalars().all()
+    await asyncio.gather(*(push_host(secrets, host) for host in hosts))
+
+
+async def push_host(secrets: Secrets, host: Host) -> None:
+    """Every issuer-backed entry of one host, when its provider holds the value."""
+    try:
+        injection = get_vm_provider(host.provider).secret_injection
+        if injection.holds_value:
+            for service, entry in host.secrets.items():
+                if "issuer" in entry:
+                    await secrets.push(host.id, host.name, service, entry, injection)
+    except Exception:
+        # One host's trouble must not cost the others their values.
+        logger.exception("push for host %s failed", host.name)
 
 
 app = FastAPI(title="Drukbox secrets exchange", lifespan=lifespan)

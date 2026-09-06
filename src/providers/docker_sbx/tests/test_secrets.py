@@ -9,7 +9,7 @@ from host_secrets.catalog import CATALOG, Service, Upstream
 from host_secrets.placeholder import Placeholder
 from providers.docker_sbx.exceptions import DockerSbxTransportError
 from providers.docker_sbx.secrets import SbxInjection
-from providers.exceptions import ProviderTransportError
+from providers.exceptions import ProviderCommandError, ProviderTransportError
 
 
 def _api_mock() -> MagicMock:
@@ -62,6 +62,38 @@ async def test_any_other_secret_is_a_custom_secret_on_its_host_from_a_file(tmp_p
     )
     api.set_secret.assert_not_awaited()
     assert environment == {"ANTHROPIC_AUTH_TOKEN": str(placeholder)}
+
+
+async def test_a_pushed_value_is_a_rewritten_file(tmp_path: Path) -> None:
+    api = _api_mock()
+    injection = SbxInjection(api, tmp_path)
+    placeholder = Placeholder.mint(uuid.uuid4(), "anthropic")
+    await injection.put_secret(
+        vm="sb-one", service=CATALOG["anthropic"], placeholder=placeholder, value="old"
+    )
+
+    await injection.push_secret(vm="sb-one", name="anthropic", value="new")
+
+    path = tmp_path / "sb-one" / "anthropic"
+    assert path.read_text() == "new"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert list(path.parent.iterdir()) == [path], "nothing staged is left behind"
+    assert api.set_custom_secret.await_count == 1, "sbx reads the file at each use"
+
+
+async def test_a_push_after_teardown_brings_nothing_back(tmp_path: Path) -> None:
+    api = _api_mock()
+    injection = SbxInjection(api, tmp_path)
+    placeholder = Placeholder.mint(uuid.uuid4(), "anthropic")
+    await injection.put_secret(
+        vm="sb-one", service=CATALOG["anthropic"], placeholder=placeholder, value="old"
+    )
+    await injection.delete_secrets(vm="sb-one")
+
+    with pytest.raises(ProviderCommandError, match="value file"):
+        await injection.push_secret(vm="sb-one", name="anthropic", value="new")
+
+    assert not (tmp_path / "sb-one").exists()
 
 
 async def test_a_new_value_replaces_the_file_and_the_secret(tmp_path: Path) -> None:
