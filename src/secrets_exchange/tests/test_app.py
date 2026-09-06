@@ -1,3 +1,4 @@
+import base64
 import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -39,6 +40,24 @@ async def test_a_placeholder_is_exchanged_for_the_real_secret(edge) -> None:
     assert response.headers["X-Upstream-Host"] == "api.github.com"
     assert response.headers["X-Upstream-Header"] == "Authorization"
     assert response.headers["X-Upstream-Credential"] == "Bearer ghs_real"
+
+
+async def test_the_git_host_of_github_gets_basic_with_the_token_as_the_password(edge) -> None:
+    host_id = uuid.uuid4()
+    minted = Placeholder.mint(host_id, "github")
+    await _create_host(
+        host_id, {"github": {"value": "ghs_real", "placeholder_fingerprint": minted.fingerprint}}
+    )
+
+    response = await edge.get("/authorize", headers=_headers(str(minted), "github.com"))
+
+    assert response.status_code == 200
+    assert response.headers["X-Upstream-Host"] == "github.com"
+    assert response.headers["X-Upstream-Header"] == "Authorization"
+    assert (
+        response.headers["X-Upstream-Credential"]
+        == "Basic " + base64.b64encode(b"x-access-token:ghs_real").decode()
+    )
 
 
 async def test_a_custom_service_gets_its_own_header_shape(edge) -> None:
@@ -147,12 +166,19 @@ async def test_the_upstreams_are_the_hosts_with_a_registered_secret(edge) -> Non
             },
         },
     )
+    await _create_host(uuid.uuid4(), {"github": {"value": "ghs_real"}})
     await _create_host(uuid.uuid4(), {})
 
     response = await edge.get("/upstreams")
 
     assert response.status_code == 200
-    assert response.json() == ["api.acme.test", "api.anthropic.com"]
+    assert response.json() == [
+        "api.acme.test",
+        "api.anthropic.com",
+        "api.github.com",
+        "github.com",
+        "uploads.github.com",
+    ]
 
 
 async def test_no_secret_means_no_upstream(edge) -> None:

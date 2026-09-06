@@ -19,6 +19,14 @@ if [ -n "${SECRETS_PROXY_CA:-}" ]; then
   update-ca-certificates >/dev/null
 fi
 
+# git takes its credential from gh, and SSH remotes go over HTTPS.
+if [ -n "${GH_TOKEN:-}" ]; then
+  git config --system --replace-all credential.https://github.com.helper ''
+  git config --system --add credential.https://github.com.helper '!gh auth git-credential'
+  git config --system --replace-all url.https://github.com/.insteadOf git@github.com:
+  git config --system --add url.https://github.com/.insteadOf ssh://git@github.com/
+fi
+
 # Generate host keys if the image doesn't ship any.
 ssh-keygen -A
 

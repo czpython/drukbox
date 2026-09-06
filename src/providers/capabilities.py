@@ -65,7 +65,7 @@ class ProxyInjection(SecretInjectionCapability):
     ) -> dict[str, str]:
         settings = get_settings()
         return {
-            service["auth_variable"]: str(placeholder),
+            service.auth_variable: str(placeholder),
             "HTTPS_PROXY": settings.secrets_proxy_url,
             "https_proxy": settings.secrets_proxy_url,
             "NO_PROXY": NO_PROXY,

@@ -115,7 +115,9 @@ sandbox cannot reach the exchange or the API through it. Bind the exchange
 process where only the proxy can reach it, because its answer is the real
 credential. A sandbox with secrets installs the proxy's CA at boot, so whoever
 holds the CA key can impersonate any host to that sandbox. The key lives in
-the proxy's volume. The API reads the public certificate only.
+the proxy's volume. The API reads the public certificate only. A sandbox with
+a `github` secret sends git through gh and rewrites SSH remotes to HTTPS, so
+the usual clone and push go through the proxy.
 
 Two pieces of material reach the VM through its provider's user-data /
 setup-script mechanism, and that channel is the relevant exposure:

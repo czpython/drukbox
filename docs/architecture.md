@@ -107,10 +107,13 @@ Caller `env` is stored for provisioning and never returned by the API;
 keys in `hosts.schemas.RESERVED_HOST_ENV_KEYS` are rejected.
 
 `POST /hosts` takes `secrets`, keyed by service handle. A built-in handle
-resolves through the catalog. A custom entry names its own `host` and
-`auth_variable`. It can also set `auth_header` and `auth_prefix`.
-The default is a bearer token in `Authorization`. Drukbox does not consult the
-catalog for a custom entry.
+resolves through the catalog, which names the variable a client reads and
+the hosts the service reaches. `github` reaches `api.github.com` and
+`uploads.github.com` with a bearer, and `github.com` with Basic and
+`x-access-token` as the user, since git's smart HTTP refuses a bearer. A
+custom entry names its own `host` and `auth_variable`. It can also set
+`auth_header` and `auth_prefix`. The default is a bearer token in
+`Authorization`. Drukbox does not consult the catalog for a custom entry.
 
 A static entry stores `value`. A refreshable entry stores `issuer`: the URL,
 the request headers, and the refresh interval. Drukbox never stores a fetched
@@ -127,7 +130,10 @@ fingerprint of the random part. The sandbox receives the auth variable with
 the placeholder in its boot environment, next to the caller's `env`. On every
 provider but docker-sbx it also receives `HTTPS_PROXY`, `https_proxy`, and
 `NO_PROXY`, so it sends its HTTPS through the proxy at `SECRETS_PROXY_URL`,
-and the proxy's CA in `SECRETS_PROXY_CA`, which it installs at boot.
+and the proxy's CA in `SECRETS_PROXY_CA`, which it installs at boot. A box
+with a `github` secret also points git at gh for its credential and rewrites
+SSH remotes to HTTPS, so git sends the placeholder as a Basic password and
+the proxy swaps it.
 The proxy is the official mitmproxy image with the addon in `deploy/proxy`.
 It terminates TLS only for the hosts the exchange lists at `/upstreams`, the
 hosts with a registered secret, and tunnels every other host blind. For a
