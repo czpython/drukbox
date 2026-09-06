@@ -72,8 +72,10 @@ class SecretInjectionCapability(abc.ABC):
 
     ``put_secret`` puts one secret within reach of a box and returns the
     environment the box needs. Provisioning calls it once per secret, and a
-    refresh calls it again with the new value. ``delete_secret`` removes
-    what ``put_secret`` put anywhere. The box only ever holds the placeholder.
+    refresh calls it again with the new value. ``delete_secrets`` removes
+    everything ``put_secret`` put anywhere for one box. It gets the box
+    alone, so teardown never reads the host row. The box only ever holds
+    the placeholder.
     """
 
     # True when the implementation keeps the real value itself, as sbx's own
@@ -94,7 +96,7 @@ class SecretInjectionCapability(abc.ABC):
     ) -> dict[str, str]: ...
 
     @abc.abstractmethod
-    async def delete_secret(self, *, vm: str, placeholder: Placeholder) -> None: ...
+    async def delete_secrets(self, *, vm: str) -> None: ...
 
 
 class VMProvider(abc.ABC):

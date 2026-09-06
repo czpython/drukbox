@@ -144,9 +144,7 @@ async def test_the_proxy_injection_hands_out_a_public_certificate_and_nothing_el
 async def test_the_proxy_injection_holds_no_value_and_has_nothing_to_delete() -> None:
     assert ProxyInjection.holds_value is False
 
-    await ProxyInjection().delete_secret(
-        vm="sb-one", placeholder=Placeholder.mint(uuid.uuid4(), "anthropic")
-    )
+    await ProxyInjection().delete_secrets(vm="sb-one")
 
 
 @pytest.mark.parametrize(

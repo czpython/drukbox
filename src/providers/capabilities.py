@@ -83,7 +83,7 @@ class ProxyInjection(SecretInjectionCapability):
             "NODE_EXTRA_CA_CERTS": environment.PROXY_CA_PATH,
         }
 
-    async def delete_secret(self, *, vm: str, placeholder: Placeholder) -> None:
+    async def delete_secrets(self, *, vm: str) -> None:
         return
 
 

@@ -154,7 +154,9 @@ the proxy. Every connection goes to the address the proxy checked, and the
 upstream certificate is checked against the CONNECT host. A request whose
 `Host` differs from the CONNECT host is refused. On docker-sbx the sandbox gets only the placeholder. Drukbox puts
 the value in sbx's own secret store for that sandbox, and sbx's proxy swaps
-the placeholder on the way out.
+the placeholder on the way out. Host deletion calls `delete_secrets` for the
+box before the VM goes, so nothing the seam put anywhere outlives the box. It
+never reads the row's secrets, so a lost key cannot block a teardown.
 
 A template is a persistent provider image keyed by provider, base image,
 and setup-script hash. `POST /templates` creates a `building` record and
