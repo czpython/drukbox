@@ -110,7 +110,12 @@ exchange routes by base URL.
 
 A static entry stores `value`. A refreshable entry stores `source`: the URL,
 the request headers, and the refresh interval. Drukbox never stores a fetched
-token.
+token. The exchange fetches it on demand, keeps it in memory, and fetches again
+when less than a minute of its life remains. The source answers
+`{"value": "…", "expires_at": "…"}`. `expires_at` is optional, and without it
+the refresh interval sets the expiry. Any other answer is a failure. While a
+source fails, the exchange serves the last value it holds, as long as that
+value is still valid. With nothing valid in memory it answers `503`.
 
 Provisioning mints a placeholder per secret. The placeholder names the host
 and the service, `drk.<host id>.<service>.<random>`. The entry keeps only a

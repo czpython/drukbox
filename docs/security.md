@@ -99,7 +99,9 @@ and loses every entry after it. So a value must be printable ASCII without
 input, so a bad value or a bad source header does not reach the caller. A
 source URL must use HTTPS. It must not carry user credentials or a fragment.
 Drukbox stores the URL path and query as a readable address. Put credentials
-only in the source headers, which Drukbox encrypts.
+only in the source headers, which Drukbox encrypts. The value a source returns
+is never stored. The exchange process keeps it in memory and fetches it again
+whenever it needs to, on first use and after a restart.
 
 A sandbox holds a placeholder, never the credential. The placeholder works
 only at the secrets exchange, and only for the host and the service it names.

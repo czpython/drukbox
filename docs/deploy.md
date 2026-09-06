@@ -308,9 +308,10 @@ Give secrets to `POST /hosts`. Provisioning delivers the placeholders in the
 sandbox's boot environment, on every provider, the same way as `env`. The
 service must have a base URL variable, because the exchange routes by base
 URL. A service without one, such as `github`, answers `422` until its client
-configuration exists. A refreshable secret, one given with `source`, gets `503`
-from the exchange until the refresh loop exists. A pool host takes no secrets:
-a request with secrets always provisions a new sandbox.
+configuration exists. A refreshable secret, one given with `source`, is
+fetched by the exchange process on first use and kept in memory until shortly
+before it expires. The exchange process must reach the source URL. A pool host
+takes no secrets: a request with secrets always provisions a new sandbox.
 
 ## Verify
 

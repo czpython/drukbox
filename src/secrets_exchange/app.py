@@ -1,19 +1,35 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+import httpx
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_session
 from host_secrets import catalog
 from host_secrets.placeholder import Placeholder
 from hosts.models import Host
+from secrets_exchange.secrets import Secrets, SourceUnavailableError
 
-app = FastAPI(title="Drukbox secrets exchange")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    async with httpx.AsyncClient(timeout=10) as client:
+        app.state.secrets = Secrets(client)
+        yield
+
+
+app = FastAPI(title="Drukbox secrets exchange", lifespan=lifespan)
 
 # Caddy copies these from an answer into the upstream request. deploy/caddy names them too.
 UPSTREAM_HOST = "X-Upstream-Host"
 UPSTREAM_HEADER = "X-Upstream-Header"
 UPSTREAM_CREDENTIAL = "X-Upstream-Credential"
+
+
+def get_secrets(request: Request) -> Secrets:
+    return request.app.state.secrets
 
 
 @app.get("/healthz")
@@ -24,6 +40,7 @@ async def healthz() -> dict[str, str]:
 @app.get("/authorize")
 async def authorize(
     session: Annotated[AsyncSession, Depends(get_session)],
+    secrets: Annotated[Secrets, Depends(get_secrets)],
     authorization: Annotated[str, Header()] = "",
     x_forwarded_uri: Annotated[str, Header()] = "",
 ) -> Response:
@@ -48,10 +65,11 @@ async def authorize(
     if not x_forwarded_uri.startswith(f"/{service['host']}/"):
         raise HTTPException(status.HTTP_403_FORBIDDEN)
 
-    if "value" not in entry:
-        # The refresh loop serves source entries. It is not in this release.
+    try:
+        secret = await secrets.current(host.id, placeholder.service, entry)
+    except SourceUnavailableError:
         return Response(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers={"Retry-After": "30"}
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers={"Retry-After": "5"}
         )
 
     return Response(
@@ -59,6 +77,6 @@ async def authorize(
         headers={
             UPSTREAM_HOST: service["host"],
             UPSTREAM_HEADER: service["credential_header"],
-            UPSTREAM_CREDENTIAL: f"{service['credential_prefix']}{entry['value']}",
+            UPSTREAM_CREDENTIAL: f"{service['credential_prefix']}{secret.value}",
         },
     )

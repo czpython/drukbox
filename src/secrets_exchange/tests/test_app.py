@@ -2,7 +2,9 @@ import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
+import httpx
 import pytest
+import respx
 from httpx import ASGITransport, AsyncClient
 
 from core.database import async_session_factory
@@ -10,17 +12,21 @@ from host_secrets.placeholder import Placeholder
 from hosts.models import Host
 from hosts.service import utc_now
 from secrets_exchange.app import UPSTREAM_CREDENTIAL, UPSTREAM_HEADER, UPSTREAM_HOST, app
+from secrets_exchange.secrets import Secrets
 
 
 @pytest.fixture
 async def edge() -> AsyncGenerator[AsyncClient]:
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://secrets exchange"
-    ) as c:
+    # ASGITransport does not run the lifespan, so the test gives the app its secrets.
+    async with (
+        httpx.AsyncClient() as outbound,
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://secrets exchange") as c,
+    ):
+        app.state.secrets = Secrets(outbound)
         yield c
 
 
-async def test_a_placeholder_is_exchanged_for_the_real_credential(edge) -> None:
+async def test_a_placeholder_is_exchanged_for_the_real_secret(edge) -> None:
     host_id = uuid.uuid4()
     minted = Placeholder.mint(host_id, "github")
     await _create_host(
@@ -62,23 +68,38 @@ async def test_a_custom_service_gets_its_own_header_shape(edge) -> None:
     assert response.headers["X-Upstream-Credential"] == "ak_live"
 
 
-async def test_a_source_entry_waits_for_the_refresh_loop(edge) -> None:
+@respx.mock
+async def test_a_source_entry_is_fetched_and_exchanged(edge) -> None:
     host_id = uuid.uuid4()
     minted = Placeholder.mint(host_id, "github")
+    source = {"url": "https://mint.test/x", "headers": {"X-Key": "k"}, "refresh": "1h"}
     await _create_host(
-        host_id,
-        {
-            "github": {
-                "source": {"url": "https://mint.test/x"},
-                "placeholder_fingerprint": minted.fingerprint,
-            }
-        },
+        host_id, {"github": {"source": source, "placeholder_fingerprint": minted.fingerprint}}
     )
+    route = respx.get("https://mint.test/x").respond(json={"value": "ghs_minted"})
+
+    response = await edge.get("/authorize", headers=_headers(str(minted), "/api.github.com/user"))
+
+    assert response.status_code == 200
+    assert response.headers["X-Upstream-Credential"] == "Bearer ghs_minted"
+    assert route.calls[0].request.headers["X-Key"] == "k"
+
+
+@respx.mock
+async def test_a_source_that_gives_nothing_usable_answers_503(edge) -> None:
+    host_id = uuid.uuid4()
+    minted = Placeholder.mint(host_id, "github")
+    source = {"url": "https://mint.test/x", "headers": {"X-Key": "k"}, "refresh": "1h"}
+    await _create_host(
+        host_id, {"github": {"source": source, "placeholder_fingerprint": minted.fingerprint}}
+    )
+    respx.get("https://mint.test/x").respond(status_code=502)
 
     response = await edge.get("/authorize", headers=_headers(str(minted), "/api.github.com/user"))
 
     assert response.status_code == 503
     assert response.headers["Retry-After"]
+    assert "X-Upstream-Credential" not in response.headers
 
 
 @pytest.mark.parametrize(
