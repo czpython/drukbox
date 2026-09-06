@@ -94,8 +94,11 @@ async def test_a_secret_the_exchange_cannot_serve_is_refused(
     assert "one" not in response.text.replace("exactly one", "")
 
 
-async def test_secrets_on_a_proxy_provider_need_the_proxy_address(client, monkeypatch) -> None:
-    monkeypatch.setattr(get_settings(), "secrets_proxy_url", "")
+@pytest.mark.parametrize("setting", ["secrets_proxy_url", "secrets_proxy_ca_file"])
+async def test_secrets_on_a_proxy_provider_need_the_proxy_and_its_certificate(
+    client, monkeypatch, setting: str
+) -> None:
+    monkeypatch.setattr(get_settings(), setting, "")
 
     response = await client.post(
         "/hosts", headers=AUTH_HEADERS, json={"secrets": {"anthropic": {"value": "sk-ant-real"}}}

@@ -130,7 +130,10 @@ and the service, `drk.<host id>.<service>.<random>`. The entry keeps only a
 fingerprint of the random part. The sandbox receives `<credential_var>` with
 the placeholder in its boot environment, next to the caller's `env`. On every
 provider but docker-sbx it also receives `HTTPS_PROXY`, `https_proxy`, and
-`NO_PROXY`, so it sends its HTTPS through the proxy at `SECRETS_PROXY_URL`.
+`NO_PROXY`, so it sends its HTTPS through the proxy at `SECRETS_PROXY_URL`,
+and the proxy's public CA certificate in `SECRETS_PROXY_CA`, which it
+installs at boot, with `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`,
+`CURL_CA_BUNDLE`, and `NODE_EXTRA_CA_CERTS` set for it.
 The proxy is the official mitmproxy image with the addon in `deploy/proxy`.
 It terminates TLS only for the hosts the exchange lists at `/upstreams`, the
 hosts with a registered secret, and tunnels every other host blind. For a

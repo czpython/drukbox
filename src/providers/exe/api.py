@@ -21,6 +21,8 @@ from .settings import ExeSettings
 # default 30s budget. Creation alone gets this read floor; a configured timeout
 # above it wins.
 _CREATE_VM_READ_TIMEOUT_FLOOR = 90.0
+# exe.dev takes a setup script of at most this many bytes.
+SETUP_SCRIPT_LIMIT = 10 * 1024
 
 
 def _encode_setup_script(script: str) -> str:
@@ -93,10 +95,22 @@ class ExeAPI:
         if env:
             # exe puts --env in /etc/profile.d. Only a login shell reads it.
             shebang, _, body = (setup_script or "#!/bin/bash").partition("\n")
-            parts = [shebang, *environment.export(env), environment.bashrc(env), body]
+            parts = [
+                shebang,
+                *environment.export(env),
+                environment.bashrc(env),
+                *environment.trust(env, sudo=True),
+                body,
+            ]
             setup_script = "\n".join(part for part in parts if part)
         if setup_script:
-            command_parts.append(f"--setup-script={_encode_setup_script(setup_script)}")
+            encoded = _encode_setup_script(setup_script)
+            if len(encoded) > SETUP_SCRIPT_LIMIT:
+                raise ExeCommandError(
+                    f"the setup script is {len(encoded)} bytes, over the exe.dev limit of "
+                    f"{SETUP_SCRIPT_LIMIT}"
+                )
+            command_parts.append(f"--setup-script={encoded}")
 
         if tags:
             for tag in tags:

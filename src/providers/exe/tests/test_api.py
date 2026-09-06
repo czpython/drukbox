@@ -117,6 +117,34 @@ async def test_create_vm_sends_a_setup_script_for_env_alone(respx_mock):
     ]
 
 
+@pytest.mark.asyncio
+@respx.mock(base_url="https://exe.dev")
+async def test_create_vm_installs_the_proxy_ca_with_sudo(respx_mock):
+    # The setup script runs as a user with passwordless sudo, not as root.
+    route = respx_mock.post("/exec").mock(
+        return_value=httpx.Response(200, content=b'{"vm_name": "sb-1", "ssh_port": 22}'),
+    )
+
+    await _api().create_vm(name="sb-1", image="ubuntu:22.04", env={"SECRETS_PROXY_CA": "Q0VSVA=="})
+
+    assert _setup_script(route.calls.last.request.content.decode())[-2:] == [
+        "printf '%s' \"$SECRETS_PROXY_CA\" | base64 -d | sudo -n tee "
+        "/usr/local/share/ca-certificates/drukbox.crt >/dev/null || exit 1",
+        "sudo -n update-ca-certificates >/dev/null || exit 1",
+    ]
+
+
+@pytest.mark.asyncio
+@respx.mock(base_url="https://exe.dev", assert_all_called=False)
+async def test_create_vm_refuses_a_setup_script_over_the_exe_limit(respx_mock):
+    route = respx_mock.post("/exec")
+
+    with pytest.raises(ExeCommandError, match=r"over the exe\.dev limit"):
+        await _api().create_vm(name="sb-1", image="ubuntu:22.04", env={"BIG": "a" * 6000})
+
+    assert route.call_count == 0
+
+
 def _setup_script(body: str) -> list[str]:
     """The setup script exe receives, as lines."""
     quoted = body.split("--setup-script=", 1)[1].split(" --", 1)[0]

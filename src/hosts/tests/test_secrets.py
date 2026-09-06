@@ -51,6 +51,7 @@ class RecordingInjection(SecretInjectionCapability):
 def settings(monkeypatch: pytest.MonkeyPatch) -> Generator[Settings, None, None]:
     monkeypatch.setenv("TAILSCALE_ENABLED", "false")
     monkeypatch.setenv("SECRETS_PROXY_URL", "http://proxy.test:8880")
+    monkeypatch.setenv("SECRETS_PROXY_CA_FILE", "env/test-proxy-ca.pem")
     get_settings.cache_clear()
     yield get_settings()
     get_settings.cache_clear()
@@ -125,6 +126,8 @@ async def test_a_proxy_box_boots_with_its_placeholders_and_the_proxy_and_no_valu
     assert environment["KEEP"] == "me"
     assert environment["HTTPS_PROXY"] == environment["https_proxy"] == "http://proxy.test:8880"
     assert environment["NO_PROXY"].startswith("localhost,")
+    assert environment["SECRETS_PROXY_CA"]
+    assert environment["NODE_EXTRA_CA_CERTS"] == "/usr/local/share/ca-certificates/drukbox.crt"
     for name, variable in (("anthropic", "ANTHROPIC_AUTH_TOKEN"), ("github", "GH_TOKEN")):
         placeholder = Placeholder.read(environment[variable])
         assert (placeholder.host_id, placeholder.service) == (host.id, name)
@@ -152,6 +155,29 @@ async def test_a_provider_that_holds_the_value_gets_it_at_boot(
     environment = _boot_environment(create_vm)
     assert Placeholder.read(environment["GH_TOKEN"]).service == "github"
     assert "HTTPS_PROXY" not in environment
+
+
+class OversizedInjection(RecordingInjection):
+    """Hands the box a value that pam_env cannot read."""
+
+    async def put_secret(
+        self, *, vm: str, service: Service, placeholder: Placeholder, value: str
+    ) -> dict[str, str]:
+        return {service["credential_var"]: "a" * 9000}
+
+
+async def test_a_boot_environment_pam_cannot_read_fails_provisioning_before_the_vm(
+    settings: Settings, create_vm: AsyncMock, stub_provider: StubVMProvider
+) -> None:
+    stub_provider.secret_injection = OversizedInjection()
+
+    async with async_session_factory() as session:
+        with pytest.raises(ProvisioningFailedError, match="longer than 8191 bytes"):
+            await HostService(session, settings=settings).create_host(
+                env={}, secrets={"anthropic": {"value": "sk-ant-real"}}, image=None, provider="stub"
+            )
+
+    create_vm.assert_not_awaited()
 
 
 @respx.mock

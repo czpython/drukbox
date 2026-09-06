@@ -113,9 +113,10 @@ header on the host the exchange approved. The proxy refuses a destination
 that resolves to a loopback, private, link-local, or metadata address, so a
 sandbox cannot reach the exchange or the API through it. Bind the exchange
 process where only the proxy can reach it, because its answer is the real
-credential. The sandbox trusts the proxy's CA for the hosts with a secret, so
-whoever holds the CA key can impersonate those hosts to the sandbox. The key
-lives in the proxy's volume.
+credential. A sandbox with secrets installs the proxy's public CA certificate
+at boot and trusts it, so whoever holds the CA key can impersonate any host
+to that sandbox. The key lives in the proxy's volume and never leaves it.
+The API reads only the public certificate.
 
 Two pieces of material reach the VM through its provider's user-data /
 setup-script mechanism, and that channel is the relevant exposure:

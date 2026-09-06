@@ -71,3 +71,37 @@ def test_cloud_init_keeps_the_setup_script_shebang_first():
 
 def test_cloud_init_without_env_is_the_setup_script():
     assert environment.cloud_init("#!/bin/sh\necho hi\n", env=None) == "#!/bin/sh\necho hi\n"
+
+
+def test_trust_installs_the_proxy_ca_from_the_exported_variable_and_stops_on_failure():
+    assert environment.trust({"SECRETS_PROXY_CA": "Q0VSVA==", "FOO": "bar"}) == [
+        "printf '%s' \"$SECRETS_PROXY_CA\" | base64 -d | tee "
+        "/usr/local/share/ca-certificates/drukbox.crt >/dev/null || exit 1",
+        "update-ca-certificates >/dev/null || exit 1",
+    ]
+
+
+def test_trust_uses_sudo_for_a_script_that_runs_as_a_user():
+    assert environment.trust({"SECRETS_PROXY_CA": "Q0VSVA=="}, sudo=True) == [
+        "printf '%s' \"$SECRETS_PROXY_CA\" | base64 -d | sudo -n tee "
+        "/usr/local/share/ca-certificates/drukbox.crt >/dev/null || exit 1",
+        "sudo -n update-ca-certificates >/dev/null || exit 1",
+    ]
+
+
+def test_a_box_without_secrets_installs_nothing():
+    assert environment.trust({"FOO": "bar"}) == []
+    assert "ca-certificates" not in environment.cloud_init("echo hi", env={"FOO": "bar"})
+
+
+def test_cloud_init_installs_the_ca_after_the_env_and_before_the_script():
+    out = environment.cloud_init("echo hi", env={"SECRETS_PROXY_CA": "Q0VSVA=="})
+    assert out.splitlines() == [
+        "#!/bin/sh",
+        "export SECRETS_PROXY_CA=Q0VSVA==",
+        "printf '%s\\n' SECRETS_PROXY_CA=Q0VSVA== >> /etc/environment",
+        "printf '%s' \"$SECRETS_PROXY_CA\" | base64 -d | tee "
+        "/usr/local/share/ca-certificates/drukbox.crt >/dev/null || exit 1",
+        "update-ca-certificates >/dev/null || exit 1",
+        "echo hi",
+    ]
