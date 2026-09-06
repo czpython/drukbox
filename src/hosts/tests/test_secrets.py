@@ -25,15 +25,13 @@ SECRETS = {
         "auth_header": "Authorization",
         "auth_prefix": "Bearer ",
         "auth_variable": "GH_TOKEN",
-        "endpoint_var": "",
-        "base_path": "",
         "issuer": ISSUER,
     },
 }
 
 
 class RecordingInjection(SecretInjectionCapability):
-    """Holds the value, as sbx does."""
+    """Holds the value, as sbx does. Records what it was handed."""
 
     needs_value = True
 

@@ -1,13 +1,6 @@
 from host_secrets.catalog import CATALOG
 
-SERVICE_KEYS = {
-    "host",
-    "auth_header",
-    "auth_prefix",
-    "auth_variable",
-    "endpoint_var",
-    "base_path",
-}
+SERVICE_KEYS = {"host", "auth_header", "auth_prefix", "auth_variable"}
 
 
 def test_catalog_starts_with_the_three_built_in_services() -> None:
