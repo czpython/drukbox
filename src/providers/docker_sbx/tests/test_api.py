@@ -70,6 +70,43 @@ async def test_run_bootstrap_feeds_the_script_over_stdin_never_argv(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_set_custom_secret_names_every_host_of_the_service(monkeypatch):
+    captured: dict = {}
+
+    async def fake_exec(*args, **kwargs):
+        captured["args"] = args
+        return _process()
+
+    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", fake_exec)
+
+    await SbxCLI().set_custom_secret(
+        sandbox="sb-test",
+        hosts=["api.github.com", "github.com"],
+        env="GH_TOKEN",
+        placeholder="drk.a.github.b",
+        command="cat /secrets/sb-test/github",
+    )
+
+    assert captured["args"] == (
+        "sbx",
+        "secret",
+        "set-custom",
+        "--sandbox",
+        "sb-test",
+        "--host",
+        "api.github.com",
+        "--host",
+        "github.com",
+        "--env",
+        "GH_TOKEN",
+        "--placeholder",
+        "drk.a.github.b",
+        "--command",
+        "cat /secrets/sb-test/github",
+    )
+
+
+@pytest.mark.asyncio
 async def test_sandbox_count_reads_the_listing(monkeypatch):
     listing = b'{"sandboxes": [{"name": "sb-a"}, {"name": "sb-b"}]}'
     create = AsyncMock(return_value=_process(stdout=listing))

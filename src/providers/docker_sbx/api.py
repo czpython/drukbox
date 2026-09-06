@@ -79,18 +79,18 @@ class SbxCLI:
         self,
         *,
         sandbox: str,
-        host: str,
+        hosts: list[str],
         env: str,
         placeholder: str,
         command: str,
     ) -> None:
+        # One secret covers every host of its service. --host repeats.
         await self._run(
             "secret",
             "set-custom",
             "--sandbox",
             sandbox,
-            "--host",
-            host,
+            *(part for host in hosts for part in ("--host", host)),
             "--env",
             env,
             "--placeholder",

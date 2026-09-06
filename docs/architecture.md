@@ -111,10 +111,14 @@ Caller `env` is stored for provisioning and never returned by the API;
 keys in `hosts.schemas.RESERVED_HOST_ENV_KEYS` are rejected.
 
 `POST /hosts` takes `secrets`, keyed by service handle. A built-in handle
-resolves through the catalog. A custom entry names its own `host` and
-`credential_var`. It can also set `credential_header` and `credential_prefix`.
-The default is a bearer token in `Authorization`. Drukbox does not consult the
-catalog for a custom entry.
+resolves through the catalog, which names the variable a client reads and
+the hosts the service reaches, each with the shape of its credential on the
+wire. `github` reaches two: `api.github.com` takes a bearer, and `github.com`
+takes Basic with `x-access-token` as the user, since git's smart HTTP refuses
+a bearer. A custom entry names its own `host` and `credential_var`. It can
+also set `credential_header` and `credential_prefix`. The default is a bearer
+token in `Authorization`. Drukbox does not consult the catalog for a custom
+entry.
 
 A static entry stores `value`. A refreshable entry stores `issuer`: the URL,
 the request headers, and the refresh interval. Drukbox never stores a fetched
@@ -133,7 +137,11 @@ provider but docker-sbx it also receives `HTTPS_PROXY`, `https_proxy`, and
 `NO_PROXY`, so it sends its HTTPS through the proxy at `SECRETS_PROXY_URL`,
 and the proxy's public CA certificate in `SECRETS_PROXY_CA`, which it
 installs at boot, with `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`,
-`CURL_CA_BUNDLE`, and `NODE_EXTRA_CA_CERTS` set for it.
+`CURL_CA_BUNDLE`, and `NODE_EXTRA_CA_CERTS` set for it. A box with a
+`github` secret also points git at gh for its credential, the lines
+`gh auth setup-git` writes, so git sends the placeholder as a Basic password
+and the proxy swaps it. An SSH remote would go around the proxy, so the box
+rewrites `git@github.com:` and `ssh://git@github.com/` to HTTPS.
 The proxy is the official mitmproxy image with the addon in `deploy/proxy`.
 It terminates TLS only for the hosts the exchange lists at `/upstreams`, the
 hosts with a registered secret, and tunnels every other host blind. For a

@@ -22,6 +22,16 @@ if [ -n "${SECRETS_PROXY_CA:-}" ]; then
   update-ca-certificates >/dev/null
 fi
 
+# A sandbox with a github secret uses gh as git's credential helper, so git
+# sends the placeholder and the proxy swaps it. An SSH remote would go around
+# the proxy, so it is rewritten to HTTPS. This runs again at every restart.
+if [ -n "${GH_TOKEN:-}" ]; then
+  git config --system --replace-all credential.https://github.com.helper ''
+  git config --system --add credential.https://github.com.helper '!gh auth git-credential'
+  git config --system --replace-all url.https://github.com/.insteadOf git@github.com:
+  git config --system --add url.https://github.com/.insteadOf ssh://git@github.com/
+fi
+
 # Generate host keys if the image doesn't ship any.
 ssh-keygen -A
 

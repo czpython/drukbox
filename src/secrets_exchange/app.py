@@ -44,9 +44,10 @@ async def upstreams(session: Annotated[AsyncSession, Depends(get_session)]) -> l
     hosts = (await session.execute(select(Host))).scalars()
     return sorted(
         {
-            catalog.service(name, entry)["host"]
+            upstream.host
             for host in hosts
             for name, entry in host.secrets.items()
+            for upstream in catalog.service(name, entry).upstreams
         }
     )
 
@@ -76,9 +77,13 @@ async def authorize(
     if not placeholder.matches(entry["placeholder_fingerprint"]):
         raise HTTPException(status.HTTP_403_FORBIDDEN)
 
-    service = catalog.service(placeholder.service, entry)
-    if x_forwarded_host != service["host"]:
+    upstreams = {
+        upstream.host: upstream
+        for upstream in catalog.service(placeholder.service, entry).upstreams
+    }
+    if x_forwarded_host not in upstreams:
         raise HTTPException(status.HTTP_403_FORBIDDEN)
+    upstream = upstreams[x_forwarded_host]
 
     try:
         secret = await secrets.current(host.id, placeholder.service, entry)
@@ -90,8 +95,8 @@ async def authorize(
     return Response(
         status_code=status.HTTP_200_OK,
         headers={
-            UPSTREAM_HOST: service["host"],
-            UPSTREAM_HEADER: service["credential_header"],
-            UPSTREAM_CREDENTIAL: f"{service['credential_prefix']}{secret.value}",
+            UPSTREAM_HOST: upstream.host,
+            UPSTREAM_HEADER: upstream.header,
+            UPSTREAM_CREDENTIAL: upstream.credential(secret.value),
         },
     )
