@@ -100,6 +100,7 @@ class ExeAPI:
                 *environment.export(env),
                 environment.bashrc(env),
                 *environment.trust(env, sudo=True),
+                *environment.github(env, sudo=True),
                 body,
             ]
             setup_script = "\n".join(part for part in parts if part)

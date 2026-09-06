@@ -52,14 +52,14 @@ class SbxInjection(SecretInjectionCapability):
             else:
                 await self.api.set_custom_secret(
                     sandbox=vm,
-                    host=service["host"],
-                    env=service["credential_var"],
+                    hosts=[upstream.host for upstream in service.upstreams],
+                    env=service.credential_var,
                     placeholder=str(placeholder),
                     command=command,
                 )
         except DockerSbxProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
-        return {service["credential_var"]: str(placeholder)}
+        return {service.credential_var: str(placeholder)}
 
     async def delete_secret(self, *, vm: str, placeholder: Placeholder) -> None:
         try:

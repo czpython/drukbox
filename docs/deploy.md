@@ -334,8 +334,12 @@ with `update-ca-certificates`. The docker sandbox image does this in its
 entrypoint, a cloud VM in its cloud-init script, and an exe VM in its setup
 script with `sudo -n`. `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, and
 `CURL_CA_BUNDLE` point at the system bundle, and `NODE_EXTRA_CA_CERTS` at
-the certificate, so curl, Python, and Node trust the proxy. A sandbox
-without secrets gets none of this. Keep `flow_detail` at `1` or below. A
+the certificate, so curl, Python, and Node trust the proxy. A sandbox with a
+`github` secret gets the placeholder in `GH_TOKEN`, git configured to take
+its credential from gh, and SSH remotes rewritten to HTTPS, so `git clone`,
+`git push`, and `gh` all cross the proxy. That sandbox needs `git` and
+`gh`. The docker sandbox image has both. A sandbox without secrets gets none
+of this. Keep `flow_detail` at `1` or below. A
 higher level prints request headers, and after the swap those carry the
 real credential. Real credentials exist in three places only. They are
 encrypted in Postgres, they pass through the exchange process for one
@@ -519,7 +523,7 @@ Docker provider:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DOCKER_DEFAULT_IMAGE` | `ghcr.io/czpython/drukbox/sandbox:latest` | Sandbox image with sshd; auto-pulled. Build `images/local/Dockerfile` to customize. |
+| `DOCKER_DEFAULT_IMAGE` | `ghcr.io/czpython/drukbox/sandbox:latest` | Sandbox image with sshd, git, and gh; auto-pulled. Build `images/local/Dockerfile` to customize. |
 | `DOCKER_SSH_USERNAME` | `root` | In-container user callers SSH as. |
 | `DOCKER_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `30.0` | ssh-keyscan retry budget for a fresh container. |
 

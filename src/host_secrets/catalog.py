@@ -1,39 +1,55 @@
-from typing import Any, TypedDict
+import base64
+from typing import Any, NamedTuple
 
 BEARER_HEADER = "Authorization"
 BEARER_PREFIX = "Bearer "
+# What a custom entry stores about its service, next to the value or the issuer.
 SERVICE_FIELDS = frozenset({"host", "credential_header", "credential_prefix", "credential_var"})
 
 
-class Service(TypedDict):
+class Upstream(NamedTuple):
+    """One host a service reaches, and how the credential goes on the wire to it."""
+
     host: str
-    credential_header: str
-    credential_prefix: str
+    header: str = BEARER_HEADER
+    prefix: str = BEARER_PREFIX
+    # Basic authentication carries the credential as this user's password.
+    basic_user: str = ""
+
+    def credential(self, value: str) -> str:
+        if self.basic_user:
+            return "Basic " + base64.b64encode(f"{self.basic_user}:{value}".encode()).decode()
+        return f"{self.prefix}{value}"
+
+
+class Service(NamedTuple):
+    """The variable a client reads the credential from, and the hosts it reaches."""
+
     credential_var: str
-
-
-def bearer(host: str, credential_var: str) -> Service:
-    return {
-        "host": host,
-        "credential_header": BEARER_HEADER,
-        "credential_prefix": BEARER_PREFIX,
-        "credential_var": credential_var,
-    }
+    upstreams: tuple[Upstream, ...]
 
 
 CATALOG: dict[str, Service] = {
-    "anthropic": bearer("api.anthropic.com", "ANTHROPIC_AUTH_TOKEN"),
-    "github": bearer("api.github.com", "GH_TOKEN"),
-    "openai": bearer("api.openai.com", "OPENAI_API_KEY"),
+    "anthropic": Service("ANTHROPIC_AUTH_TOKEN", (Upstream("api.anthropic.com"),)),
+    # gh sends a bearer to the API and to release asset uploads. git's smart
+    # HTTP refuses a bearer and takes Basic with x-access-token as the user.
+    "github": Service(
+        "GH_TOKEN",
+        (
+            Upstream("api.github.com"),
+            Upstream("uploads.github.com"),
+            Upstream("github.com", basic_user="x-access-token"),
+        ),
+    ),
+    "openai": Service("OPENAI_API_KEY", (Upstream("api.openai.com"),)),
 }
 
 
 def service(name: str, entry: dict[str, Any]) -> Service:
-    """The service an entry reaches: its host, header, and the variable a client reads."""
-    fields = entry if "host" in entry else CATALOG[name]
-    return {
-        "host": fields["host"],
-        "credential_header": fields["credential_header"],
-        "credential_prefix": fields["credential_prefix"],
-        "credential_var": fields["credential_var"],
-    }
+    """The service an entry reaches. A custom entry names one host of its own."""
+    if "host" in entry:
+        return Service(
+            entry["credential_var"],
+            (Upstream(entry["host"], entry["credential_header"], entry["credential_prefix"]),),
+        )
+    return CATALOG[name]

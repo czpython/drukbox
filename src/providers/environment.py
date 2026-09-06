@@ -3,6 +3,8 @@
 import re
 import shlex
 
+from host_secrets.catalog import CATALOG
+
 _NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # pam_env reads /etc/environment one entry per line, with its own parser: a
@@ -83,10 +85,32 @@ def trust(env: dict[str, str], *, sudo: bool = False) -> list[str]:
     ]
 
 
+def github(env: dict[str, str], *, sudo: bool = False) -> list[str]:
+    """Shell lines that point git at gh for its GitHub credential, when ``env``
+    carries one, and send an SSH remote over HTTPS.
+
+    These are the lines ``gh auth setup-git`` writes, for every user of the box.
+    git then sends the placeholder as a Basic password, which the proxy swaps.
+    An SSH remote would go around the proxy, so it is rewritten to HTTPS. The
+    lines can run again on the same box, as a container restart does.
+    """
+    if CATALOG["github"].credential_var not in env:
+        return []
+    git = f"{'sudo -n ' if sudo else ''}git config --system"
+    return [
+        f"{git} --replace-all credential.https://github.com.helper '' || exit 1",
+        f"{git} --add credential.https://github.com.helper '!gh auth git-credential' || exit 1",
+        f"{git} --replace-all url.https://github.com/.insteadOf git@github.com: || exit 1",
+        f"{git} --add url.https://github.com/.insteadOf ssh://git@github.com/ || exit 1",
+    ]
+
+
 def cloud_init(setup_script: str, env: dict[str, str] | None) -> str:
     """The user-data for a cloud VM: a shebang, ``env`` for the setup script
-    and for every later session, the proxy's CA, then the setup script."""
+    and for every later session, the proxy's CA, git's setup, then the setup
+    script."""
     script = setup_script if setup_script.startswith("#!") else f"#!/bin/sh\n{setup_script}"
     shebang, _, body = script.partition("\n")
-    lines = [shebang, *export(env or {}), *persist(env or {}), *trust(env or {}), body]
+    env = env or {}
+    lines = [shebang, *export(env), *persist(env), *trust(env), *github(env), body]
     return "\n".join(line for line in lines if line)

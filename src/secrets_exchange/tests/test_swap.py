@@ -154,11 +154,12 @@ def _basic(user: str, password: str) -> str:
     [
         (f"Bearer {PLACEHOLDER}", PLACEHOLDER),
         (f"bearer  {PLACEHOLDER}", PLACEHOLDER),
+        (f"token {PLACEHOLDER}", PLACEHOLDER),
         (PLACEHOLDER, PLACEHOLDER),
         (_basic("x-access-token", PLACEHOLDER), PLACEHOLDER),
         ("Bearer sk-ant-oat01-real", None),
         (f"Bearer x{PLACEHOLDER}", None),
-        (f"token {PLACEHOLDER}", None),
+        (f"Digest {PLACEHOLDER}", None),
         ("Bearer drk.0123abcd.anthropic", None),
         (_basic("user", "ghs_real"), None),
         ("Basic not-base64!", None),

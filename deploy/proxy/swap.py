@@ -53,13 +53,14 @@ class ExchangeUnavailable(Exception):
 def placeholder_in(value: str) -> str | None:
     """The placeholder a header value carries.
 
-    A bearer carries it after the scheme. Basic carries it as the password, so
-    the value is decoded and the password read. Anything else must be the
-    placeholder itself. A placeholder inside a longer value never counts.
+    A bearer carries it after the scheme, and so does gh's ``token`` scheme.
+    Basic carries it as the password, so the value is decoded and the password
+    read. Anything else must be the placeholder itself. A placeholder inside a
+    longer value never counts.
     """
     scheme, _, rest = value.partition(" ")
     candidate = value
-    if scheme.lower() == "bearer":
+    if scheme.lower() in ("bearer", "token"):
         candidate = rest.strip()
     elif scheme.lower() == "basic":
         try:
