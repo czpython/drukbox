@@ -153,6 +153,25 @@ async def test_delete_secrets_removes_the_scope_and_the_files(tmp_path: Path) ->
     assert not (tmp_path / "sb-one").exists()
 
 
+async def test_value_files_that_cannot_be_removed_keep_the_secrets_for_a_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api = _api_mock()
+    injection = SbxInjection(api, tmp_path)
+    placeholder = Placeholder.mint(uuid.uuid4(), "anthropic")
+    await injection.put_secret(
+        vm="sb-one", service=CATALOG["anthropic"], placeholder=placeholder, value="sk-ant-real"
+    )
+
+    def refuse(path: Path) -> None:
+        raise PermissionError(f"{path}: operation not permitted")
+
+    monkeypatch.setattr("providers.docker_sbx.secrets.shutil.rmtree", refuse)
+
+    with pytest.raises(ProviderCommandError, match="value files"):
+        await injection.delete_secrets(vm="sb-one")
+
+
 async def test_delete_secrets_can_run_again_after_a_partial_teardown(tmp_path: Path) -> None:
     api = _api_mock()
 

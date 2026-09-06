@@ -376,9 +376,12 @@ secret on its hosts. The value files that sbx reads live in a `secrets`
 directory under `DOCKER_SBX_WORKSPACE_ROOT`, beside the workspaces and never
 inside one. sbx reads a value file at each use, so a fresh value is a
 rewritten file. sbx keeps a sandbox's secrets after the sandbox is removed, so
-host deletion removes every secret in the sandbox's scope and the files. Do
-not set a global sbx secret for a destination drukbox manages. sbx applies
-the global one first, and drukbox's value never reaches the sandbox.
+host deletion removes every secret in the sandbox's scope and the files. The
+janitor deletes an expired host the same way. Remove a sandbox through
+drukbox, never with `sbx rm`: its secrets would stay in sbx's store until its
+row expires. Do not set a global sbx secret for a destination drukbox
+manages. sbx applies the global one first, and drukbox's value never reaches
+the sandbox.
 
 Give secrets to `POST /hosts`. Provisioning delivers the placeholders in the
 sandbox's boot environment, on every provider, the same way as `env`. A

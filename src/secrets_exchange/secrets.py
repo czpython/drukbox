@@ -134,6 +134,12 @@ class Secrets:
         self._client = client
         self._refreshable: dict[tuple[uuid.UUID, str], RefreshableSecret] = {}
 
+    def keep(self, host_ids: set[uuid.UUID]) -> None:
+        """Forget the secrets of every other host. Nothing is fetched for a dead box."""
+        self._refreshable = {
+            key: secret for key, secret in self._refreshable.items() if key[0] in host_ids
+        }
+
     async def current(self, host_id: uuid.UUID, service: str, entry: dict[str, Any]) -> Secret:
         """Raises ``IssuerUnavailableError`` when no valid secret exists."""
         if "value" in entry:
