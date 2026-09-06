@@ -369,8 +369,14 @@ from the sandbox tag to the proxy host:
 A sandbox then reaches that port on that host and nothing else there. A
 Docker Sandboxes sandbox dials nothing. Drukbox puts each value in sbx's own
 secret store for that sandbox, and sbx's proxy swaps the placeholder. The
-value files that sbx reads live in a `secrets` directory under
-`DOCKER_SBX_WORKSPACE_ROOT`, beside the workspaces and never inside one.
+`github` service is sbx's own `github` secret, which covers git and gh. Any
+other service, and a custom entry that names a host of its own, is a custom
+secret on its hosts. The value files that sbx reads live in a `secrets`
+directory under `DOCKER_SBX_WORKSPACE_ROOT`, beside the workspaces and never
+inside one. sbx keeps a sandbox's secrets after the sandbox is removed, so
+host deletion removes every secret in the sandbox's scope and the files. Do
+not set a global sbx secret for a destination drukbox manages. sbx applies
+the global one first, and drukbox's value never reaches the sandbox.
 
 Give secrets to `POST /hosts`. Provisioning delivers the placeholders in the
 sandbox's boot environment, on every provider, the same way as `env`. A

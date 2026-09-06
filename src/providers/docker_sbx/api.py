@@ -99,6 +99,24 @@ class SbxCLI:
             command,
         )
 
+    async def custom_placeholders(self, *, sandbox: str) -> list[str]:
+        """The placeholders of the custom secrets in the sandbox's scope.
+
+        ``sbx secret ls`` has no JSON output. The custom rows follow a
+        ``CUSTOM SECRETS`` header, with the placeholder in the fourth column.
+        """
+        output = await self._run("secret", "ls", "--sandbox", sandbox)
+        placeholders: list[str] = []
+        custom = False
+        for line in output.splitlines():
+            if line.startswith("CUSTOM SECRETS"):
+                custom = True
+                continue
+            columns = re.split(r"\s{2,}", line.strip())
+            if custom and len(columns) >= 4 and columns[0] == sandbox:
+                placeholders.append(columns[3])
+        return placeholders
+
     async def remove_secret(self, service: str, *, sandbox: str) -> None:
         # Without -f the CLI asks for confirmation and waits forever.
         await self._run("secret", "rm", "-f", service, "--sandbox", sandbox)
