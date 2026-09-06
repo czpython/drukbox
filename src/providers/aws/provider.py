@@ -7,6 +7,7 @@ import httpx
 from core.settings import get_settings
 from providers import environment
 from providers.base import VMCreateResult, VMProvider
+from providers.capabilities import ProxyInjection
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
 from providers.ssh_keys import generate_ed25519_keypair
 
@@ -22,6 +23,7 @@ _MANAGED_SG_DESCRIPTION = "SSH ingress for drukbox-managed sandbox VMs."
 
 class AWSProvider(VMProvider):
     name: ClassVar[str] = "aws"
+    secret_injection = ProxyInjection()
     diagnose_hint: ClassVar[str] = "check_aws_credentials_and_region"
     supports_instance_type = True
     supports_disk_gb = True

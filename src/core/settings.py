@@ -48,12 +48,12 @@ class Settings(BaseSettings):
         description="Name of the network provider used when callers don't specify one.",
     )
 
-    secrets_exchange_url: str = Field(
+    secrets_proxy_url: str = Field(
         default="",
-        validation_alias="SECRETS_EXCHANGE_URL",
+        validation_alias="SECRETS_PROXY_URL",
         description=(
-            "Base URL a sandbox dials to reach the secrets exchange, for example "
-            "https://secrets.example.com or http://172.17.0.1:8080."
+            "Proxy a sandbox sends its HTTPS through, for example http://172.17.0.1:8880. "
+            "The proxy swaps the sandbox's placeholder for the real credential."
         ),
     )
 

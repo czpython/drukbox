@@ -19,6 +19,7 @@ from providers.ssh_keys import generate_ed25519_keypair
 from .api import SbxCLI
 from .exceptions import DockerSbxNotFoundError, DockerSbxProviderError
 from .process import SbxExecProcess
+from .secrets import SbxInjection
 from .settings import DockerSbxSettings
 
 
@@ -61,6 +62,10 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
         self.api = api
         self.settings = settings
         self.docker = docker
+        # The value files live beside the workspaces. A workspace is mounted
+        # into its box, so a value in one would be a value in the box.
+        self.secrets_root = settings.workspace_root / "secrets"
+        self.secret_injection = SbxInjection(api, self.secrets_root)
 
     @classmethod
     def from_settings(cls) -> Self:
@@ -128,7 +133,7 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
             # sandbox by name if the cleanup fails.
             with contextlib.suppress(DockerSbxProviderError):
                 await self.api.remove_sandbox(name)
-            self._remove_workspace(name)
+            self._remove_sandbox_files(name)
             raise ProviderTransportError(str(exc)) from exc
 
         try:
@@ -143,7 +148,7 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
         except DockerSbxProviderError as exc:
             with contextlib.suppress(DockerSbxProviderError):
                 await self.api.remove_sandbox(name)
-            self._remove_workspace(name)
+            self._remove_sandbox_files(name)
             raise ProviderTransportError(str(exc)) from exc
 
         # A sandbox has no reachable address of its own: callers arrive
@@ -162,14 +167,14 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
         except DockerSbxNotFoundError as exc:
             # The sandbox is not there, but its workspace can be. Remove the
             # workspace also.
-            self._remove_workspace(name)
+            self._remove_sandbox_files(name)
             raise ProviderNotFoundError(f"sandbox '{name}' was not found") from exc
         except DockerSbxProviderError as exc:
             # Keep the workspace. The sandbox can continue to operate on it.
             # HostService keeps the record and can try the deletion again.
             raise ProviderTransportError(str(exc)) from exc
 
-        self._remove_workspace(name)
+        self._remove_sandbox_files(name)
 
     async def build_template_image(
         self,
@@ -198,7 +203,8 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
     def _workspace(self, name: str) -> Path:
         return self.settings.workspace_root / name
 
-    def _remove_workspace(self, name: str) -> None:
-        # The workspace is temporary data for one sandbox. An error here must
-        # not block the host deletion.
+    def _remove_sandbox_files(self, name: str) -> None:
+        # The workspace and the value files are temporary data for one
+        # sandbox. An error here must not block the host deletion.
         shutil.rmtree(self._workspace(name), ignore_errors=True)
+        shutil.rmtree(self.secrets_root / name, ignore_errors=True)

@@ -3,7 +3,7 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import TemplateCapability
+from providers.capabilities import ProxyInjection, TemplateCapability
 from providers.exceptions import (
     ProviderCommandError,
     ProviderNotFoundError,
@@ -23,6 +23,7 @@ _RESERVED_ENV_KEYS = frozenset({_AUTHORIZED_KEY_ENV, _ENV_KEYS_ENV})
 
 class DockerProvider(VMProvider, TemplateCapability):
     name: ClassVar[str] = "docker"
+    secret_injection = ProxyInjection()
     diagnose_hint: ClassVar[str] = "check_docker_daemon_is_running"
     # A local container has no path onto the tailnet; its hosts keep the
     # published 127.0.0.1 sshd port even on a tailnet-mode service.

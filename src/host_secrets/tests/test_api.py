@@ -45,6 +45,19 @@ async def test_a_host_is_created_with_its_secrets_and_never_returns_them(
     }
 
 
+async def test_a_built_in_service_needs_no_base_url_variable(client, monkeypatch) -> None:
+    monkeypatch.setattr("hosts.service.HostService.provision", AsyncMock())
+
+    response = await client.post(
+        "/hosts", headers=AUTH_HEADERS, json={"secrets": {"github": {"value": "ghs_real"}}}
+    )
+
+    assert response.status_code == 201
+    assert await _stored_secrets(uuid.UUID(response.json()["id"])) == {
+        "github": {"value": "ghs_real"}
+    }
+
+
 async def test_secrets_are_ciphertext_at_rest(client, monkeypatch) -> None:
     monkeypatch.setattr("hosts.service.HostService.provision", AsyncMock())
 
@@ -61,7 +74,6 @@ async def test_secrets_are_ciphertext_at_rest(client, monkeypatch) -> None:
     ("secrets", "reason"),
     [
         ({"acme": {"value": "one"}}, "unknown secret service"),
-        ({"github": {"value": "one"}}, "no base URL variable"),
         ({"GitHub": {"value": "one"}}, "invalid secret service name"),
         (
             {
@@ -84,15 +96,15 @@ async def test_a_secret_the_exchange_cannot_serve_is_refused(
     assert "one" not in response.text.replace("exactly one", "")
 
 
-async def test_secrets_need_the_exchange_address(client, monkeypatch) -> None:
-    monkeypatch.setattr(get_settings(), "secrets_exchange_url", "")
+async def test_secrets_on_a_proxy_provider_need_the_proxy_address(client, monkeypatch) -> None:
+    monkeypatch.setattr(get_settings(), "secrets_proxy_url", "")
 
     response = await client.post(
         "/hosts", headers=AUTH_HEADERS, json={"secrets": {"anthropic": {"value": "sk-ant-real"}}}
     )
 
     assert response.status_code == 409
-    assert response.json()["error_code"] == "SECRETS_EXCHANGE_NOT_CONFIGURED"
+    assert response.json()["error_code"] == "SECRETS_PROXY_NOT_CONFIGURED"
 
 
 async def _stored_secrets(host_id: uuid.UUID) -> dict[str, object]:

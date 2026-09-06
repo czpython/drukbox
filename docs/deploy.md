@@ -123,10 +123,6 @@ the host:
 2. Sign in one time with `sbx login`. Headless hosts use a device-code
    flow.
 3. Start the daemon: `sbx daemon start -d --policy balanced`.
-4. Allow the secrets exchange. The daemon sends every sandbox through
-   its own egress proxy, and the default policy denies what it does not
-   list. One rule for the exchange address serves every sandbox:
-   `sbx policy allow network secrets.example.com:443`.
 
 Docker documents `sbx` as a tool for the daemon owner's own user on the
 host. Thus the simplest deployment runs drukbox directly on the host, as
@@ -303,35 +299,37 @@ Real credentials exist in three places only. They are encrypted in Postgres,
 they pass through the exchange process for one request, and they pass through
 Caddy for one request. Caddy does not log them.
 
-`SECRETS_EXCHANGE_URL` is the address a sandbox dials. For local containers,
-set it to Caddy on the Docker bridge, for example `http://172.17.0.1:8080`, and
-let Caddy listen there without TLS. A public deployment uses a public name with
-automatic HTTPS. A private network works the same way with its own address.
+`SECRETS_PROXY_URL` is the proxy a sandbox sends its HTTPS through. Every
+provider but docker-sbx sets `HTTPS_PROXY` in the sandbox to it. For local
+containers the proxy listens on the Docker bridge, for example
+`http://172.17.0.1:8880`. A tailnet or a private network uses its own address.
 
-The exchange is the first flow that runs from a sandbox to drukbox. Every
-other flow runs the other way. So the network between them needs one rule
-for it, one address and one port, for every sandbox. On a tailnet that is a
-grant from the sandbox tag to the exchange host:
+The proxy is the first flow that runs from a sandbox to drukbox. Every other
+flow runs the other way. So the network between them needs one rule for it,
+one address and one port, for every sandbox. On a tailnet that is a grant
+from the sandbox tag to the proxy host:
 
 ```json
-"hosts":  { "secrets-exchange": "100.64.0.10" },
+"hosts":  { "secrets-proxy": "100.64.0.10" },
 "grants": [
-    { "src": ["tag:sandbox"], "dst": ["secrets-exchange"], "ip": ["tcp:443"] }
+    { "src": ["tag:sandbox"], "dst": ["secrets-proxy"], "ip": ["tcp:8880"] }
 ]
 ```
 
-A sandbox then reaches that port on that host and nothing else there. On
-Docker Sandboxes the same rule is the `sbx policy allow network` line in
-[the docker-sbx section](#local-microvms-with-docker-sandboxes).
+A sandbox then reaches that port on that host and nothing else there. A
+Docker Sandboxes sandbox dials nothing. Drukbox puts each value in sbx's own
+secret store for that sandbox, and sbx's proxy swaps the placeholder. The
+value files that sbx reads live in a `secrets` directory under
+`DOCKER_SBX_WORKSPACE_ROOT`, beside the workspaces and never inside one.
 
 Give secrets to `POST /hosts`. Provisioning delivers the placeholders in the
-sandbox's boot environment, on every provider, the same way as `env`. The
-service must have a base URL variable, because the exchange routes by base
-URL. A service without one, such as `github`, answers `422` until its client
-configuration exists. A refreshable secret, one given with `issuer`, is
+sandbox's boot environment, on every provider, the same way as `env`. A
+refreshable secret, one given with `issuer`, is
 fetched by the exchange process on first use and kept in memory until shortly
-before it expires. The exchange process must reach the issuer URL. A pool host
-takes no secrets: a request with secrets always provisions a new sandbox.
+before it expires. The exchange process must reach the issuer URL. On
+docker-sbx the API process fetches it once at provisioning, since sbx holds
+the value. A pool host takes no secrets: a request with secrets always
+provisions a new sandbox.
 
 ## Verify
 
@@ -385,7 +383,7 @@ Secrets exchange:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SECRETS_EXCHANGE_URL` | — | Base URL a sandbox dials to reach the secrets exchange. Required to create a host with secrets. |
+| `SECRETS_PROXY_URL` | — | Proxy a sandbox sends its HTTPS through. Required to create a host with secrets on every provider but docker-sbx. |
 | `SECRETS_EXCHANGE_BIND_HOST` | `127.0.0.1` | Interface the exchange process binds. Bind it where only Caddy can reach it. |
 | `SECRETS_EXCHANGE_PORT` | `8781` | Port the exchange process listens on. |
 
@@ -494,7 +492,7 @@ Docker Sandboxes provider:
 | `DOCKER_SBX_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `30.0` | Time limit for the ssh-keyscan tries on a new sandbox. |
 | `DOCKER_SBX_CPUS` | `2` | Number of CPUs for each sandbox. |
 | `DOCKER_SBX_MEMORY` | `2g` | Memory for each sandbox, in binary units. |
-| `DOCKER_SBX_WORKSPACE_ROOT` | `~/.drukbox/sbx-workspaces` | Directory with one temporary workspace for each sandbox. The path must be the same for drukbox and for the daemon. |
+| `DOCKER_SBX_WORKSPACE_ROOT` | `~/.drukbox/sbx-workspaces` | Directory with one temporary workspace for each sandbox, and a `secrets` directory with the value files sbx reads. The path must be the same for drukbox and for the daemon. |
 
 The published image does not contain the `sbx` CLI. Mount the binary and
 the auth store of the host, as

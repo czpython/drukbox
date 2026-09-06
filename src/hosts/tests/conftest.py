@@ -4,6 +4,7 @@ import pytest
 
 from providers import registry as registry_module
 from providers.base import VMCreateResult, VMProvider
+from providers.capabilities import ProxyInjection
 
 
 class StubVMProvider(VMProvider):
@@ -13,6 +14,7 @@ class StubVMProvider(VMProvider):
 
     name = "stub"
     diagnose_hint = "check_stub"
+    secret_injection = ProxyInjection()
     supports_instance_type = True
     supports_disk_gb = True
 

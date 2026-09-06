@@ -2,7 +2,7 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import TemplateCapability
+from providers.capabilities import ProxyInjection, TemplateCapability
 from providers.docker.api import DockerAPI
 from providers.docker.exceptions import DockerProviderError
 from providers.docker.images import build_derived_image, remove_derived_image
@@ -25,6 +25,7 @@ from providers.exe.settings import ExeSettings
 
 class ExeProvider(VMProvider, TemplateCapability):
     name: ClassVar[str] = "exe"
+    secret_injection = ProxyInjection()
     diagnose_hint: ClassVar[str] = "check_exe_dev_api_token_and_url"
 
     def __init__(
