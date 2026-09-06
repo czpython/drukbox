@@ -413,6 +413,10 @@ infrastructure only):
 SERVICE_URL=http://localhost:8780 SERVICE_TOKEN=... npm --prefix api-tests test
 ```
 
+The secrets path has its own check, run by hand from inside a box:
+`claude -p`, `git push`, and `gh` through one provider's secrets, with a dummy
+issuer. `api-tests/acceptance/README.md` says what to set and what passes.
+
 ## Configuration reference
 
 Core, required:
