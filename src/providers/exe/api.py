@@ -90,10 +90,12 @@ class ExeAPI:
         if registry_auth:
             command_parts.append(f"--registry-auth={shlex.quote(registry_auth)}")
 
+        if env:
+            # exe puts --env in /etc/profile.d. Only a login shell reads it.
+            shebang, _, body = (setup_script or "#!/bin/bash").partition("\n")
+            parts = [shebang, *environment.export(env), environment.bashrc(env), body]
+            setup_script = "\n".join(part for part in parts if part)
         if setup_script:
-            # The setup script runs before the VM's own env applies.
-            shebang, _, body = setup_script.partition("\n")
-            setup_script = "\n".join([shebang, *environment.export(env or {}), body])
             command_parts.append(f"--setup-script={_encode_setup_script(setup_script)}")
 
         if tags:
