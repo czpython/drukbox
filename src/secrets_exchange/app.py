@@ -54,11 +54,13 @@ async def push_on_expiry(secrets: Secrets) -> None:
 
 
 async def push_active_hosts(secrets: Secrets) -> None:
-    """Side by side, so one slow issuer delays no other host."""
+    """Side by side, so one slow issuer delays no other host. A host that is
+    gone is forgotten first."""
     async with async_session_factory() as session:
-        active = select(Host).where(Host.status == HostStatus.ACTIVE.value)
-        hosts = (await session.execute(active)).scalars().all()
-    await asyncio.gather(*(push_to_host(secrets, host) for host in hosts))
+        hosts = (await session.execute(select(Host))).scalars().all()
+    secrets.forget_deleted_hosts({host.id for host in hosts})
+    active = [host for host in hosts if host.status == HostStatus.ACTIVE.value]
+    await asyncio.gather(*(push_to_host(secrets, host) for host in active))
 
 
 async def push_to_host(secrets: Secrets, host: Host) -> None:
