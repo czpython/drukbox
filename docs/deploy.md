@@ -313,8 +313,29 @@ volumes:
 ```
 
 The exchange binds `0.0.0.0` inside the compose network and publishes no
-port, so only the proxy reaches it. The public certificate of the CA in the
-volume is what a sandbox must trust for the hosts with a secret. Keep `flow_detail` at `1` or below. A
+port, so only the proxy reaches it. The API reads the public certificate of
+the CA from the same volume, at `SECRETS_PROXY_CA_FILE`, and hands it to
+every sandbox with secrets:
+
+```yaml
+  api:
+    image: ghcr.io/czpython/drukbox:latest
+    env_file: drukbox.env
+    environment:
+      SECRETS_PROXY_URL: http://proxy.example:8880
+      SECRETS_PROXY_CA_FILE: /secrets-proxy-ca/mitmproxy-ca-cert.pem
+    volumes:
+      - secrets-proxy-ca:/secrets-proxy-ca:ro
+```
+
+A sandbox with secrets gets the certificate in `SECRETS_PROXY_CA`, base64,
+and installs it at boot in `/usr/local/share/ca-certificates/drukbox.crt`
+with `update-ca-certificates`. The docker sandbox image does this in its
+entrypoint, a cloud VM in its cloud-init script, and an exe VM in its setup
+script with `sudo -n`. `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, and
+`CURL_CA_BUNDLE` point at the system bundle, and `NODE_EXTRA_CA_CERTS` at
+the certificate, so curl, Python, and Node trust the proxy. A sandbox
+without secrets gets none of this. Keep `flow_detail` at `1` or below. A
 higher level prints request headers, and after the swap those carry the
 real credential. Real credentials exist in three places only. They are
 encrypted in Postgres, they pass through the exchange process for one
@@ -409,6 +430,7 @@ Secrets exchange:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SECRETS_PROXY_URL` | — | Proxy a sandbox sends its HTTPS through. Required to create a host with secrets on every provider but docker-sbx. |
+| `SECRETS_PROXY_CA_FILE` | — | Path of the proxy's public CA certificate, from the proxy's volume. Required with `SECRETS_PROXY_URL`. |
 | `SECRETS_EXCHANGE_BIND_HOST` | `127.0.0.1` | Interface the exchange process binds. Bind it where only the proxy can reach it. |
 | `SECRETS_EXCHANGE_PORT` | `8781` | Port the exchange process listens on. |
 

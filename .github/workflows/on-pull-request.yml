@@ -145,6 +145,7 @@ jobs:
       DEFAULT_HOST_PROVIDER: docker
       # The sandbox sends its HTTPS through a proxy on the Docker bridge; the API test only checks delivery.
       SECRETS_PROXY_URL: http://172.17.0.1:8880
+      SECRETS_PROXY_CA_FILE: /secrets-proxy-ca.pem
       DOCKER_DEFAULT_IMAGE: drukbox/sandbox:ci
       UVICORN_HOST: 127.0.0.1
 
@@ -163,12 +164,14 @@ jobs:
           docker run --name drukbox-api-test --detach \
             --network host \
             --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
+            --mount type=bind,src=$PWD/env/test-proxy-ca.pem,dst=/secrets-proxy-ca.pem,readonly \
             --group-add "$(stat -c '%g' /var/run/docker.sock)" \
             --env DATABASE_URL \
             --env SECRETS_KEY \
             --env SERVICE_TOKENS \
             --env DEFAULT_HOST_PROVIDER \
             --env SECRETS_PROXY_URL \
+            --env SECRETS_PROXY_CA_FILE \
             --env DOCKER_DEFAULT_IMAGE \
             --env UVICORN_HOST \
             drukbox:api-test \

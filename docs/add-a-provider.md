@@ -84,12 +84,15 @@ installs `--all-extras`, so the shipped image carries every provider.
 
 Every provider declares `secret_injection`, how a secret reaches its boxes.
 Declare `ProxyInjection` from `providers.capabilities` as a class attribute.
-The sandbox then gets a placeholder and the proxy address in `env`, like every
-other variable, and the provider has one job: put `env` where every session
-can read it. On Linux that is `/etc/environment`, which PAM reads at login.
-`providers.environment.persist` writes it. The cloud providers get this from
-`environment.cloud_init`. A provider with a secret store of its own, such as
-docker-sbx, implements `SecretInjectionCapability` itself.
+The sandbox then gets a placeholder, the proxy address, and the proxy's CA
+in `env`, like every other variable. The provider has two jobs: put `env`
+where every session can read it, and install the CA. On Linux the first is
+`/etc/environment`, which PAM reads at login, and
+`providers.environment.persist` writes it. `providers.environment.trust`
+writes the second, with `sudo` when the script runs as a user. The cloud
+providers get both from `environment.cloud_init`. A provider with a secret
+store of its own, such as docker-sbx, implements `SecretInjectionCapability`
+itself.
 
 Do not add provider-specific fields to the host schema. Add a capability
 instead.

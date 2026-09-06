@@ -15,6 +15,10 @@ _VALUE_RE = re.compile(VALUE_PATTERN)
 # pam_env reads a line into a buffer of 8192 bytes. A `KEY=VALUE\n` line that
 # fills it ends the read, and every entry after it is lost too.
 LINE_LIMIT = 8191
+# The public certificate of the secrets proxy's CA, base64, in the env of a
+# box with secrets. The box installs it where every client looks.
+PROXY_CA = "SECRETS_PROXY_CA"
+PROXY_CA_PATH = "/usr/local/share/ca-certificates/drukbox.crt"
 
 
 def export(env: dict[str, str]) -> list[str]:
@@ -61,10 +65,28 @@ def bashrc(env: dict[str, str]) -> str:
     )
 
 
+def trust(env: dict[str, str], *, sudo: bool = False) -> list[str]:
+    """Shell lines that install the proxy's CA, when ``env`` carries one.
+
+    The lines read the exported variable, so they follow ``export``. A failed
+    install ends the script, since a box that does not trust the proxy must
+    not come up as if it did. ``sudo`` is for a script that runs as a user
+    with passwordless sudo.
+    """
+    if PROXY_CA not in env:
+        return []
+    privileged = "sudo -n " if sudo else ""
+    return [
+        f"printf '%s' \"${PROXY_CA}\" | base64 -d | {privileged}tee {PROXY_CA_PATH} >/dev/null"
+        " || exit 1",
+        f"{privileged}update-ca-certificates >/dev/null || exit 1",
+    ]
+
+
 def cloud_init(setup_script: str, env: dict[str, str] | None) -> str:
     """The user-data for a cloud VM: a shebang, ``env`` for the setup script
-    and for every later session, then the setup script."""
+    and for every later session, the proxy's CA, then the setup script."""
     script = setup_script if setup_script.startswith("#!") else f"#!/bin/sh\n{setup_script}"
     shebang, _, body = script.partition("\n")
-    lines = [shebang, *export(env or {}), *persist(env or {}), body]
+    lines = [shebang, *export(env or {}), *persist(env or {}), *trust(env or {}), body]
     return "\n".join(line for line in lines if line)
