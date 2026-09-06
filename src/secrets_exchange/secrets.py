@@ -1,0 +1,134 @@
+"""The secret the exchange hands Caddy for one entry."""
+
+import asyncio
+import json
+import logging
+import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from typing import Any, Self
+
+import httpx
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
+
+logger = logging.getLogger(__name__)
+
+# A fetched value is fetched again when less than this remains of its life.
+MARGIN = timedelta(minutes=1)
+# After a failed fetch the exchange waits before it asks the source again.
+# The wait doubles with each failure, up to the longest.
+FIRST_RETRY = timedelta(seconds=5)
+LONGEST_RETRY = timedelta(minutes=1)
+_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+class SourceError(Exception):
+    """One fetch gave no usable answer. The message is safe to log."""
+
+
+class SourceUnavailableError(Exception):
+    """No valid secret exists for the entry."""
+
+
+class Secret(BaseModel):
+    """A value and when it expires. A source answers with this shape."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    value: str = Field(min_length=1)
+    expires_at: AwareDatetime | None = None
+
+    @classmethod
+    def static(cls, value: str) -> Self:
+        return cls(value=value)
+
+    @classmethod
+    async def fetch(cls, source: dict[str, Any], client: httpx.AsyncClient) -> Self:
+        """Ask the source for its current value. Raises ``SourceError``."""
+        try:
+            response = await client.get(source["url"], headers=source["headers"])
+            response.raise_for_status()
+            secret = cls.model_validate(response.json())
+        except httpx.HTTPStatusError as exc:
+            raise SourceError(f"status {exc.response.status_code}") from exc
+        except httpx.HTTPError as exc:
+            raise SourceError(type(exc).__name__) from exc
+        except json.JSONDecodeError as exc:
+            raise SourceError("answer is not JSON") from exc
+        except ValidationError as exc:
+            raise SourceError("answer has the wrong shape") from exc
+        if not secret.expires_at:
+            interval = source["refresh"]
+            lifetime = timedelta(seconds=int(interval[:-1]) * _UNITS[interval[-1]])
+            secret = cls(value=secret.value, expires_at=datetime.now(UTC) + lifetime)
+        if not secret.is_valid(datetime.now(UTC)):
+            raise SourceError("answer has already expired")
+        return secret
+
+    def is_valid(self, at: datetime) -> bool:
+        return not self.expires_at or at < self.expires_at
+
+    def is_stale(self, at: datetime) -> bool:
+        return bool(self.expires_at) and at >= self.expires_at - MARGIN
+
+
+@dataclass
+class RefreshableSecret:
+    """A secret that knows how to refresh itself. It holds the latest value from
+    the source, the fetch that runs now, and the time of the next permitted
+    attempt."""
+
+    latest: Secret | None = None
+    fetching: asyncio.Task[None] | None = None
+    next_attempt: datetime = field(default_factory=lambda: datetime.now(UTC))
+    wait: timedelta = FIRST_RETRY
+
+    async def refresh(self, source: dict[str, Any], client: httpx.AsyncClient) -> None:
+        """Fetch the secret once. Do nothing before the next permitted attempt."""
+        if datetime.now(UTC) < self.next_attempt:
+            return
+        try:
+            self.latest = await Secret.fetch(source, client)
+        except SourceError as exc:
+            # The URL is an address, not a secret. It makes the log useful.
+            logger.warning("source %s failed: %s", source["url"], exc)
+            self.next_attempt = datetime.now(UTC) + self.wait
+            self.wait = min(self.wait * 2, LONGEST_RETRY)
+        else:
+            self.wait = FIRST_RETRY
+
+    def refresh_in_background(self, source: dict[str, Any], client: httpx.AsyncClient) -> None:
+        """Start a fetch when none runs."""
+        if not self.fetching:
+            self.fetching = asyncio.create_task(self.refresh(source, client))
+            self.fetching.add_done_callback(lambda _: setattr(self, "fetching", None))
+
+
+class Secrets:
+    """The current secret for each entry.
+
+    A static value comes from the entry. A refreshable secret is fetched on
+    first use and kept in memory. The exchange serves stale while it
+    revalidates, and serves stale on error, as RFC 5861 names it. Only a
+    request with no valid secret waits for a fetch. Nothing is written back
+    to the database.
+    """
+
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        self._client = client
+        self._refreshable: dict[tuple[uuid.UUID, str], RefreshableSecret] = {}
+
+    async def current(self, host_id: uuid.UUID, service: str, entry: dict[str, Any]) -> Secret:
+        """Raises ``SourceUnavailableError`` when no valid secret exists."""
+        if "value" in entry:
+            return Secret.static(entry["value"])
+        refreshable = self._refreshable.setdefault((host_id, service), RefreshableSecret())
+        now = datetime.now(UTC)
+        if refreshable.latest and refreshable.latest.is_valid(now):
+            if refreshable.latest.is_stale(now):
+                refreshable.refresh_in_background(entry["source"], self._client)
+            return refreshable.latest
+        await refreshable.refresh(entry["source"], self._client)
+        if refreshable.latest and refreshable.latest.is_valid(datetime.now(UTC)):
+            return refreshable.latest
+        raise SourceUnavailableError(f"no valid secret for {host_id}/{service}")

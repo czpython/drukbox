@@ -109,6 +109,7 @@ uv run alembic upgrade head
 - `hosts.api` owns HTTP request and response concerns.
 - `hosts.service.HostService` owns host lifecycle behavior.
 - `host_secrets.placeholder.issue_placeholders` mints placeholders when a host provisions.
+- `secrets_exchange.secrets.Secrets` holds the current secret per entry. It fetches a `source` on demand and keeps it in memory.
 - `http_proxies.service.HTTPProxyService` owns HTTP proxy behavior.
 - VM provider implementations live in `providers/<name>/`.
 - Network provider implementations live in `networking/<name>/`.
