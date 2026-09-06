@@ -25,7 +25,7 @@ HeaderName = Annotated[str, StringConstraints(pattern=r"^[!#$%&'*+.^_`|~0-9A-Za-
 EnvironmentVariable = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
 
 
-class SecretSource(BaseModel):
+class SecretIssuer(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     url: HttpUrl
@@ -34,13 +34,13 @@ class SecretSource(BaseModel):
 
     @field_validator("url")
     @classmethod
-    def require_secure_source(cls, url: HttpUrl) -> HttpUrl:
+    def require_secure_issuer(cls, url: HttpUrl) -> HttpUrl:
         if url.scheme != "https":
-            raise ValueError("source URL must use https")
+            raise ValueError("issuer URL must use https")
         if url.username or url.password:
-            raise ValueError("source URL must not contain credentials")
+            raise ValueError("issuer URL must not contain credentials")
         if url.fragment:
-            raise ValueError("source URL must not contain a fragment")
+            raise ValueError("issuer URL must not contain a fragment")
         return url
 
     def to_storage(self) -> dict[str, Any]:
@@ -62,12 +62,12 @@ class SecretEntry(BaseModel):
     endpoint_var: str = Field(default="", pattern=r"^(?:[A-Za-z_][A-Za-z0-9_]*)?$")
     base_path: str = Field(default="", pattern=r"^(?:/[A-Za-z0-9._~-]+)*$")
     value: SecretValue | None = None
-    source: SecretSource | None = None
+    issuer: SecretIssuer | None = None
 
     @model_validator(mode="after")
     def validate_shape(self) -> Self:
-        if bool(self.value) == bool(self.source):
-            raise ValueError("provide exactly one of value or source")
+        if bool(self.value) == bool(self.issuer):
+            raise ValueError("provide exactly one of value or issuer")
 
         if SERVICE_FIELDS & self.model_fields_set and not (self.host and self.credential_var):
             raise ValueError("a custom service needs host and credential_var")
@@ -77,6 +77,6 @@ class SecretEntry(BaseModel):
         entry = self.model_dump(include=set(SERVICE_FIELDS)) if self.host else {}
         if self.value:
             entry["value"] = self.value.get_secret_value()
-        elif self.source:
-            entry["source"] = self.source.to_storage()
+        elif self.issuer:
+            entry["issuer"] = self.issuer.to_storage()
         return entry

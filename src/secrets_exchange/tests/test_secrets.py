@@ -8,18 +8,18 @@ import pytest
 import respx
 
 from secrets_exchange.secrets import (
+    IssuerError,
+    IssuerUnavailableError,
     Secret,
     Secrets,
-    SourceError,
-    SourceUnavailableError,
 )
 
-SOURCE = {
+ISSUER = {
     "url": "https://mint.test/box/github",
     "headers": {"Authorization": "Bearer d2d"},
     "refresh": "1h",
 }
-ENTRY = {"source": SOURCE, "placeholder_fingerprint": "abc"}
+ENTRY = {"issuer": ISSUER, "placeholder_fingerprint": "abc"}
 
 
 @pytest.fixture
@@ -29,8 +29,8 @@ async def secrets():
 
 
 @respx.mock
-async def test_a_source_is_fetched_once_and_kept_until_it_ages(secrets) -> None:
-    route = respx.get(SOURCE["url"]).respond(json={"value": "ghs_one"})
+async def test_an_issuer_is_fetched_once_and_kept_until_it_ages(secrets) -> None:
+    route = respx.get(ISSUER["url"]).respond(json={"value": "ghs_one"})
 
     first = await secrets.current(uuid.uuid4(), "github", ENTRY)
     second = await secrets.current(first_key := uuid.uuid4(), "github", ENTRY)
@@ -43,8 +43,8 @@ async def test_a_source_is_fetched_once_and_kept_until_it_ages(secrets) -> None:
 
 
 @respx.mock
-async def test_a_static_entry_never_touches_the_source(secrets) -> None:
-    route = respx.get(SOURCE["url"])
+async def test_a_static_entry_never_touches_the_issuer(secrets) -> None:
+    route = respx.get(ISSUER["url"])
 
     secret = await secrets.current(uuid.uuid4(), "github", {"value": "ghs_static"})
 
@@ -53,11 +53,11 @@ async def test_a_static_entry_never_touches_the_source(secrets) -> None:
 
 
 @respx.mock
-async def test_the_source_expiry_wins_over_the_refresh_interval() -> None:
+async def test_the_issuer_expiry_wins_over_the_refresh_interval() -> None:
     expires_at = datetime.now(UTC) + timedelta(minutes=5)
-    respx.get(SOURCE["url"]).respond(json={"value": "x", "expires_at": expires_at.isoformat()})
+    respx.get(ISSUER["url"]).respond(json={"value": "x", "expires_at": expires_at.isoformat()})
     async with httpx.AsyncClient() as client:
-        secret = await Secret.fetch(SOURCE, client)
+        secret = await Secret.fetch(ISSUER, client)
     assert secret.expires_at == expires_at
 
 
@@ -67,7 +67,7 @@ async def test_a_value_near_its_end_is_fetched_again_and_the_old_one_serves_mean
 ) -> None:
     host_id = uuid.uuid4()
     soon = (datetime.now(UTC) + timedelta(seconds=30)).isoformat()
-    route = respx.get(SOURCE["url"]).respond(json={"value": "ghs_old", "expires_at": soon})
+    route = respx.get(ISSUER["url"]).respond(json={"value": "ghs_old", "expires_at": soon})
     assert (await secrets.current(host_id, "github", ENTRY)).value == "ghs_old"
 
     route.respond(json={"value": "ghs_new", "expires_at": soon})
@@ -90,12 +90,12 @@ async def test_a_value_near_its_end_is_fetched_again_and_the_old_one_serves_mean
 )
 async def test_nothing_usable_and_nothing_held_is_unavailable_then_waits(secrets, answer) -> None:
     host_id = uuid.uuid4()
-    route = respx.get(SOURCE["url"]).respond(**answer)
+    route = respx.get(ISSUER["url"]).respond(**answer)
 
-    with pytest.raises(SourceUnavailableError):
+    with pytest.raises(IssuerUnavailableError):
         await secrets.current(host_id, "github", ENTRY)
     route.respond(json={"value": "ghs_fine"})
-    with pytest.raises(SourceUnavailableError):
+    with pytest.raises(IssuerUnavailableError):
         await secrets.current(host_id, "github", ENTRY)
 
     assert route.call_count == 1, "the second request waits out the retry delay"
@@ -103,9 +103,9 @@ async def test_nothing_usable_and_nothing_held_is_unavailable_then_waits(secrets
 
 @respx.mock
 async def test_a_wrong_answer_is_logged_without_its_content(secrets, caplog) -> None:
-    respx.get(SOURCE["url"]).respond(json={"token": "secret-xyz"})
+    respx.get(ISSUER["url"]).respond(json={"token": "secret-xyz"})
 
-    with caplog.at_level(logging.WARNING), pytest.raises(SourceUnavailableError):
+    with caplog.at_level(logging.WARNING), pytest.raises(IssuerUnavailableError):
         await secrets.current(uuid.uuid4(), "github", ENTRY)
 
     assert "answer has the wrong shape" in caplog.text
@@ -115,9 +115,9 @@ async def test_a_wrong_answer_is_logged_without_its_content(secrets, caplog) -> 
 @respx.mock
 async def test_an_answer_that_has_already_expired_is_a_failure(secrets) -> None:
     past = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
-    respx.get(SOURCE["url"]).respond(json={"value": "ghs_dead", "expires_at": past})
+    respx.get(ISSUER["url"]).respond(json={"value": "ghs_dead", "expires_at": past})
 
-    with pytest.raises(SourceUnavailableError):
+    with pytest.raises(IssuerUnavailableError):
         await secrets.current(uuid.uuid4(), "github", ENTRY)
 
 
@@ -126,18 +126,18 @@ async def test_a_value_that_expires_during_a_failed_fetch_is_not_served(
 ) -> None:
     key = (uuid.uuid4(), "github")
 
-    async def slow_failure(cls, source, client):
+    async def slow_failure(cls, issuer, client):
         await asyncio.sleep(0.3)
-        raise SourceError("ConnectError")
+        raise IssuerError("ConnectError")
 
     with respx.mock:
         soon = (datetime.now(UTC) + timedelta(seconds=0.2)).isoformat()
-        respx.get(SOURCE["url"]).respond(json={"value": "ghs_old", "expires_at": soon})
+        respx.get(ISSUER["url"]).respond(json={"value": "ghs_old", "expires_at": soon})
         assert (await secrets.current(*key, ENTRY)).value == "ghs_old"
     await asyncio.sleep(0.25)
 
     monkeypatch.setattr(Secret, "fetch", classmethod(slow_failure))
-    with pytest.raises(SourceUnavailableError):
+    with pytest.raises(IssuerUnavailableError):
         await secrets.current(*key, ENTRY)
 
 
@@ -145,12 +145,12 @@ async def test_the_old_value_serves_while_a_fetch_is_under_way(secrets, monkeypa
     key = (uuid.uuid4(), "github")
     with respx.mock:
         soon = (datetime.now(UTC) + timedelta(seconds=30)).isoformat()
-        respx.get(SOURCE["url"]).respond(json={"value": "ghs_old", "expires_at": soon})
+        respx.get(ISSUER["url"]).respond(json={"value": "ghs_old", "expires_at": soon})
         assert (await secrets.current(*key, ENTRY)).value == "ghs_old"
     release = asyncio.Event()
     fetches = 0
 
-    async def paused_fetch(cls, source, client):
+    async def paused_fetch(cls, issuer, client):
         nonlocal fetches
         fetches += 1
         await release.wait()
@@ -172,17 +172,17 @@ async def test_the_retry_wait_starts_when_a_slow_fetch_fails(secrets, monkeypatc
     key = (uuid.uuid4(), "github")
     attempts = 0
 
-    async def slow_failure(cls, source, client):
+    async def slow_failure(cls, issuer, client):
         nonlocal attempts
         attempts += 1
         await asyncio.sleep(0.2)
-        raise SourceError("ReadTimeout")
+        raise IssuerError("ReadTimeout")
 
     monkeypatch.setattr(Secret, "fetch", classmethod(slow_failure))
     monkeypatch.setattr("secrets_exchange.secrets.FIRST_RETRY", timedelta(seconds=0.1))
-    with pytest.raises(SourceUnavailableError):
+    with pytest.raises(IssuerUnavailableError):
         await secrets.current(*key, ENTRY)
-    with pytest.raises(SourceUnavailableError):
+    with pytest.raises(IssuerUnavailableError):
         await secrets.current(*key, ENTRY)
 
     assert attempts == 1, "the wait counts from the failure, not from the start of the fetch"

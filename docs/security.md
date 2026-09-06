@@ -96,10 +96,10 @@ and loses every entry after it. So a value must be printable ASCII without
 `KEY=VALUE` line must stay under 8191 bytes.
 
 `POST /hosts` never returns a secret. A validation response omits the rejected
-input, so a bad value or a bad source header does not reach the caller. A
-source URL must use HTTPS. It must not carry user credentials or a fragment.
+input, so a bad value or a bad issuer header does not reach the caller. An
+issuer URL must use HTTPS. It must not carry user credentials or a fragment.
 Drukbox stores the URL path and query as a readable address. Put credentials
-only in the source headers, which Drukbox encrypts. The value a source returns
+only in the issuer headers, which Drukbox encrypts. The value an issuer returns
 is never stored. The exchange process keeps it in memory and fetches it again
 whenever it needs to, on first use and after a restart.
 

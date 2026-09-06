@@ -7,7 +7,7 @@ from hosts.service import utc_now
 
 async def test_host_secrets_are_ciphertext_at_rest_and_decrypt_on_read() -> None:
     secrets = {
-        "source": {
+        "issuer": {
             "url": "https://mint.example/token",
             "headers": {"Authorization": "Bearer fetch-token"},
         },

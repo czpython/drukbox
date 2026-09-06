@@ -69,12 +69,12 @@ async def test_a_custom_service_gets_its_own_header_shape(edge) -> None:
 
 
 @respx.mock
-async def test_a_source_entry_is_fetched_and_exchanged(edge) -> None:
+async def test_an_issuer_entry_is_fetched_and_exchanged(edge) -> None:
     host_id = uuid.uuid4()
     minted = Placeholder.mint(host_id, "github")
-    source = {"url": "https://mint.test/x", "headers": {"X-Key": "k"}, "refresh": "1h"}
+    issuer = {"url": "https://mint.test/x", "headers": {"X-Key": "k"}, "refresh": "1h"}
     await _create_host(
-        host_id, {"github": {"source": source, "placeholder_fingerprint": minted.fingerprint}}
+        host_id, {"github": {"issuer": issuer, "placeholder_fingerprint": minted.fingerprint}}
     )
     route = respx.get("https://mint.test/x").respond(json={"value": "ghs_minted"})
 
@@ -86,12 +86,12 @@ async def test_a_source_entry_is_fetched_and_exchanged(edge) -> None:
 
 
 @respx.mock
-async def test_a_source_that_gives_nothing_usable_answers_503(edge) -> None:
+async def test_an_issuer_that_gives_nothing_usable_answers_503(edge) -> None:
     host_id = uuid.uuid4()
     minted = Placeholder.mint(host_id, "github")
-    source = {"url": "https://mint.test/x", "headers": {"X-Key": "k"}, "refresh": "1h"}
+    issuer = {"url": "https://mint.test/x", "headers": {"X-Key": "k"}, "refresh": "1h"}
     await _create_host(
-        host_id, {"github": {"source": source, "placeholder_fingerprint": minted.fingerprint}}
+        host_id, {"github": {"issuer": issuer, "placeholder_fingerprint": minted.fingerprint}}
     )
     respx.get("https://mint.test/x").respond(status_code=502)
 

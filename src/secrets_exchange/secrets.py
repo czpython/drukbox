@@ -15,23 +15,23 @@ logger = logging.getLogger(__name__)
 
 # A fetched value is fetched again when less than this remains of its life.
 MARGIN = timedelta(minutes=1)
-# After a failed fetch the exchange waits before it asks the source again.
+# After a failed fetch the exchange waits before it asks the issuer again.
 # The wait doubles with each failure, up to the longest.
 FIRST_RETRY = timedelta(seconds=5)
 LONGEST_RETRY = timedelta(minutes=1)
 _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
 
-class SourceError(Exception):
+class IssuerError(Exception):
     """One fetch gave no usable answer. The message is safe to log."""
 
 
-class SourceUnavailableError(Exception):
+class IssuerUnavailableError(Exception):
     """No valid secret exists for the entry."""
 
 
 class Secret(BaseModel):
-    """A value and when it expires. A source answers with this shape."""
+    """A value and when it expires. An issuer answers with this shape."""
 
     model_config = ConfigDict(extra="ignore", frozen=True)
 
@@ -43,26 +43,26 @@ class Secret(BaseModel):
         return cls(value=value)
 
     @classmethod
-    async def fetch(cls, source: dict[str, Any], client: httpx.AsyncClient) -> Self:
-        """Ask the source for its current value. Raises ``SourceError``."""
+    async def fetch(cls, issuer: dict[str, Any], client: httpx.AsyncClient) -> Self:
+        """Ask the issuer for its current value. Raises ``IssuerError``."""
         try:
-            response = await client.get(source["url"], headers=source["headers"])
+            response = await client.get(issuer["url"], headers=issuer["headers"])
             response.raise_for_status()
             secret = cls.model_validate(response.json())
         except httpx.HTTPStatusError as exc:
-            raise SourceError(f"status {exc.response.status_code}") from exc
+            raise IssuerError(f"status {exc.response.status_code}") from exc
         except httpx.HTTPError as exc:
-            raise SourceError(type(exc).__name__) from exc
+            raise IssuerError(type(exc).__name__) from exc
         except json.JSONDecodeError as exc:
-            raise SourceError("answer is not JSON") from exc
+            raise IssuerError("answer is not JSON") from exc
         except ValidationError as exc:
-            raise SourceError("answer has the wrong shape") from exc
+            raise IssuerError("answer has the wrong shape") from exc
         if not secret.expires_at:
-            interval = source["refresh"]
+            interval = issuer["refresh"]
             lifetime = timedelta(seconds=int(interval[:-1]) * _UNITS[interval[-1]])
             secret = cls(value=secret.value, expires_at=datetime.now(UTC) + lifetime)
         if not secret.is_valid(datetime.now(UTC)):
-            raise SourceError("answer has already expired")
+            raise IssuerError("answer has already expired")
         return secret
 
     def is_valid(self, at: datetime) -> bool:
@@ -75,7 +75,7 @@ class Secret(BaseModel):
 @dataclass
 class RefreshableSecret:
     """A secret that knows how to refresh itself. It holds the latest value from
-    the source, the fetch that runs now, and the time of the next permitted
+    the issuer, the fetch that runs now, and the time of the next permitted
     attempt."""
 
     latest: Secret | None = None
@@ -83,24 +83,24 @@ class RefreshableSecret:
     next_attempt: datetime = field(default_factory=lambda: datetime.now(UTC))
     wait: timedelta = FIRST_RETRY
 
-    async def refresh(self, source: dict[str, Any], client: httpx.AsyncClient) -> None:
+    async def refresh(self, issuer: dict[str, Any], client: httpx.AsyncClient) -> None:
         """Fetch the secret once. Do nothing before the next permitted attempt."""
         if datetime.now(UTC) < self.next_attempt:
             return
         try:
-            self.latest = await Secret.fetch(source, client)
-        except SourceError as exc:
+            self.latest = await Secret.fetch(issuer, client)
+        except IssuerError as exc:
             # The URL is an address, not a secret. It makes the log useful.
-            logger.warning("source %s failed: %s", source["url"], exc)
+            logger.warning("issuer %s failed: %s", issuer["url"], exc)
             self.next_attempt = datetime.now(UTC) + self.wait
             self.wait = min(self.wait * 2, LONGEST_RETRY)
         else:
             self.wait = FIRST_RETRY
 
-    def refresh_in_background(self, source: dict[str, Any], client: httpx.AsyncClient) -> None:
+    def refresh_in_background(self, issuer: dict[str, Any], client: httpx.AsyncClient) -> None:
         """Start a fetch when none runs."""
         if not self.fetching:
-            self.fetching = asyncio.create_task(self.refresh(source, client))
+            self.fetching = asyncio.create_task(self.refresh(issuer, client))
             self.fetching.add_done_callback(lambda _: setattr(self, "fetching", None))
 
 
@@ -119,16 +119,16 @@ class Secrets:
         self._refreshable: dict[tuple[uuid.UUID, str], RefreshableSecret] = {}
 
     async def current(self, host_id: uuid.UUID, service: str, entry: dict[str, Any]) -> Secret:
-        """Raises ``SourceUnavailableError`` when no valid secret exists."""
+        """Raises ``IssuerUnavailableError`` when no valid secret exists."""
         if "value" in entry:
             return Secret.static(entry["value"])
         refreshable = self._refreshable.setdefault((host_id, service), RefreshableSecret())
         now = datetime.now(UTC)
         if refreshable.latest and refreshable.latest.is_valid(now):
             if refreshable.latest.is_stale(now):
-                refreshable.refresh_in_background(entry["source"], self._client)
+                refreshable.refresh_in_background(entry["issuer"], self._client)
             return refreshable.latest
-        await refreshable.refresh(entry["source"], self._client)
+        await refreshable.refresh(entry["issuer"], self._client)
         if refreshable.latest and refreshable.latest.is_valid(datetime.now(UTC)):
             return refreshable.latest
-        raise SourceUnavailableError(f"no valid secret for {host_id}/{service}")
+        raise IssuerUnavailableError(f"no valid secret for {host_id}/{service}")

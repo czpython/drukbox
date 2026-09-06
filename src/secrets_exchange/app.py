@@ -10,7 +10,7 @@ from core.database import get_session
 from host_secrets import catalog
 from host_secrets.placeholder import Placeholder
 from hosts.models import Host
-from secrets_exchange.secrets import Secrets, SourceUnavailableError
+from secrets_exchange.secrets import IssuerUnavailableError, Secrets
 
 
 @asynccontextmanager
@@ -67,7 +67,7 @@ async def authorize(
 
     try:
         secret = await secrets.current(host.id, placeholder.service, entry)
-    except SourceUnavailableError:
+    except IssuerUnavailableError:
         return Response(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers={"Retry-After": "5"}
         )

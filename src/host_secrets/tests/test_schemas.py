@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from host_secrets.schemas import SecretEntry
 
 
-def _source(
+def _issuer(
     *,
     url: str = "https://mint.example.test/token",
     headers: dict[str, str] | None = None,
@@ -27,7 +27,7 @@ def test_static_built_in_entry_has_only_the_value() -> None:
 def test_refreshable_entry_preserves_the_readable_recipe() -> None:
     registration = SecretEntry.model_validate(
         {
-            "source": {
+            "issuer": {
                 "url": "https://mint.example.test/boxes/box-1/token?audience=github",
                 "headers": {"Authorization": "Bearer fetch-secret"},
                 "refresh": "50m",
@@ -36,7 +36,7 @@ def test_refreshable_entry_preserves_the_readable_recipe() -> None:
     )
 
     assert registration.to_storage() == {
-        "source": {
+        "issuer": {
             "url": "https://mint.example.test/boxes/box-1/token?audience=github",
             "headers": {"Authorization": "Bearer fetch-secret"},
             "refresh": "50m",
@@ -88,7 +88,7 @@ def test_custom_entry_can_override_the_auth_shape() -> None:
     "payload",
     [
         {},
-        {"value": "one", "source": _source()},
+        {"value": "one", "issuer": _issuer()},
         {"host": "api.acme.test", "value": "one"},
         {"credential_var": "ACME_TOKEN", "value": "one"},
         {"credential_prefix": "", "value": "one"},
@@ -105,16 +105,16 @@ def test_registration_rejects_ambiguous_or_incomplete_shapes(
 
 
 @pytest.mark.parametrize(
-    "source",
+    "issuer",
     [
-        _source(url="http://mint.example.test/token"),
-        _source(url="https://user:password@mint.example.test/token"),
-        _source(url="https://mint.example.test/token#credential"),
-        _source(refresh="0m"),
-        _source(refresh="50minutes"),
-        _source(headers={}),
+        _issuer(url="http://mint.example.test/token"),
+        _issuer(url="https://user:password@mint.example.test/token"),
+        _issuer(url="https://mint.example.test/token#credential"),
+        _issuer(refresh="0m"),
+        _issuer(refresh="50minutes"),
+        _issuer(headers={}),
     ],
 )
-def test_source_rejects_unsafe_or_invalid_recipes(source: dict[str, object]) -> None:
+def test_issuer_rejects_unsafe_or_invalid_recipes(issuer: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
-        SecretEntry.model_validate({"source": source})
+        SecretEntry.model_validate({"issuer": issuer})
