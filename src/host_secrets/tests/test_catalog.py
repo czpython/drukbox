@@ -2,9 +2,9 @@ from host_secrets.catalog import CATALOG
 
 SERVICE_KEYS = {
     "host",
-    "credential_header",
-    "credential_prefix",
-    "credential_var",
+    "auth_header",
+    "auth_prefix",
+    "auth_variable",
     "endpoint_var",
     "base_path",
 }

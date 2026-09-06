@@ -1,6 +1,6 @@
 from core.exceptions import AppException
 
 
-class SecretsExchangeNotConfiguredError(AppException):
+class SecretsProxyNotConfiguredError(AppException):
     status_code = 409
-    error_code = "SECRETS_EXCHANGE_NOT_CONFIGURED"
+    error_code = "SECRETS_PROXY_NOT_CONFIGURED"

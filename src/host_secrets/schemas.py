@@ -55,9 +55,9 @@ class SecretEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     host: str | None = Field(default=None, max_length=253, pattern=HOST_PATTERN)
-    credential_var: EnvironmentVariable | None = None
-    credential_header: HeaderName = BEARER_HEADER
-    credential_prefix: str = BEARER_PREFIX
+    auth_variable: EnvironmentVariable | None = None
+    auth_header: HeaderName = BEARER_HEADER
+    auth_prefix: str = BEARER_PREFIX
     # Empty when the client has no base URL variable.
     endpoint_var: str = Field(default="", pattern=r"^(?:[A-Za-z_][A-Za-z0-9_]*)?$")
     base_path: str = Field(default="", pattern=r"^(?:/[A-Za-z0-9._~-]+)*$")
@@ -69,8 +69,8 @@ class SecretEntry(BaseModel):
         if bool(self.value) == bool(self.issuer):
             raise ValueError("provide exactly one of value or issuer")
 
-        if SERVICE_FIELDS & self.model_fields_set and not (self.host and self.credential_var):
-            raise ValueError("a custom service needs host and credential_var")
+        if SERVICE_FIELDS & self.model_fields_set and not (self.host and self.auth_variable):
+            raise ValueError("a custom service needs host and auth_variable")
         return self
 
     def to_storage(self) -> dict[str, Any]:

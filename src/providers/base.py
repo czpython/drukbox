@@ -2,18 +2,19 @@ import abc
 from dataclasses import dataclass
 from typing import ClassVar, NamedTuple, Self
 
+from providers.capabilities import ProxyInjection, SecretInjectionCapability
+
 
 @dataclass(frozen=True)
 class VMCreateResult:
     provider_id: str
     name: str
     ssh_username: str
-    # Unset ssh_host/ssh_port mean the VM has no directly dialable address.
+    # Empty when the VM has no address of its own.
     ssh_host: str = ""
     ssh_port: int = 0
     private_key: str | None = None
-    # The public half of a per-VM keypair. The service stores it so the SSH
-    # gateway can authenticate callers of gateway providers.
+    # The gateway authenticates callers with it.
     public_key: str | None = None
 
 
@@ -26,8 +27,7 @@ class TerminalSize(NamedTuple):
 
 
 class SandboxProcess(abc.ABC):
-    """One live process inside a sandbox. The gateway pumps bytes between an
-    SSH channel and this object; the receive methods return b"" at the end."""
+    """One live process in a sandbox. The receive methods return b"" at the end."""
 
     @classmethod
     @abc.abstractmethod
@@ -38,8 +38,7 @@ class SandboxProcess(abc.ABC):
         command: str | None,
         terminal: TerminalSize | None,
     ) -> "SandboxProcess":
-        """Open a process in the sandbox: a shell when command is None, with
-        a PTY when terminal is not None. Raises neutral provider errors."""
+        """A shell when command is None. A PTY when terminal is given."""
         ...  # pragma: no cover
 
     @abc.abstractmethod
@@ -66,44 +65,29 @@ class SandboxProcess(abc.ABC):
 
 class VMProvider(abc.ABC):
     name: ClassVar[str]
-    # The process class that serves this provider's hosts through the SSH
-    # gateway. None means the hosts have their own dialable sshd and the
-    # gateway plays no part.
+    secrets: SecretInjectionCapability = ProxyInjection()
+    # None when the hosts have an sshd of their own and no gateway.
     gateway_process_class: ClassVar[type[SandboxProcess] | None] = None
-    # Remediation slug attached to a failed /doctor probe. Owned here because
-    # the provider is what knows how its own dependency gets fixed.
+    # The remediation slug of a failed /doctor probe.
     diagnose_hint: ClassVar[str]
-    # Time limit for the /doctor probe. Owned here for the same reason: the
-    # provider knows the cost of its own probe. CLI-backed probes can be
-    # slower than the default.
     diagnose_timeout_seconds: ClassVar[float] = 5.0
-    # Which per-request sizing fields create_vm honors. HostService rejects a
-    # sized request up front — before any host row or VM exists — when the
-    # target provider leaves these False.
+    # HostService rejects a sized request before any row or VM exists.
     supports_instance_type: ClassVar[bool] = False
     supports_disk_gb: ClassVar[bool] = False
-    # Whether this provider's hosts can join the tailnet when the service runs
-    # in Tailscale mode. A local provider leaves it False and its hosts keep
-    # the external path only, even on a tailnet-mode service.
+    # A local provider's hosts keep the external path only.
     supports_tailnet: ClassVar[bool] = True
 
     @classmethod
     @abc.abstractmethod
-    def from_settings(cls) -> Self:
-        """Construct the provider from process settings. Used as the registry factory."""
-        ...
+    def from_settings(cls) -> Self: ...
 
     @property
     @abc.abstractmethod
-    def default_image(self) -> str:
-        """Fallback image when the caller doesn't pass one."""
-        ...
+    def default_image(self) -> str: ...
 
     @property
     @abc.abstractmethod
-    def bootstrap_ssh_timeout_seconds(self) -> float:
-        """How long HostService.scan_known_hosts retries ssh-keyscan for."""
-        ...
+    def bootstrap_ssh_timeout_seconds(self) -> float: ...
 
     @abc.abstractmethod
     async def create_vm(
@@ -122,12 +106,7 @@ class VMProvider(abc.ABC):
 
     @abc.abstractmethod
     async def diagnose(self) -> str:
-        """Run one cheap, non-mutating probe against the provider.
-
-        Returns a short detail string on success; raises on failure. The
-        ``/doctor`` orchestrator wraps the call to classify the error and
-        attach a remediation hint, so implementations should NOT catch.
-        """
+        """One cheap read-only probe. Raise on failure: /doctor classifies the error."""
         ...
 
     @abc.abstractmethod

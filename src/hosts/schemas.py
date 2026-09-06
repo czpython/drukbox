@@ -63,19 +63,14 @@ class HostCreate(BaseModel):
 
     @field_validator("secrets")
     @classmethod
-    def reject_secrets_the_exchange_cannot_route(
+    def reject_unknown_secret_services(
         cls, secrets: dict[str, SecretEntry]
     ) -> dict[str, SecretEntry]:
         for name, registration in secrets.items():
             if not re.fullmatch(SECRET_NAME_PATTERN, name):
                 raise ValueError(f"invalid secret service name {name!r}")
-            entry = registration.to_storage()
-            if "host" not in entry and name not in catalog.CATALOG:
+            if not registration.host and name not in catalog.CATALOG:
                 raise ValueError(f"unknown secret service {name!r}")
-            if not catalog.service(name, entry)["endpoint_var"]:
-                raise ValueError(
-                    f"{name!r} has no base URL variable, so the exchange cannot route it"
-                )
         return secrets
 
     @field_validator("env")
