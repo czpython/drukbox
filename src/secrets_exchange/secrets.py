@@ -11,6 +11,9 @@ from typing import Any, Self
 import httpx
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
+from providers.base import SecretInjectionCapability
+from providers.exceptions import ProviderError
+
 logger = logging.getLogger(__name__)
 
 # A fetched value is fetched again when less than this remains of its life.
@@ -76,10 +79,11 @@ class Secret(BaseModel):
 @dataclass
 class RefreshableSecret:
     """A secret that knows how to refresh itself. It holds the latest value from
-    the issuer, the fetch that runs now, and the time of the next permitted
-    attempt."""
+    the issuer, the value a provider that holds values has, the fetch that runs
+    now, and the time of the next permitted attempt."""
 
     latest: Secret | None = None
+    pushed: Secret | None = None
     fetching: asyncio.Task[None] | None = None
     next_attempt: datetime = field(default_factory=lambda: datetime.now(UTC))
     wait: timedelta = FIRST_RETRY
@@ -93,10 +97,20 @@ class RefreshableSecret:
         except IssuerError as exc:
             # The URL is an address, not a secret. It makes the log useful.
             logger.warning("issuer %s failed: %s", issuer["url"], exc)
-            self.next_attempt = datetime.now(UTC) + self.wait
-            self.wait = min(self.wait * 2, LONGEST_RETRY)
+            self.retry_later()
         else:
             self.wait = FIRST_RETRY
+
+    def retry_later(self) -> None:
+        """Wait before the next attempt, longer after each failure, up to the longest."""
+        self.next_attempt = datetime.now(UTC) + self.wait
+        self.wait = min(self.wait * 2, LONGEST_RETRY)
+
+    def unpushed(self, at: datetime) -> Secret | None:
+        """The latest value, when it is valid and the provider does not have it yet."""
+        if self.latest and self.latest is not self.pushed and self.latest.is_valid(at):
+            return self.latest
+        return None
 
     def refresh_in_background(self, issuer: dict[str, Any], client: httpx.AsyncClient) -> None:
         """Start a fetch when none runs."""
@@ -111,8 +125,9 @@ class Secrets:
     A static value comes from the entry. A refreshable secret is fetched on
     first use and kept in memory. The exchange serves stale while it
     revalidates, and serves stale on error, as RFC 5861 names it. Only a
-    request with no valid secret waits for a fetch. Nothing is written back
-    to the database.
+    request with no valid secret waits for a fetch. A provider that holds the
+    value never asks, so ``push`` hands it a fresh value before the old one
+    expires. Nothing is written back to the database.
     """
 
     def __init__(self, client: httpx.AsyncClient) -> None:
@@ -133,3 +148,36 @@ class Secrets:
         if refreshable.latest and refreshable.latest.is_valid(datetime.now(UTC)):
             return refreshable.latest
         raise IssuerUnavailableError(f"no valid secret for {host_id}/{service}")
+
+    async def push(
+        self,
+        host_id: uuid.UUID,
+        vm: str,
+        service: str,
+        entry: dict[str, Any],
+        injection: SecretInjectionCapability,
+    ) -> None:
+        """Hand the provider that holds the value a fresh one before the old one expires.
+
+        A push that fails waits like a fetch that fails, and the same value goes
+        again after the wait. The first push happens at first sight of the entry,
+        since the boot value came from the API process.
+        """
+        refreshable = self._refreshable.setdefault((host_id, service), RefreshableSecret())
+        now = datetime.now(UTC)
+        if now < refreshable.next_attempt or (
+            refreshable.pushed and not refreshable.pushed.is_stale(now)
+        ):
+            return
+        if not refreshable.unpushed(now):
+            await refreshable.refresh(entry["issuer"], self._client)
+        if secret := refreshable.unpushed(now):
+            try:
+                await injection.push_secret(vm=vm, name=service, value=secret.value)
+            except ProviderError as exc:
+                logger.warning("push of %s to %s failed: %s", service, vm, exc)
+                refreshable.retry_later()
+            else:
+                logger.info("pushed %s to %s", service, vm)
+                refreshable.pushed = secret
+                refreshable.wait = FIRST_RETRY

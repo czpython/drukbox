@@ -129,6 +129,14 @@ the refresh interval sets the expiry. Any other answer is a failure. While a
 issuer fails, the exchange serves the last value it holds, as long as that
 value is still valid. With nothing valid in memory it answers `503`.
 
+A provider that holds the value, as docker-sbx does, never asks the exchange.
+For such a provider the exchange runs a timer. It fetches a fresh value when
+less than a minute of the pushed one remains, and hands it to the seam's
+`push_secret`. A push that fails waits like a fetch that fails, and the same
+value goes again after the wait. The first push happens when the exchange
+first sees the host, since the boot value came from the API process. Nothing
+is written back to the database.
+
 Provisioning mints a placeholder per secret. The placeholder names the host
 and the service, `drk.<host id>.<service>.<random>`. The entry keeps only a
 fingerprint of the random part. The sandbox receives `<credential_var>` with
@@ -154,7 +162,8 @@ the proxy. Every connection goes to the address the proxy checked, and the
 upstream certificate is checked against the CONNECT host. A request whose
 `Host` differs from the CONNECT host is refused. On docker-sbx the sandbox gets only the placeholder. Drukbox puts
 the value in sbx's own secret store for that sandbox, and sbx's proxy swaps
-the placeholder on the way out. Host deletion calls `delete_secrets` for the
+the placeholder on the way out. sbx reads the value file at each use, so a
+pushed value is a rewritten file. Host deletion calls `delete_secrets` for the
 box before the VM goes, so nothing the seam put anywhere outlives the box. It
 never reads the row's secrets, so a lost key cannot block a teardown.
 
