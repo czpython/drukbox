@@ -47,14 +47,14 @@ def test_refreshable_entry_preserves_the_readable_recipe() -> None:
 
 def test_custom_entry_stores_the_whole_service_with_bearer_defaults() -> None:
     registration = SecretEntry.model_validate(
-        {"host": "api.acme.test", "credential_var": "ACME_TOKEN", "value": "static-secret"}
+        {"host": "api.acme.test", "auth_variable": "ACME_TOKEN", "value": "static-secret"}
     )
 
     assert registration.to_storage() == {
         "host": "api.acme.test",
-        "credential_header": "Authorization",
-        "credential_prefix": "Bearer ",
-        "credential_var": "ACME_TOKEN",
+        "auth_header": "Authorization",
+        "auth_prefix": "Bearer ",
+        "auth_variable": "ACME_TOKEN",
         "endpoint_var": "",
         "base_path": "",
         "value": "static-secret",
@@ -65,9 +65,9 @@ def test_custom_entry_can_override_the_auth_shape() -> None:
     registration = SecretEntry.model_validate(
         {
             "host": "api.acme.test",
-            "credential_header": "x-api-key",
-            "credential_prefix": "",
-            "credential_var": "ACME_TOKEN",
+            "auth_header": "x-api-key",
+            "auth_prefix": "",
+            "auth_variable": "ACME_TOKEN",
             "endpoint_var": "ACME_BASE_URL",
             "value": "static-secret",
         }
@@ -75,9 +75,9 @@ def test_custom_entry_can_override_the_auth_shape() -> None:
 
     assert registration.to_storage() == {
         "host": "api.acme.test",
-        "credential_header": "x-api-key",
-        "credential_prefix": "",
-        "credential_var": "ACME_TOKEN",
+        "auth_header": "x-api-key",
+        "auth_prefix": "",
+        "auth_variable": "ACME_TOKEN",
         "endpoint_var": "ACME_BASE_URL",
         "base_path": "",
         "value": "static-secret",
@@ -90,11 +90,11 @@ def test_custom_entry_can_override_the_auth_shape() -> None:
         {},
         {"value": "one", "issuer": _issuer()},
         {"host": "api.acme.test", "value": "one"},
-        {"credential_var": "ACME_TOKEN", "value": "one"},
-        {"credential_prefix": "", "value": "one"},
+        {"auth_variable": "ACME_TOKEN", "value": "one"},
+        {"auth_prefix": "", "value": "one"},
         {"endpoint_var": "", "value": "one"},
         {"placeholder": "managed", "value": "one"},
-        {"host": "api.acme.test", "credential_var": "not a variable", "value": "one"},
+        {"host": "api.acme.test", "auth_variable": "not a variable", "value": "one"},
     ],
 )
 def test_registration_rejects_ambiguous_or_incomplete_shapes(

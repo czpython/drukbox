@@ -41,9 +41,7 @@ class DockerSbxSettings(BaseSettings):
     workspace_root: Path = Field(
         default_factory=lambda: Path.home() / ".drukbox" / "sbx-workspaces",
         description=(
-            "Directory that holds one temporary workspace for each sandbox. The "
-            "daemon reads workspace paths on its own filesystem. When drukbox "
-            "runs in a container, the path must be the same in the container "
-            "and on the host."
+            "Directory with one workspace per sandbox and the value files sbx reads. "
+            "The same path in the container and on the host."
         ),
     )
