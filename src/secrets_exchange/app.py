@@ -4,6 +4,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_session
@@ -22,7 +23,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Drukbox secrets exchange", lifespan=lifespan)
 
-# Caddy copies these from an answer into the upstream request. deploy/caddy names them too.
+# The proxy reads these from an answer and swaps the header. deploy/proxy/swap.py names them too.
 UPSTREAM_HOST = "X-Upstream-Host"
 UPSTREAM_HEADER = "X-Upstream-Header"
 UPSTREAM_CREDENTIAL = "X-Upstream-Credential"
@@ -37,14 +38,28 @@ async def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/upstreams")
+async def upstreams(session: Annotated[AsyncSession, Depends(get_session)]) -> list[str]:
+    """The hosts with a registered secret. The proxy terminates TLS for these only."""
+    hosts = (await session.execute(select(Host))).scalars()
+    return sorted(
+        {
+            catalog.service(name, entry)["host"]
+            for host in hosts
+            for name, entry in host.secrets.items()
+        }
+    )
+
+
 @app.get("/authorize")
 async def authorize(
     session: Annotated[AsyncSession, Depends(get_session)],
     secrets: Annotated[Secrets, Depends(get_secrets)],
     authorization: Annotated[str, Header()] = "",
-    x_forwarded_uri: Annotated[str, Header()] = "",
+    x_forwarded_host: Annotated[str, Header()] = "",
 ) -> Response:
-    """Answer Caddy's forward_auth with the upstream and the real credential.
+    """Answer the proxy with the upstream and the real credential for a placeholder
+    sent to ``x_forwarded_host``.
 
     Never answer 401. git answers a 401 with a retry through its own credential store.
     """
@@ -62,7 +77,7 @@ async def authorize(
         raise HTTPException(status.HTTP_403_FORBIDDEN)
 
     service = catalog.service(placeholder.service, entry)
-    if not x_forwarded_uri.startswith(f"/{service['host']}/"):
+    if x_forwarded_host != service["host"]:
         raise HTTPException(status.HTTP_403_FORBIDDEN)
 
     try:

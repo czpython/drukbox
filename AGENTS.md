@@ -17,7 +17,7 @@ It owns:
 - Tailscale auth key creation, device discovery, and cleanup
 - SSH host key scanning and `known_hosts` material
 - An SSH gateway for hosts of gateway providers (`python -m gateway.server`)
-- The secrets exchange process behind Caddy (`python -m secrets_exchange`)
+- The secrets exchange process behind the secrets proxy (`python -m secrets_exchange`)
 - Account-bound exe.dev HTTP proxy resources
 
 Periodic maintenance runs as cron jobs: `python -m janitor` reaps expired
@@ -49,7 +49,7 @@ src/
   core/              # Settings, database, exception base
   hosts/             # Host API, models, schemas, service, janitor, pool, auth
   host_secrets/      # Secret catalog and placeholders
-  secrets_exchange/  # The secrets exchange process behind Caddy
+  secrets_exchange/  # The secrets exchange process behind the secrets proxy
   gateway/           # SSH gateway for gateway-provider hosts
   http_proxies/      # HTTP proxy API, schemas, service, deps
   janitor/           # Cron entry point that runs the host and template reapers
@@ -58,6 +58,7 @@ src/
   templates/         # Template API, models, service, and janitor
   conftest.py        # Test env defaults and database reset fixture
 alembic/             # Database migrations
+deploy/proxy/        # The secrets proxy: a mitmproxy addon, mounted into the official image
 api-tests/           # Playwright black-box API tests
 docs/                # Architecture, networking, deploy, add-a-provider
 Dockerfile           # Single image: API + cron commands + migrations

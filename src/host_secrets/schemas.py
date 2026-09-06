@@ -58,9 +58,6 @@ class SecretEntry(BaseModel):
     credential_var: EnvironmentVariable | None = None
     credential_header: HeaderName = BEARER_HEADER
     credential_prefix: str = BEARER_PREFIX
-    # Empty when the client has no base URL variable.
-    endpoint_var: str = Field(default="", pattern=r"^(?:[A-Za-z_][A-Za-z0-9_]*)?$")
-    base_path: str = Field(default="", pattern=r"^(?:/[A-Za-z0-9._~-]+)*$")
     value: SecretValue | None = None
     issuer: SecretIssuer | None = None
 

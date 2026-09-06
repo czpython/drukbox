@@ -1,4 +1,4 @@
-"""The secret the exchange hands Caddy for one entry."""
+"""The secret the exchange hands the proxy for one entry."""
 
 import asyncio
 import json

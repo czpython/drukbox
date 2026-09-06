@@ -24,8 +24,6 @@ SECRETS = {
         "credential_header": "Authorization",
         "credential_prefix": "Bearer ",
         "credential_var": "GH_TOKEN",
-        "endpoint_var": "",
-        "base_path": "",
         "issuer": ISSUER,
     },
 }

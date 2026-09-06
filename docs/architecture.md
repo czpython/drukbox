@@ -31,7 +31,8 @@ hosts.api          HTTP request/response concerns only
 hosts.service      host lifecycle behavior (HostService)
 host_secrets.api   host secret registration concerns only
 host_secrets       built-in catalog, placeholders, delivery at provisioning
-secrets_exchange   the secrets exchange process behind Caddy
+secrets_exchange   the secrets exchange process behind the secrets proxy
+deploy/proxy       the secrets proxy addon, run by the official mitmproxy image
 templates.api      template request/response concerns only
 templates.service  template build and delete behavior (TemplateService)
 providers/<name>   one package per VM provider
@@ -111,11 +112,9 @@ keys in `hosts.schemas.RESERVED_HOST_ENV_KEYS` are rejected.
 
 `POST /hosts` takes `secrets`, keyed by service handle. A built-in handle
 resolves through the catalog. A custom entry names its own `host` and
-`credential_var`. It can also set `credential_header`, `credential_prefix`,
-`endpoint_var`, and `base_path`, the part of the base URL after the host that
-the client expects. The defaults are a bearer token in `Authorization`, no base
-URL variable, and no base path. Drukbox does not consult the catalog for a
-custom entry.
+`credential_var`. It can also set `credential_header` and `credential_prefix`.
+The default is a bearer token in `Authorization`. Drukbox does not consult the
+catalog for a custom entry.
 
 A static entry stores `value`. A refreshable entry stores `issuer`: the URL,
 the request headers, and the refresh interval. Drukbox never stores a fetched
@@ -132,11 +131,19 @@ fingerprint of the random part. The sandbox receives `<credential_var>` with
 the placeholder in its boot environment, next to the caller's `env`. On every
 provider but docker-sbx it also receives `HTTPS_PROXY`, `https_proxy`, and
 `NO_PROXY`, so it sends its HTTPS through the proxy at `SECRETS_PROXY_URL`.
-The proxy asks the exchange process, with the placeholder, for the upstream
-host, the header, and the real credential. It swaps the header and forwards
-the request. On docker-sbx the sandbox gets only the placeholder. Drukbox
-puts the value in sbx's own secret store for that sandbox, and sbx's proxy
-swaps the placeholder on the way out.
+The proxy is the official mitmproxy image with the addon in `deploy/proxy`.
+It terminates TLS only for the hosts the exchange lists at `/upstreams`, the
+hosts with a registered secret, and tunnels every other host blind. For a
+request with a placeholder it asks the exchange at `/authorize`, with the
+placeholder and the destination host, for the header the upstream reads and
+the real credential. It swaps that one header and streams the request on.
+A destination that resolves to a loopback, private, link-local, or metadata
+address is refused, so a sandbox cannot reach the exchange or the API through
+the proxy. Every connection goes to the address the proxy checked, and the
+upstream certificate is checked against the CONNECT host. A request whose
+`Host` differs from the CONNECT host is refused. On docker-sbx the sandbox gets only the placeholder. Drukbox puts
+the value in sbx's own secret store for that sandbox, and sbx's proxy swaps
+the placeholder on the way out.
 
 A template is a persistent provider image keyed by provider, base image,
 and setup-script hash. `POST /templates` creates a `building` record and
