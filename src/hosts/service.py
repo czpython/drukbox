@@ -28,6 +28,7 @@ from networking.tailscale import (
     Tailscale,
 )
 from providers.base import VMProvider
+from providers.environment import get_persist
 from providers.exceptions import (
     ProviderCommandError,
     ProviderError,
@@ -233,9 +234,11 @@ class HostService:
             raise UnsupportedSizingError(
                 f"provider {vm.name!r} does not support a per-request disk_gb"
             )
-        if secrets and not vm.secrets.needs_value and not self.settings.secrets_proxy_url:
+        proxy = self.settings.secrets_proxy_url and self.settings.secrets_proxy_ca_file
+        if secrets and not vm.secrets.needs_value and not proxy:
             raise SecretsProxyNotConfiguredError(
-                "SECRETS_PROXY_URL must name the proxy that sandboxes dial"
+                "SECRETS_PROXY_URL and SECRETS_PROXY_CA_FILE must name the proxy that "
+                "sandboxes dial and its certificate"
             )
         if template and not image:
             image = await self._resolve_template_image(template_id=template, provider=vm.name)
@@ -506,7 +509,8 @@ class HostService:
 
         try:
             environment.update(await self.put_secrets(host, vm))
-        except (IssuerError, ProviderError) as exc:
+            get_persist(environment)
+        except (IssuerError, ProviderError, ValueError) as exc:
             await self.mark_failed(host, exc)
             return
 

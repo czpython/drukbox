@@ -64,7 +64,7 @@ class ExoscaleProvider(VMProvider):
         except ExoscaleProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
 
-        user_data = environment.cloud_init(setup_script or "", env)
+        user_data = environment.get_cloud_init(setup_script or "", env)
         try:
             instance_id = await self.api.create_instance(
                 name=name,

@@ -70,7 +70,7 @@ class HetznerProvider(VMProvider):
         except HetznerProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
 
-        user_data = environment.cloud_init(setup_script or "", env)
+        user_data = environment.get_cloud_init(setup_script or "", env)
         try:
             server_id = await self.api.create_server(
                 name=name,

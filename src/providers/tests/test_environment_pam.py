@@ -25,7 +25,7 @@ ENV = {
 @pytest.mark.parametrize("user", ["root", "nobody"])
 def test_a_session_sees_each_value_unchanged(user):
     read_back = " ; ".join(f"printenv {key}" for key in ENV)
-    script = "\n".join([*environment.persist(ENV), f"su -m {user} -s /bin/sh -c '{read_back}'"])
+    script = "\n".join([*environment.get_persist(ENV), f"su -m {user} -s /bin/sh -c '{read_back}'"])
     result = subprocess.run(
         ["docker", "run", "--rm", "debian:bookworm-slim", "sh", "-c", script],
         capture_output=True,
