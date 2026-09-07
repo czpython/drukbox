@@ -1,7 +1,8 @@
 import shlex
+import shutil
 from pathlib import Path
 
-from host_secrets.catalog import Service
+from host_secrets.catalog import CATALOG, Service
 from host_secrets.placeholder import Placeholder
 from providers.capabilities import SecretInjectionCapability
 from providers.exceptions import ProviderTransportError
@@ -9,9 +10,9 @@ from providers.exceptions import ProviderTransportError
 from .api import SbxCLI
 from .exceptions import DockerSbxProviderError
 
-# sbx's own secret for these covers git and gh. Every other service is a
-# custom secret on its host.
-_NATIVE_SERVICES = frozenset({"github"})
+# sbx's own secret for these covers git and gh, when the entry reaches the
+# service itself. Every other entry is a custom secret on its hosts.
+_NATIVE_SERVICES = {"github": CATALOG["github"]}
 
 
 class SbxInjection(SecretInjectionCapability):
@@ -41,7 +42,7 @@ class SbxInjection(SecretInjectionCapability):
         path.write_text(value)
         command = f"cat {shlex.quote(str(path))}"
         try:
-            if placeholder.service in _NATIVE_SERVICES:
+            if _NATIVE_SERVICES.get(placeholder.service) == service:
                 await self.api.set_secret(placeholder.service, sandbox=vm, command=command)
             else:
                 await self.api.set_custom_secret(
@@ -55,15 +56,17 @@ class SbxInjection(SecretInjectionCapability):
             raise ProviderTransportError(str(exc)) from exc
         return {service.auth_variable: str(placeholder)}
 
-    async def delete_secret(self, *, vm: str, placeholder: Placeholder) -> None:
+    async def delete_secrets(self, *, vm: str) -> None:
+        """sbx keeps a sandbox's secrets after the sandbox is removed, and
+        answers a missing one with success, so this can run again."""
         try:
-            if placeholder.service in _NATIVE_SERVICES:
-                await self.api.remove_secret(placeholder.service, sandbox=vm)
-            else:
-                await self.api.remove_custom_secret(sandbox=vm, placeholder=str(placeholder))
+            for name in _NATIVE_SERVICES:
+                await self.api.remove_secret(name, sandbox=vm)
+            for placeholder in await self.api.custom_placeholders(sandbox=vm):
+                await self.api.remove_custom_secret(sandbox=vm, placeholder=placeholder)
         except DockerSbxProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
-        self.value_path(vm, placeholder.service).unlink()
+        shutil.rmtree(self.secrets_root / vm, ignore_errors=True)
 
     def value_path(self, vm: str, service: str) -> Path:
         return self.secrets_root / vm / service

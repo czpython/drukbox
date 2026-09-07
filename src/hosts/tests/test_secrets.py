@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 import respx
 from sqlalchemy import select, text
+from sqlalchemy_encrypted_field import SecretDecryptError
 
 from core.database import async_session_factory
 from core.settings import Settings, get_settings
@@ -16,6 +17,7 @@ from hosts.service import HostService, utc_now
 from hosts.tests.conftest import StubVMProvider
 from providers.base import VMCreateResult
 from providers.capabilities import SecretInjectionCapability
+from providers.exceptions import ProviderTransportError
 
 ISSUER = {"url": "https://mint.test/box/github", "headers": {"X-Key": "k"}, "refresh": "1h"}
 SECRETS = {
@@ -37,6 +39,7 @@ class RecordingInjection(SecretInjectionCapability):
 
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
+        self.deleted: list[str] = []
 
     async def put_secret(
         self, *, vm: str, service: Service, placeholder: Placeholder, value: str
@@ -44,8 +47,8 @@ class RecordingInjection(SecretInjectionCapability):
         self.values[placeholder.service] = value
         return {service.auth_variable: str(placeholder)}
 
-    async def delete_secret(self, *, vm: str, placeholder: Placeholder) -> None:
-        return
+    async def delete_secrets(self, *, vm: str) -> None:
+        self.deleted.append(vm)
 
 
 @pytest.fixture
@@ -218,6 +221,67 @@ async def test_a_wrong_issuer_answer_at_boot_never_reaches_the_log_or_the_host(
 
     assert "secret-xyz" not in caplog.text
     assert "secret-xyz" not in str(failure.value)
+
+
+async def test_teardown_removes_the_secrets_before_the_vm(
+    settings: Settings, create_vm: AsyncMock, stub_provider: StubVMProvider
+) -> None:
+    recording = RecordingInjection()
+    stub_provider.secrets = recording
+    async with async_session_factory() as session:
+        host = await HostService(session, settings=settings).create_host(
+            env={}, secrets={"anthropic": {"value": "sk-ant-real"}}, image=None, provider="stub"
+        )
+
+    async with async_session_factory() as session:
+        assert await HostService(session, settings=settings).delete_host(host.id)
+
+    assert recording.deleted == [host.name]
+    assert stub_provider.deleted == [host.name]
+
+
+async def test_a_secret_that_cannot_be_removed_keeps_the_host_for_a_retry(
+    settings: Settings, create_vm: AsyncMock, stub_provider: StubVMProvider
+) -> None:
+    recording = RecordingInjection()
+    stub_provider.secrets = recording
+    async with async_session_factory() as session:
+        host = await HostService(session, settings=settings).create_host(
+            env={}, secrets={"anthropic": {"value": "sk-ant-real"}}, image=None, provider="stub"
+        )
+    recording.delete_secrets = AsyncMock(side_effect=ProviderTransportError("sbx is down"))
+
+    async with async_session_factory() as session:
+        service = HostService(session, settings=settings)
+        with pytest.raises(ProviderTransportError):
+            await service.delete_host(host.id)
+        assert await service.get_host(host.id)
+    assert stub_provider.deleted == []
+
+
+async def test_teardown_needs_no_secrets_key(
+    settings: Settings,
+    create_vm: AsyncMock,
+    stub_provider: StubVMProvider,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A row whose secrets no longer decrypt still goes, VM and all."""
+    stub_provider.secrets = RecordingInjection()
+    async with async_session_factory() as session:
+        host = await HostService(session, settings=settings).create_host(
+            env={}, secrets={"anthropic": {"value": "sk-ant-real"}}, image=None, provider="stub"
+        )
+    monkeypatch.setenv("SECRETS_KEY", "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=")
+    get_settings.cache_clear()
+
+    async with async_session_factory() as session:
+        service = HostService(session, settings=settings)
+        stored = await service.get_host(host.id)
+        assert stored
+        with pytest.raises(SecretDecryptError):
+            dict(stored.secrets)
+        assert await service.delete_host(host.id)
+    assert stub_provider.deleted == [host.name]
 
 
 async def test_secrets_on_a_provider_that_holds_the_value_need_no_proxy(
