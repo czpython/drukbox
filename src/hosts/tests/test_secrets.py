@@ -164,6 +164,26 @@ async def test_a_provider_that_holds_the_value_gets_it_at_boot(
     assert "HTTPS_PROXY" not in environment
 
 
+@respx.mock
+async def test_an_http_issuer_inside_the_deployment_is_fetched_at_boot(
+    settings: Settings, create_vm: AsyncMock, stub_provider: StubVMProvider
+) -> None:
+    recording = RecordingInjection()
+    stub_provider.secrets = recording
+    issuer = {**ISSUER, "url": "http://web:8000/api/mint/grant/github"}
+    respx.get(issuer["url"]).respond(json={"value": "ghs_minted"})
+
+    async with async_session_factory() as session:
+        await HostService(session, settings=settings).create_host(
+            env={},
+            secrets={"github": {**SECRETS["github"], "issuer": issuer}},
+            image=None,
+            provider="stub",
+        )
+
+    assert recording.values == {"github": "ghs_minted"}
+
+
 class OversizedInjection(RecordingInjection):
     """Hands the box a value that pam_env cannot read."""
 

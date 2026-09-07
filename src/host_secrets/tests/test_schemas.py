@@ -95,11 +95,26 @@ def test_registration_rejects_ambiguous_or_incomplete_shapes(
 
 
 @pytest.mark.parametrize(
+    "url",
+    [
+        "https://mint.example.test/token",
+        "http://127.0.0.1:8001/api/mint/grant/github",
+        "http://web:8000/api/mint/grant/github",
+    ],
+)
+def test_issuer_accepts_http_inside_the_deployment_and_https_anywhere(url: str) -> None:
+    entry = SecretEntry.model_validate({"issuer": _issuer(url=url)})
+
+    assert entry.issuer and str(entry.issuer.url) == url
+
+
+@pytest.mark.parametrize(
     "issuer",
     [
-        _issuer(url="http://mint.example.test/token"),
+        _issuer(url="ftp://mint.example.test/token"),
         _issuer(url="https://user:password@mint.example.test/token"),
         _issuer(url="https://mint.example.test/token#credential"),
+        _issuer(headers={"Authorization": "Bearer secret\n"}),
         _issuer(refresh="0m"),
         _issuer(refresh="50minutes"),
         _issuer(headers={}),

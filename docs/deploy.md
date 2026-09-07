@@ -381,7 +381,8 @@ Give secrets to `POST /hosts`. Provisioning delivers the placeholders in the
 sandbox's boot environment, on every provider, the same way as `env`. A
 refreshable secret, one given with `issuer`, is fetched by the exchange
 process on first use and kept in memory until shortly before it expires. The
-exchange process must reach the issuer URL. On docker-sbx the API process
+exchange process must reach the issuer URL, over plain HTTP inside the
+deployment or HTTPS outside it. On docker-sbx the API process
 fetches it once at provisioning, since sbx holds the value. The exchange
 process pushes a fresh one before it expires, and logs each push. A pool host
 takes no secrets: a request with secrets always provisions a new sandbox.

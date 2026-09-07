@@ -118,9 +118,11 @@ certificate, from `SECRETS_PROXY_CA_FILE`.
 
 `POST /hosts` never returns a secret. A validation response omits the rejected
 input, so a bad value or a bad issuer header does not reach the caller. An
-issuer URL must use HTTPS. It must not carry user credentials or a fragment.
-Put credentials only in the issuer headers, which Drukbox encrypts. The value
-an issuer returns is never stored.
+issuer URL must not carry user credentials or a fragment. It can use plain
+HTTP inside the deployment, where the exchange already answers the proxy in
+the clear. An issuer outside the deployment uses HTTPS. Put credentials only
+in the issuer headers, which Drukbox encrypts. The value an issuer returns is
+never stored.
 
 ## What `env` is and is not
 

@@ -109,6 +109,25 @@ async def test_an_issuer_entry_is_fetched_and_exchanged(edge) -> None:
 
 
 @respx.mock
+async def test_an_http_issuer_inside_the_deployment_is_fetched(edge) -> None:
+    host_id = uuid.uuid4()
+    minted = Placeholder.mint(host_id, "github")
+    issuer = {
+        "url": "http://web:8000/api/mint/grant/github",
+        "headers": {"X-Key": "k"},
+        "refresh": "1h",
+    }
+    await _create_host(
+        host_id, {"github": {"issuer": issuer, "placeholder_fingerprint": minted.fingerprint}}
+    )
+    respx.get(issuer["url"]).respond(json={"value": "ghs_minted"})
+
+    response = await edge.get("/authorize", headers=_headers(str(minted), "api.github.com"))
+
+    assert response.headers["X-Upstream-Credential"] == "Bearer ghs_minted"
+
+
+@respx.mock
 async def test_an_issuer_that_gives_nothing_usable_answers_503(edge) -> None:
     host_id = uuid.uuid4()
     minted = Placeholder.mint(host_id, "github")
