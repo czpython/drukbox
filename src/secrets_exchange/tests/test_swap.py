@@ -21,6 +21,38 @@ ADDON = Path(__file__).parents[3] / "deploy" / "proxy" / "swap.py"
 PLACEHOLDER = "drk.0123abcd.anthropic.s3cret"
 
 
+class Headers:
+    """mitmproxy's Headers, as far as the addon uses them: names compare
+    without case, a repeated name keeps every field, and ``items()`` folds
+    the fields of one name into one value."""
+
+    def __init__(self, *fields: tuple[str, str]) -> None:
+        self.fields = list(fields)
+
+    def items(self, multi: bool = False) -> list[tuple[str, str]]:
+        if multi:
+            return list(self.fields)
+        names: dict[str, str] = {}
+        values: dict[str, list[str]] = {}
+        for name, value in self.fields:
+            names.setdefault(name.lower(), name)
+            values.setdefault(name.lower(), []).append(value)
+        return [(name, ", ".join(values[key])) for key, name in names.items()]
+
+    def __delitem__(self, name: str) -> None:
+        kept = [field for field in self.fields if field[0].lower() != name.lower()]
+        if len(kept) == len(self.fields):
+            raise KeyError(name)
+        self.fields = kept
+
+    def __setitem__(self, name: str, value: str) -> None:
+        self.fields = [field for field in self.fields if field[0].lower() != name.lower()]
+        self.fields.append((name, value))
+
+    def __eq__(self, other: object) -> bool:
+        return dict(self.items()) == other
+
+
 class FakeRequest:
     def __init__(self, url: str, headers: dict[str, str], request_timeout: float) -> None:
         self.url = url
@@ -126,7 +158,7 @@ def _flow(scheme: str, host: str, headers: dict[str, str], connect_host: str = "
             host="104.18.0.1" if scheme == "https" else host,
             host_header=f"{host}:443" if scheme == "https" else host,
             port=443,
-            headers=headers,
+            headers=Headers(*headers.items()),
             stream=False,
         ),
         server_conn=SimpleNamespace(sni=connect_host if scheme == "https" else None),
@@ -350,6 +382,188 @@ async def test_a_basic_placeholder_is_swapped_the_same_way(swap: ModuleType) -> 
     await addon.requestheaders(flow)
 
     assert flow.request.headers == {"Authorization": basic}
+
+
+OTHER = PLACEHOLDER.replace(".anthropic.", ".acme.")
+THIRD = PLACEHOLDER.replace(".anthropic.", ".third.")
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+async def test_every_header_with_a_placeholder_is_swapped(swap: ModuleType, reverse: bool) -> None:
+    exchange = FakeExchange(
+        swap,
+        {"api.acme.test"},
+        {
+            (PLACEHOLDER, "api.acme.test"): ("Authorization", "Bearer real-one"),
+            (OTHER, "api.acme.test"): ("X-Acme-Key", "real-two"),
+        },
+    )
+    addon = _swap(swap, exchange, "104.18.0.1")
+    headers = {"Authorization": f"Bearer {PLACEHOLDER}", "X-Acme-Key": OTHER, "Accept": "*/*"}
+    if reverse:
+        headers = dict(reversed(headers.items()))
+    flow = _flow("https", "api.acme.test", headers)
+
+    await addon.requestheaders(flow)
+
+    assert flow.request.headers == {
+        "Authorization": "Bearer real-one",
+        "X-Acme-Key": "real-two",
+        "Accept": "*/*",
+    }
+    assert sorted(exchange.asked) == sorted(
+        [(PLACEHOLDER, "api.acme.test"), (OTHER, "api.acme.test")]
+    )
+    assert not flow.response
+
+
+async def test_a_credential_is_never_scanned_as_a_placeholder(swap: ModuleType) -> None:
+    exchange = FakeExchange(
+        swap,
+        {"api.acme.test"},
+        {(PLACEHOLDER, "api.acme.test"): ("Authorization", f"Bearer {OTHER}")},
+    )
+    addon = _swap(swap, exchange, "104.18.0.1")
+    flow = _flow("https", "api.acme.test", {"Authorization": f"Bearer {PLACEHOLDER}"})
+
+    await addon.requestheaders(flow)
+
+    assert flow.request.headers == {"Authorization": f"Bearer {OTHER}"}
+    assert exchange.asked == [(PLACEHOLDER, "api.acme.test")]
+
+
+async def test_two_placeholders_for_one_header_refuse_the_request(swap: ModuleType) -> None:
+    exchange = FakeExchange(
+        swap,
+        {"api.acme.test"},
+        {
+            (PLACEHOLDER, "api.acme.test"): ("Authorization", "Bearer real-one"),
+            (OTHER, "api.acme.test"): ("Authorization", "Bearer real-two"),
+        },
+    )
+    addon = _swap(swap, exchange, "104.18.0.1")
+    headers = {"Authorization": f"Bearer {PLACEHOLDER}", "X-Acme-Key": OTHER}
+    flow = _flow("https", "api.acme.test", headers)
+
+    await addon.requestheaders(flow)
+
+    assert flow.response.status_code == 403
+    assert flow.request.headers == headers
+    assert flow.request.stream is False
+
+
+async def test_a_refused_second_placeholder_leaves_the_request_untouched(
+    swap: ModuleType,
+) -> None:
+    exchange = FakeExchange(
+        swap,
+        {"api.acme.test"},
+        {(PLACEHOLDER, "api.acme.test"): ("Authorization", "Bearer real-one")},
+    )
+    addon = _swap(swap, exchange, "104.18.0.1")
+    headers = {"Authorization": f"Bearer {PLACEHOLDER}", "X-Acme-Key": OTHER}
+    flow = _flow("https", "api.acme.test", headers)
+
+    await addon.requestheaders(flow)
+
+    assert flow.response.status_code == 403
+    assert flow.request.headers == headers
+    assert flow.request.stream is False
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [("Authorization", "authorization"), ("Authorization", "Authorization")],
+)
+async def test_one_destination_twice_is_refused_whatever_the_case_or_the_value(
+    swap: ModuleType, first: str, second: str
+) -> None:
+    exchange = FakeExchange(
+        swap,
+        {"api.acme.test"},
+        {
+            (PLACEHOLDER, "api.acme.test"): (first, "Bearer real-one"),
+            (OTHER, "api.acme.test"): (second, "Bearer real-one"),
+        },
+    )
+    addon = _swap(swap, exchange, "104.18.0.1")
+    headers = {"Authorization": f"Bearer {PLACEHOLDER}", "X-Acme-Key": OTHER}
+    flow = _flow("https", "api.acme.test", headers)
+
+    await addon.requestheaders(flow)
+
+    assert flow.response.status_code == 403
+    assert flow.request.headers == headers
+
+
+async def test_every_field_of_a_repeated_name_carries_its_own_placeholder(
+    swap: ModuleType,
+) -> None:
+    exchange = FakeExchange(
+        swap,
+        {"api.acme.test"},
+        {
+            (PLACEHOLDER, "api.acme.test"): ("Authorization", "Bearer real-one"),
+            (OTHER, "api.acme.test"): ("X-Acme-Key", "real-two"),
+            (THIRD, "api.acme.test"): ("X-Acme-Key", "real-three"),
+        },
+    )
+    addon = _swap(swap, exchange, "104.18.0.1")
+    flow = _flow("https", "api.acme.test", {})
+    fields = [
+        ("X-Acme-Key", OTHER),
+        ("X-Acme-Key", THIRD),
+        ("Authorization", f"Bearer {PLACEHOLDER}"),
+    ]
+    flow.request.headers = Headers(*fields)
+
+    await addon.requestheaders(flow)
+
+    assert flow.response.status_code == 403
+    assert flow.request.headers.items(multi=True) == fields
+    assert exchange.asked == [(OTHER, "api.acme.test"), (THIRD, "api.acme.test")]
+
+
+async def test_a_repeated_field_without_a_placeholder_passes_as_it_is(swap: ModuleType) -> None:
+    exchange = FakeExchange(swap, {"api.acme.test"}, {})
+    addon = _swap(swap, exchange, "104.18.0.1")
+    flow = _flow("https", "api.acme.test", {})
+    flow.request.headers = Headers(("Accept", "text/plain"), ("Accept", "application/json"))
+
+    await addon.requestheaders(flow)
+
+    assert flow.request.headers.items(multi=True) == [
+        ("Accept", "text/plain"),
+        ("Accept", "application/json"),
+    ]
+    assert exchange.asked == []
+
+
+class ExchangeDownAfterOneAnswer(FakeExchange):
+    async def authorize(self, placeholder: str, host: str) -> tuple[str, str]:
+        self.unavailable = bool(self.asked)
+        return await super().authorize(placeholder, host)
+
+
+async def test_an_exchange_that_falls_silent_midway_gives_503_and_swaps_nothing(
+    swap: ModuleType,
+) -> None:
+    exchange = ExchangeDownAfterOneAnswer(
+        swap,
+        {"api.acme.test"},
+        {
+            (PLACEHOLDER, "api.acme.test"): ("Authorization", "Bearer real-one"),
+            (OTHER, "api.acme.test"): ("X-Acme-Key", "real-two"),
+        },
+    )
+    addon = _swap(swap, exchange, "104.18.0.1")
+    headers = {"Authorization": f"Bearer {PLACEHOLDER}", "X-Acme-Key": OTHER}
+    flow = _flow("https", "api.acme.test", headers)
+
+    await addon.requestheaders(flow)
+
+    assert flow.response.status_code == 503
+    assert flow.request.headers == headers
 
 
 async def test_a_host_header_that_differs_from_the_connect_host_is_refused(

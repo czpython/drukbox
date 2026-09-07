@@ -97,11 +97,12 @@ database and never returned by the API.
 
 The placeholder, `drk.<host id>.<service>.<random>`, works only at the secrets
 proxy, and only for the host and the service it names. The entry stores a
-fingerprint of it, so a database read cannot replay it. The proxy swaps that
-one header, on HTTPS to a registered host, and touches nothing else. Plain
-HTTP is forwarded unchanged. The proxy refuses a loopback, private, link-local,
-or metadata destination, so a box cannot reach the exchange or the API through
-it. It logs no credential.
+fingerprint of it, so a database read cannot replay it. The proxy swaps every
+header that carries a placeholder, on HTTPS to a registered host, and touches
+nothing else. One placeholder it cannot resolve refuses the whole request.
+Plain HTTP is forwarded unchanged. The proxy refuses a loopback, private,
+link-local, or metadata destination, so a box cannot reach the exchange or the
+API through it. It logs no credential.
 
 The real value is encrypted in the database. It passes through the exchange
 and the proxy for one request, and the exchange keeps an issuer's value in

@@ -172,31 +172,46 @@ class Swap:
             if not is_reachable(await self.resolve(flow.request.host)):
                 flow.response = http.Response.make(403, b"destination refused\n")
         else:
-            for name, value in flow.request.headers.items():
-                if placeholder := placeholder_in(value):
-                    await self.swap(flow, name, placeholder)
-                    break
+            found = [
+                (name, placeholder)
+                for name, value in flow.request.headers.items(multi=True)
+                if (placeholder := placeholder_in(value))
+            ]
+            if found:
+                await self.swap(flow, found)
         flow.request.stream = not flow.response
 
-    async def swap(self, flow: http.HTTPFlow, name: str, placeholder: str) -> None:
+    async def swap(self, flow: http.HTTPFlow, found: list[tuple[str, str]]) -> None:
+        """Every placeholder is authorized first. Then all are replaced at once,
+        so a refusal leaves the request untouched and unsent. Header names
+        compare without case, as mitmproxy keeps them."""
         # The authority the client sends must match the CONNECT host.
         approved = flow.server_conn.sni or flow.request.host
         authority = urllib.parse.urlsplit(f"//{flow.request.host_header or ''}").hostname
         if authority != approved.lower():
             flow.response = http.Response.make(403, b"host does not match the connection\n")
             return
-        try:
-            header, credential = await self.exchange.authorize(placeholder, approved)
-        except Refused:
-            logger.info("refused a placeholder for %s", approved)
-            flow.response = http.Response.make(403, b"placeholder refused\n")
-            return
-        except ExchangeUnavailable as exc:
-            logger.warning("the exchange gave no answer for %s: %s", approved, exc)
-            flow.response = http.Response.make(503, b"exchange unavailable\n")
-            return
-        del flow.request.headers[name]
-        flow.request.headers[header] = credential
+        credentials: dict[str, tuple[str, str]] = {}
+        for _, placeholder in found:
+            try:
+                header, credential = await self.exchange.authorize(placeholder, approved)
+            except Refused:
+                logger.info("refused a placeholder for %s", approved)
+                flow.response = http.Response.make(403, b"placeholder refused\n")
+                return
+            except ExchangeUnavailable as exc:
+                logger.warning("the exchange gave no answer for %s: %s", approved, exc)
+                flow.response = http.Response.make(503, b"exchange unavailable\n")
+                return
+            if header.lower() in credentials:
+                logger.info("two placeholders for one header on %s", approved)
+                flow.response = http.Response.make(403, b"placeholders conflict\n")
+                return
+            credentials[header.lower()] = (header, credential)
+        for name in {name.lower() for name, _ in found}:
+            del flow.request.headers[name]
+        for header, credential in credentials.values():
+            flow.request.headers[header] = credential
 
     def responseheaders(self, flow: http.HTTPFlow) -> None:
         flow.response.stream = True
