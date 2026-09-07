@@ -34,14 +34,21 @@ class SecretIssuer(BaseModel):
 
     @field_validator("url")
     @classmethod
-    def require_secure_issuer(cls, url: HttpUrl) -> HttpUrl:
-        if url.scheme != "https":
-            raise ValueError("issuer URL must use https")
+    def refuse_secrets_in_url(cls, url: HttpUrl) -> HttpUrl:
         if url.username or url.password:
             raise ValueError("issuer URL must not contain credentials")
         if url.fragment:
             raise ValueError("issuer URL must not contain a fragment")
         return url
+
+    @field_validator("headers")
+    @classmethod
+    def refuse_control_characters(cls, headers: dict[str, SecretStr]) -> dict[str, SecretStr]:
+        for value in headers.values():
+            secret = value.get_secret_value()
+            if not (secret.isascii() and secret.isprintable()):
+                raise ValueError("issuer header values must be printable ASCII")
+        return headers
 
     def to_storage(self) -> dict[str, Any]:
         return {

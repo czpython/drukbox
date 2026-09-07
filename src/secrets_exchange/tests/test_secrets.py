@@ -264,3 +264,15 @@ async def test_a_fetch_that_fails_pushes_nothing(secrets) -> None:
     await secrets.push(uuid.uuid4(), VM, "github", ENTRY, injection)
 
     injection.push_secret.assert_not_awaited()
+
+
+async def test_a_header_h11_refuses_never_reaches_the_error_chain() -> None:
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.LocalProtocolError("Illegal header value b'Bearer sk-live\\n'")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(refuse)) as client:
+        with pytest.raises(IssuerError, match="not valid HTTP") as caught:
+            await Secret.fetch(ISSUER, client)
+
+    assert not caught.value.__cause__
+    assert "sk-live" not in repr(caught.value)

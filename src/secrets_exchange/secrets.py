@@ -45,6 +45,9 @@ class Secret(BaseModel):
             response = await client.get(issuer["url"], headers=issuer["headers"])
             response.raise_for_status()
             secret = cls.model_validate(response.json())
+        except httpx.LocalProtocolError:
+            # The message would carry the header value.
+            raise IssuerError("issuer headers are not valid HTTP") from None
         except httpx.HTTPStatusError as exc:
             raise IssuerError(f"status {exc.response.status_code}") from exc
         except httpx.HTTPError as exc:
