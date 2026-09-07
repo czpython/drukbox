@@ -58,7 +58,7 @@ src/
   templates/         # Template API, models, service, and janitor
   conftest.py        # Test env defaults and database reset fixture
 alembic/             # Database migrations
-deploy/proxy/        # The secrets proxy: a mitmproxy addon, mounted into the official image
+deploy/proxy/        # The secrets proxy: a mitmproxy addon and the Dockerfile of its image
 api-tests/           # Playwright black-box API tests
 docs/                # Architecture, networking, deploy, add-a-provider
 Dockerfile           # Single image: API + cron commands + migrations

@@ -133,6 +133,9 @@ jobs:
       - name: Build container image
         run: docker build -t drukbox:validate .
 
+      - name: Build proxy image
+        run: docker build -t drukbox-proxy:validate deploy/proxy
+
   api-tests:
     name: Run API Tests (docker provider)
     runs-on: ubuntu-latest

@@ -12,6 +12,7 @@ import binascii
 import ipaddress
 import json
 import logging
+import os
 import socket
 import time
 import urllib.parse
@@ -105,7 +106,12 @@ class Swap:
         self._upstreams_known = False
 
     def load(self, loader) -> None:
-        loader.add_option("exchange_url", str, "", "Address of the secrets exchange process.")
+        loader.add_option(
+            "exchange_url",
+            str,
+            os.environ.get("SECRETS_EXCHANGE_URL", ""),
+            "Address of the secrets exchange process.",
+        )
 
     def configure(self, updated: set[str]) -> None:
         if "exchange_url" in updated:
