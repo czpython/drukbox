@@ -278,9 +278,11 @@ placeholder for the real credential on the way out. Two pieces run this:
 
 - **The proxy** is `ghcr.io/czpython/drukbox/proxy`: the official
   `mitmproxy/mitmproxy` image with the addon `deploy/proxy/swap.py` built in.
-  It listens on 8880 and reads the exchange address from
-  `SECRETS_EXCHANGE_URL`. A checkout can mount the addon into the official
-  image instead. It terminates TLS only for the hosts
+  It listens on 8880 at `SECRETS_PROXY_BIND_HOST`, `0.0.0.0` by default, and
+  reads the exchange address from `SECRETS_EXCHANGE_URL`. A deployment on the
+  host network sets the bind host to the one address its sandboxes dial. On a
+  public host an open listener is an open proxy. A checkout can mount the
+  addon into the official image instead. It terminates TLS only for the hosts
   that have a registered secret and tunnels every other host blind. It
   refuses a destination that resolves to a loopback, private, link-local, or
   metadata address. It makes its CA on first start and keeps it in a volume.
