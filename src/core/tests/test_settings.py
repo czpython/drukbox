@@ -185,3 +185,102 @@ def test_load_test_env_overrides_ambient_values(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("TAILSCALE_ENABLED", "false")
     conftest.load_test_env()
     assert os.environ["TAILSCALE_ENABLED"] == "true"
+
+
+@pytest.mark.parametrize("host", ["ghcr.io", "docker.io", "registry.example:5000"])
+def test_registry_access_does_not_require_templates(monkeypatch, host):
+    settings = _settings_with(
+        monkeypatch,
+        {
+            **_base_env(),
+            "REGISTRY_HOST": host,
+            "REGISTRY_USERNAME": "builder",
+            "REGISTRY_PASSWORD": "private-token",
+            "TEMPLATE_REPOSITORY": "",
+        },
+    )
+    assert settings.registry_host == host
+    assert settings.template_repository == ""
+    assert settings.registry_password.get_secret_value() == "private-token"
+    assert "private-token" not in repr(settings)
+
+
+@pytest.mark.parametrize("repository", ["acme/templates", "org/team/templates"])
+def test_template_destination_uses_registry_access(monkeypatch, repository):
+    settings = _settings_with(
+        monkeypatch,
+        {
+            **_base_env(),
+            "REGISTRY_HOST": "ghcr.io",
+            "REGISTRY_USERNAME": "builder",
+            "REGISTRY_PASSWORD": "private-token",
+            "TEMPLATE_REPOSITORY": repository,
+        },
+    )
+    assert settings.template_repository == repository
+
+
+@pytest.mark.parametrize("host", ["https://ghcr.io", "ghcr.io/acme", "ghcr.io@evil.example"])
+def test_registry_host_rejects_url_and_path(monkeypatch, host):
+    with pytest.raises(ValueError, match="REGISTRY_HOST"):
+        _settings_with(
+            monkeypatch,
+            {
+                **_base_env(),
+                "REGISTRY_HOST": host,
+                "REGISTRY_USERNAME": "builder",
+                "REGISTRY_PASSWORD": "private-token",
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    "repository",
+    [
+        "https://ghcr.io/acme/templates",
+        "acme/templates:latest",
+        "acme/templates@sha256:abc",
+        "acme/",
+    ],
+)
+def test_template_repository_rejects_url_tag_or_digest(monkeypatch, repository):
+    with pytest.raises(ValueError, match="TEMPLATE_REPOSITORY"):
+        _settings_with(
+            monkeypatch,
+            {
+                **_base_env(),
+                "REGISTRY_HOST": "ghcr.io",
+                "REGISTRY_USERNAME": "builder",
+                "REGISTRY_PASSWORD": "private-token",
+                "TEMPLATE_REPOSITORY": repository,
+            },
+        )
+
+
+def test_partial_registry_names_missing_setting_without_secret(monkeypatch):
+    with pytest.raises(ValueError) as error:
+        _settings_with(
+            monkeypatch,
+            {
+                **_base_env(),
+                "REGISTRY_HOST": "ghcr.io",
+                "REGISTRY_USERNAME": "",
+                "REGISTRY_PASSWORD": "private-token",
+            },
+        )
+    assert "REGISTRY_USERNAME" in str(error.value)
+    assert "private-token" not in str(error.value)
+
+
+def test_template_destination_requires_registry_access(monkeypatch):
+    with pytest.raises(ValueError, match="REGISTRY_HOST"):
+        _settings_with(
+            monkeypatch,
+            {
+                **_base_env(),
+                "REGISTRY_HOST": "",
+                "REGISTRY_USERNAME": "",
+                "REGISTRY_PASSWORD": "",
+                "TEMPLATE_REPOSITORY": "acme/templates",
+            },
+        )

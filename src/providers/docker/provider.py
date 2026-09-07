@@ -140,6 +140,7 @@ class DockerProvider(VMProvider, TemplateCapability):
             self.api,
             base_image=base_image,
             setup_script=setup_script,
+            label=label,
         )
 
     async def delete_template_image(self, image: str) -> None:
