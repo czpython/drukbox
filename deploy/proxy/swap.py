@@ -42,10 +42,11 @@ class ExchangeUnavailable(Exception):
 
 
 def placeholder_in(value: str) -> str:
-    """Basic carries it as the password. Inside a longer value it never counts."""
+    """Bearer and gh's ``token`` carry it after the scheme, Basic as the
+    password. Inside a longer value it never counts."""
     scheme, _, rest = value.partition(" ")
     candidate = value
-    if scheme.lower() == "bearer":
+    if scheme.lower() in ("bearer", "token"):
         candidate = rest.strip()
     elif scheme.lower() == "basic":
         try:

@@ -42,7 +42,7 @@ class RecordingInjection(SecretInjectionCapability):
         self, *, vm: str, service: Service, placeholder: Placeholder, value: str
     ) -> dict[str, str]:
         self.values[placeholder.service] = value
-        return {service["auth_variable"]: str(placeholder)}
+        return {service.auth_variable: str(placeholder)}
 
     async def delete_secret(self, *, vm: str, placeholder: Placeholder) -> None:
         return
@@ -164,7 +164,7 @@ class OversizedInjection(RecordingInjection):
     async def put_secret(
         self, *, vm: str, service: Service, placeholder: Placeholder, value: str
     ) -> dict[str, str]:
-        return {service["auth_variable"]: "a" * 9000}
+        return {service.auth_variable: "a" * 9000}
 
 
 async def test_a_boot_environment_pam_cannot_read_fails_provisioning_before_the_vm(

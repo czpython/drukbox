@@ -1,4 +1,5 @@
 import json
+import re
 
 import httpx
 import pytest
@@ -135,6 +136,26 @@ async def test_create_vm_installs_the_proxy_ca_with_sudo(respx_mock):
 
 
 @pytest.mark.asyncio
+@respx.mock(base_url="https://exe.dev")
+async def test_create_vm_sets_git_up_with_sudo_for_a_github_secret(respx_mock):
+    route = respx_mock.post("/exec").mock(
+        return_value=httpx.Response(200, content=b'{"vm_name": "sb-1", "ssh_port": 22}'),
+    )
+
+    await _api().create_vm(name="sb-1", image="ubuntu:22.04", env={"GH_TOKEN": "drk.a.github.b"})
+
+    lines = _setup_script(route.calls.last.request.content.decode())
+    assert lines[-4] == (
+        "sudo -n git config --system --replace-all credential.https://github.com.helper '' "
+        "|| exit 1"
+    )
+    assert lines[-1] == (
+        "sudo -n git config --system --add url.https://github.com/.insteadOf "
+        "ssh://git@github.com/ || exit 1"
+    )
+
+
+@pytest.mark.asyncio
 @respx.mock(base_url="https://exe.dev", assert_all_called=False)
 async def test_create_vm_refuses_a_setup_script_over_the_exe_limit(respx_mock):
     route = respx_mock.post("/exec")
@@ -147,8 +168,9 @@ async def test_create_vm_refuses_a_setup_script_over_the_exe_limit(respx_mock):
 
 def _setup_script(body: str) -> list[str]:
     """The setup script exe receives, as lines."""
-    quoted = body.split("--setup-script=", 1)[1].split(" --", 1)[0]
-    return json.loads(quoted).split("\n")
+    quoted = re.search(r'--setup-script=("(?:[^"\\]|\\.)*")', body)
+    assert quoted
+    return json.loads(quoted.group(1)).split("\n")
 
 
 @pytest.mark.asyncio

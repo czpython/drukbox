@@ -54,7 +54,7 @@ async def test_any_other_secret_is_a_custom_secret_on_its_host_from_a_file(tmp_p
     assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
     api.set_custom_secret.assert_awaited_once_with(
         sandbox="sb-one",
-        host="api.anthropic.com",
+        hosts=["api.anthropic.com"],
         env="ANTHROPIC_AUTH_TOKEN",
         placeholder=str(placeholder),
         command=f"cat {path}",

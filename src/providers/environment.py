@@ -3,6 +3,8 @@
 import re
 import shlex
 
+from host_secrets.catalog import CATALOG
+
 _NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # pam_env reads /etc/environment one entry per line, with its own parser: a
@@ -77,16 +79,32 @@ def get_install_ca(env: dict[str, str], *, sudo: bool = False) -> list[str]:
     return []
 
 
+def get_github(env: dict[str, str], *, sudo: bool = False) -> list[str]:
+    """The lines ``gh auth setup-git`` writes, for every user, and SSH remotes
+    sent over HTTPS. They can run again on the same box."""
+    git = f"{'sudo -n ' if sudo else ''}git config --system"
+    if CATALOG["github"].auth_variable in env:
+        return [
+            f"{git} --replace-all credential.https://github.com.helper '' || exit 1",
+            f"{git} --add credential.https://github.com.helper '!gh auth git-credential' || exit 1",
+            f"{git} --replace-all url.https://github.com/.insteadOf git@github.com: || exit 1",
+            f"{git} --add url.https://github.com/.insteadOf ssh://git@github.com/ || exit 1",
+        ]
+    return []
+
+
 def get_cloud_init(setup_script: str, env: dict[str, str] | None) -> str:
     """A shebang, ``env`` for the script and every session, the proxy's CA,
-    then the script."""
+    git's setup, then the script."""
     script = setup_script if setup_script.startswith("#!") else f"#!/bin/sh\n{setup_script}"
     shebang, _, body = script.partition("\n")
+    env = env or {}
     lines = [
         shebang,
-        *get_export(env or {}),
-        *get_persist(env or {}),
-        *get_install_ca(env or {}),
+        *get_export(env),
+        *get_persist(env),
+        *get_install_ca(env),
+        *get_github(env),
         body,
     ]
     return "\n".join(line for line in lines if line)
