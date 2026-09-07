@@ -59,8 +59,19 @@ class SbxCLI:
         await self._run("rm", "--force", name)
 
     async def set_secret(self, service: str, *, sandbox: str, command: str) -> None:
-        # --token would put the value in argv, which every process can read.
-        await self._run("secret", "set", service, "--sandbox", sandbox, "--command", command)
+        # --token would put the value in argv. Without on-demand, sbx caches
+        # the command's output for 55 minutes.
+        await self._run(
+            "secret",
+            "set",
+            service,
+            "--sandbox",
+            sandbox,
+            "--command",
+            command,
+            "--refresh",
+            "on-demand",
+        )
 
     async def set_custom_secret(
         self,
@@ -71,7 +82,7 @@ class SbxCLI:
         placeholder: str,
         command: str,
     ) -> None:
-        # One secret covers every host of its service. --host repeats.
+        # --host repeats. sbx runs the command at each use by default.
         await self._run(
             "secret",
             "set-custom",

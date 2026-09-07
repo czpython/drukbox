@@ -47,6 +47,9 @@ class RecordingInjection(SecretInjectionCapability):
         self.values[placeholder.service] = value
         return {service.auth_variable: str(placeholder)}
 
+    async def push_secret(self, *, vm: str, name: str, value: str) -> None:
+        self.values[name] = value
+
     async def delete_secrets(self, *, vm: str) -> None:
         self.deleted.append(vm)
 
