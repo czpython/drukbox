@@ -129,6 +129,13 @@ fetches a fresh value when less than a minute of the pushed one remains and
 hands it to `push_secret`. A push that fails waits like a fetch that fails.
 A host that is gone is forgotten on the next pass.
 
+An issuer can end a value before its expiry, as an OAuth provider does when
+it revokes the previous token at a refresh. The issuer then orders a refresh
+at `POST /refresh/<host id>/<service>`. The exchange forgets the held value,
+fetches now, and on a provider that holds the value pushes at once. It answers
+`200` after that, and `503` with `Retry-After` when the issuer gave nothing
+usable. The order carries no value: the exchange only asks the issuer again.
+
 Provisioning mints a placeholder per secret. The placeholder names the host
 and the service, `drk.<host id>.<service>.<random>`. The entry keeps only a
 fingerprint of the random part. The sandbox receives the auth variable with

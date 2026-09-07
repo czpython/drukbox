@@ -10,8 +10,9 @@ from typing import Any, Self
 import httpx
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
-from providers.capabilities import SecretInjectionCapability
+from hosts.models import Host
 from providers.exceptions import ProviderError
+from providers.registry import get_vm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,8 @@ class RefreshableSecret:
 class Secrets:
     """The current secret per entry. A fetched value is kept in memory, served
     stale while a refresh runs or fails, and never written back. A provider
-    that holds the value never asks, so ``push`` hands it a fresh one."""
+    that holds the value never asks, so ``push`` hands it a fresh one. An
+    issuer that ends a value early orders ``refresh``."""
 
     def __init__(self, client: httpx.AsyncClient) -> None:
         self._client = client
@@ -145,10 +147,10 @@ class Secrets:
             key: secret for key, secret in self._refreshable.items() if key[0] in existing
         }
 
-    async def current(self, host_id: uuid.UUID, service: str, entry: dict[str, Any]) -> Secret:
+    async def current(self, host: Host, service: str, entry: dict[str, Any]) -> Secret:
         if "value" in entry:
             return Secret(value=entry["value"])
-        refreshable = self._refreshable.setdefault((host_id, service), RefreshableSecret())
+        refreshable = self._refreshable.setdefault((host.id, service), RefreshableSecret())
         now = datetime.now(UTC)
         if refreshable.latest and refreshable.latest.is_valid(now):
             if refreshable.latest.is_stale(now):
@@ -157,28 +159,44 @@ class Secrets:
         await refreshable.refresh(entry["issuer"], self._client)
         if refreshable.latest and refreshable.latest.is_valid(datetime.now(UTC)):
             return refreshable.latest
-        raise IssuerUnavailableError(f"no valid secret for {host_id}/{service}")
+        raise IssuerUnavailableError(f"no valid secret for {host.id}/{service}")
 
-    async def push(
-        self,
-        host_id: uuid.UUID,
-        vm: str,
-        service: str,
-        entry: dict[str, Any],
-        injection: SecretInjectionCapability,
-    ) -> None:
+    async def push(self, host: Host, service: str, entry: dict[str, Any]) -> None:
         """The first push comes at first sight, since the boot value came from
-        the API process."""
-        refreshable = self._refreshable.setdefault((host_id, service), RefreshableSecret())
-        if refreshable.is_due(datetime.now(UTC)):
+        the API process. A provider that holds no value is never visited."""
+        provider = get_vm_provider(host.provider)
+        refreshable = self._refreshable.setdefault((host.id, service), RefreshableSecret())
+        if provider.secrets.needs_value and refreshable.is_due(datetime.now(UTC)):
             try:
                 pushed = await refreshable.push(
                     entry["issuer"],
                     self._client,
-                    lambda value: injection.push_secret(vm=vm, name=service, value=value),
+                    lambda value: provider.secrets.push_secret(
+                        vm=host.name, name=service, value=value
+                    ),
                 )
             except ProviderError as exc:
-                logger.warning("push of %s to %s failed: %s", service, vm, exc)
+                logger.warning("push of %s to %s failed: %s", service, host.name, exc)
             else:
                 if pushed:
-                    logger.info("pushed %s to %s", service, vm)
+                    logger.info("pushed %s to %s", service, host.name)
+
+    async def refresh(self, host: Host, service: str, entry: dict[str, Any]) -> None:
+        """Forget the held value, fetch now, and hand the new one to a provider
+        that holds the value. Raises :class:`IssuerUnavailableError` when
+        nothing valid came back."""
+        provider = get_vm_provider(host.provider)
+        refreshable = self._refreshable[(host.id, service)] = RefreshableSecret()
+        if provider.secrets.needs_value:
+            pushed = await refreshable.push(
+                entry["issuer"],
+                self._client,
+                lambda value: provider.secrets.push_secret(vm=host.name, name=service, value=value),
+            )
+            if pushed:
+                return
+        else:
+            await refreshable.refresh(entry["issuer"], self._client)
+            if refreshable.latest:
+                return
+        raise IssuerUnavailableError(f"no valid secret for {host.id}/{service}")

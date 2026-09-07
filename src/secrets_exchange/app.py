@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -17,7 +18,6 @@ from host_secrets import catalog
 from host_secrets.placeholder import Placeholder
 from hosts.models import Host, HostStatus
 from providers.exceptions import ProviderError
-from providers.registry import get_vm_provider
 from secrets_exchange.secrets import IssuerUnavailableError, Secrets
 
 logger = logging.getLogger(__name__)
@@ -65,15 +65,11 @@ async def push_active_hosts(secrets: Secrets) -> None:
 
 async def push_to_host(secrets: Secrets, host: Host) -> None:
     try:
-        injection = get_vm_provider(host.provider).secrets
-        entries = dict(host.secrets)
+        for service, entry in host.secrets.items():
+            if "issuer" in entry:
+                await secrets.push(host, service, entry)
     except (ProviderError, SecretDecryptError) as exc:
         logger.error("push for host %s failed: %s", host.name, exc)
-        return
-    if injection.needs_value:
-        for service, entry in entries.items():
-            if "issuer" in entry:
-                await secrets.push(host.id, host.name, service, entry, injection)
 
 
 app = FastAPI(title="Drukbox secrets exchange", lifespan=lifespan)
@@ -137,7 +133,7 @@ async def authorize(
     upstream = upstreams[x_forwarded_host]
 
     try:
-        secret = await secrets.current(host.id, placeholder.service, entry)
+        secret = await secrets.current(host, placeholder.service, entry)
     except IssuerUnavailableError:
         return Response(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers={"Retry-After": "5"}
@@ -151,3 +147,30 @@ async def authorize(
             UPSTREAM_CREDENTIAL: upstream.credential(secret.value),
         },
     )
+
+
+@app.post("/refresh/{host_id}/{service}")
+async def refresh(
+    host_id: uuid.UUID,
+    service: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    secrets: Annotated[Secrets, Depends(get_secrets)],
+) -> Response:
+    """The issuer ended the held value early. No request carries it again,
+    and a provider that holds the value gets the new one at once."""
+    host = await session.get(Host, host_id)
+    if not host or service not in host.secrets:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    entry = host.secrets[service]
+    if "value" in entry:
+        raise HTTPException(status.HTTP_409_CONFLICT)
+
+    try:
+        await secrets.refresh(host, service, entry)
+    except (IssuerUnavailableError, ProviderError) as exc:
+        logger.warning("refresh of %s for %s failed: %s", service, host.name, exc)
+        return Response(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers={"Retry-After": "5"}
+        )
+    logger.info("refreshed %s for %s", service, host.name)
+    return Response(status_code=status.HTTP_200_OK)

@@ -15,6 +15,7 @@ from host_secrets.placeholder import Placeholder
 from hosts.models import Host, HostStatus
 from hosts.service import utc_now
 from hosts.tests.conftest import stub_provider  # noqa: F401
+from providers.exceptions import ProviderTransportError
 from providers.registry import get_vm_provider
 from secrets_exchange.app import UPSTREAM_CREDENTIAL, UPSTREAM_HEADER, app, push_active_hosts
 from secrets_exchange.secrets import Secrets
@@ -244,9 +245,9 @@ async def _create_host(
 @respx.mock
 @pytest.mark.usefixtures("stub_provider")
 async def test_the_timer_pushes_issuer_values_to_a_provider_that_holds_them(edge) -> None:
-    injection = MagicMock(needs_value=True)
-    injection.push_secret = AsyncMock()
-    get_vm_provider("stub").secrets = injection
+    secrets = MagicMock(needs_value=True)
+    secrets.push_secret = AsyncMock()
+    get_vm_provider("stub").secrets = secrets
     host_id = uuid.uuid4()
     await _create_host(
         host_id,
@@ -260,7 +261,7 @@ async def test_the_timer_pushes_issuer_values_to_a_provider_that_holds_them(edge
 
     await push_active_hosts(app.state.secrets)
 
-    injection.push_secret.assert_awaited_once_with(
+    secrets.push_secret.assert_awaited_once_with(
         vm=f"sb-{host_id.hex[:12]}", name="anthropic", value="sk-ant-fresh"
     )
 
@@ -268,8 +269,8 @@ async def test_the_timer_pushes_issuer_values_to_a_provider_that_holds_them(edge
 @respx.mock
 @pytest.mark.usefixtures("stub_provider")
 async def test_the_timer_forgets_a_deleted_host(edge) -> None:
-    injection = MagicMock(needs_value=True, push_secret=AsyncMock())
-    get_vm_provider("stub").secrets = injection
+    secrets = MagicMock(needs_value=True, push_secret=AsyncMock())
+    get_vm_provider("stub").secrets = secrets
     host_id = uuid.uuid4()
     await _create_host(
         host_id, {"anthropic": {"issuer": ISSUER, "placeholder_fingerprint": "a"}}, provider="stub"
@@ -284,15 +285,15 @@ async def test_the_timer_forgets_a_deleted_host(edge) -> None:
     await push_active_hosts(app.state.secrets)
 
     assert (host_id, "anthropic") not in app.state.secrets._refreshable
-    injection.push_secret.assert_awaited_once()
+    secrets.push_secret.assert_awaited_once()
 
 
 @respx.mock
 @pytest.mark.usefixtures("stub_provider")
 async def test_one_host_in_trouble_costs_no_other_host_its_value(edge, caplog) -> None:
-    injection = MagicMock(needs_value=True)
-    injection.push_secret = AsyncMock()
-    get_vm_provider("stub").secrets = injection
+    secrets = MagicMock(needs_value=True)
+    secrets.push_secret = AsyncMock()
+    get_vm_provider("stub").secrets = secrets
     troubled, healthy = uuid.uuid4(), uuid.uuid4()
     entry = {"issuer": ISSUER, "placeholder_fingerprint": "a"}
     await _create_host(troubled, {"anthropic": entry}, provider="gone")
@@ -302,7 +303,116 @@ async def test_one_host_in_trouble_costs_no_other_host_its_value(edge, caplog) -
     with caplog.at_level(logging.ERROR):
         await push_active_hosts(app.state.secrets)
 
-    injection.push_secret.assert_awaited_once_with(
+    secrets.push_secret.assert_awaited_once_with(
         vm=f"sb-{healthy.hex[:12]}", name="anthropic", value="sk-ant-fresh"
     )
     assert f"sb-{troubled.hex[:12]}" in caplog.text
+
+
+@respx.mock
+@pytest.mark.usefixtures("stub_provider")
+async def test_a_refresh_order_replaces_the_held_value_at_once(edge) -> None:
+    get_vm_provider("stub").secrets = MagicMock(needs_value=False)
+    host_id = uuid.uuid4()
+    minted = Placeholder.mint(host_id, "github")
+    await _create_host(
+        host_id,
+        {"github": {"issuer": ISSUER, "placeholder_fingerprint": minted.fingerprint}},
+        provider="stub",
+    )
+    headers = _headers(str(minted), "api.github.com")
+    route = respx.get(ISSUER["url"]).respond(json={"value": "ghs_one"})
+    assert (await edge.get("/authorize", headers=headers)).headers[UPSTREAM_CREDENTIAL] == (
+        "Bearer ghs_one"
+    )
+    route.respond(json={"value": "ghs_two"})
+
+    response = await edge.post(f"/refresh/{host_id}/github")
+
+    assert response.status_code == 200
+    assert (await edge.get("/authorize", headers=headers)).headers[UPSTREAM_CREDENTIAL] == (
+        "Bearer ghs_two"
+    )
+    assert route.call_count == 2
+
+
+@respx.mock
+@pytest.mark.usefixtures("stub_provider")
+async def test_a_refresh_order_pushes_the_new_value_to_a_provider_that_holds_it(edge) -> None:
+    secrets = MagicMock(needs_value=True, push_secret=AsyncMock())
+    get_vm_provider("stub").secrets = secrets
+    host_id = uuid.uuid4()
+    await _create_host(
+        host_id, {"anthropic": {"issuer": ISSUER, "placeholder_fingerprint": "a"}}, provider="stub"
+    )
+    route = respx.get(ISSUER["url"]).respond(json={"value": "sk-ant-one"})
+    await push_active_hosts(app.state.secrets)
+    route.respond(json={"value": "sk-ant-two"})
+
+    response = await edge.post(f"/refresh/{host_id}/anthropic")
+
+    assert response.status_code == 200
+    assert [call.kwargs["value"] for call in secrets.push_secret.await_args_list] == [
+        "sk-ant-one",
+        "sk-ant-two",
+    ]
+    await push_active_hosts(app.state.secrets)
+    assert secrets.push_secret.await_count == 2, "the timer finds the pushed value fresh"
+
+
+@respx.mock
+@pytest.mark.usefixtures("stub_provider")
+async def test_a_refresh_order_that_gets_nothing_usable_answers_503_and_waits(edge) -> None:
+    get_vm_provider("stub").secrets = MagicMock(needs_value=False)
+    host_id = uuid.uuid4()
+    minted = Placeholder.mint(host_id, "github")
+    await _create_host(
+        host_id,
+        {"github": {"issuer": ISSUER, "placeholder_fingerprint": minted.fingerprint}},
+        provider="stub",
+    )
+    route = respx.get(ISSUER["url"]).respond(status_code=502)
+
+    response = await edge.post(f"/refresh/{host_id}/github")
+
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "5"
+    route.respond(json={"value": "ghs_fine"})
+    authorized = await edge.get("/authorize", headers=_headers(str(minted), "api.github.com"))
+    assert authorized.status_code == 503, "the next request waits out the retry delay"
+    assert route.call_count == 1
+
+
+@respx.mock
+@pytest.mark.usefixtures("stub_provider")
+async def test_a_refresh_order_whose_push_fails_answers_503_without_the_value(edge, caplog) -> None:
+    secrets = MagicMock(needs_value=True)
+    secrets.push_secret = AsyncMock(side_effect=ProviderTransportError("sbx is down"))
+    get_vm_provider("stub").secrets = secrets
+    host_id = uuid.uuid4()
+    await _create_host(
+        host_id, {"anthropic": {"issuer": ISSUER, "placeholder_fingerprint": "a"}}, provider="stub"
+    )
+    respx.get(ISSUER["url"]).respond(json={"value": "sk-ant-one"})
+
+    with caplog.at_level(logging.WARNING):
+        response = await edge.post(f"/refresh/{host_id}/anthropic")
+
+    assert response.status_code == 503
+    assert "sbx is down" in caplog.text
+    assert "sk-ant-one" not in caplog.text
+
+
+async def test_a_refresh_order_for_an_unknown_host_or_service_answers_404(edge) -> None:
+    host_id = uuid.uuid4()
+    await _create_host(host_id, {"github": {"issuer": ISSUER, "placeholder_fingerprint": "a"}})
+
+    assert (await edge.post(f"/refresh/{uuid.uuid4()}/github")).status_code == 404
+    assert (await edge.post(f"/refresh/{host_id}/anthropic")).status_code == 404
+
+
+async def test_a_refresh_order_for_a_static_entry_answers_409(edge) -> None:
+    host_id = uuid.uuid4()
+    await _create_host(host_id, {"github": {"value": "ghs_real", "placeholder_fingerprint": "a"}})
+
+    assert (await edge.post(f"/refresh/{host_id}/github")).status_code == 409
