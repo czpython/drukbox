@@ -8,7 +8,10 @@ import httpx
 import pytest
 import respx
 
+from hosts.models import Host
+from hosts.tests.conftest import stub_provider  # noqa: F401
 from providers.exceptions import ProviderTransportError
+from providers.registry import get_vm_provider
 from secrets_exchange.secrets import (
     IssuerError,
     IssuerUnavailableError,
@@ -25,10 +28,15 @@ ENTRY = {"issuer": ISSUER, "placeholder_fingerprint": "abc"}
 VM = "sb-one"
 
 
-def _holding_injection() -> MagicMock:
-    injection = MagicMock(needs_value=True)
-    injection.push_secret = AsyncMock()
-    return injection
+def _host(provider: str = "exe") -> Host:
+    return Host(id=uuid.uuid4(), name=VM, provider=provider)
+
+
+def _holding() -> MagicMock:
+    """The stub provider holds the value, like sbx."""
+    stub = get_vm_provider("stub")
+    stub.secrets = MagicMock(needs_value=True, push_secret=AsyncMock())
+    return stub.secrets
 
 
 @pytest.fixture
@@ -41,13 +49,13 @@ async def secrets():
 async def test_an_issuer_is_fetched_once_and_kept_until_it_ages(secrets) -> None:
     route = respx.get(ISSUER["url"]).respond(json={"value": "ghs_one"})
 
-    first = await secrets.current(uuid.uuid4(), "github", ENTRY)
-    second = await secrets.current(first_key := uuid.uuid4(), "github", ENTRY)
+    first = await secrets.current(_host(), "github", ENTRY)
+    second = await secrets.current(first_host := _host(), "github", ENTRY)
 
     assert first.value == second.value == "ghs_one"
     assert route.calls[0].request.headers["Authorization"] == "Bearer d2d"
     assert route.call_count == 2, "each entry has its own secret"
-    assert (await secrets.current(first_key, "github", ENTRY)).value == "ghs_one"
+    assert (await secrets.current(first_host, "github", ENTRY)).value == "ghs_one"
     assert route.call_count == 2, "a held secret is not fetched again"
 
 
@@ -55,7 +63,7 @@ async def test_an_issuer_is_fetched_once_and_kept_until_it_ages(secrets) -> None
 async def test_a_static_entry_never_touches_the_issuer(secrets) -> None:
     route = respx.get(ISSUER["url"])
 
-    secret = await secrets.current(uuid.uuid4(), "github", {"value": "ghs_static"})
+    secret = await secrets.current(_host(), "github", {"value": "ghs_static"})
 
     assert secret == Secret(value="ghs_static")
     assert route.call_count == 0
@@ -74,16 +82,16 @@ async def test_the_issuer_expiry_wins_over_the_refresh_interval() -> None:
 async def test_a_value_near_its_end_is_fetched_again_and_the_old_one_serves_meanwhile(
     secrets,
 ) -> None:
-    host_id = uuid.uuid4()
+    host = _host()
     soon = (datetime.now(UTC) + timedelta(seconds=30)).isoformat()
     route = respx.get(ISSUER["url"]).respond(json={"value": "ghs_old", "expires_at": soon})
-    assert (await secrets.current(host_id, "github", ENTRY)).value == "ghs_old"
+    assert (await secrets.current(host, "github", ENTRY)).value == "ghs_old"
 
     route.respond(json={"value": "ghs_new", "expires_at": soon})
-    assert (await secrets.current(host_id, "github", ENTRY)).value == "ghs_old"
+    assert (await secrets.current(host, "github", ENTRY)).value == "ghs_old"
 
     await _eventually(lambda: route.call_count == 2)
-    assert (await secrets.current(host_id, "github", ENTRY)).value == "ghs_new"
+    assert (await secrets.current(host, "github", ENTRY)).value == "ghs_new"
 
 
 @respx.mock
@@ -98,14 +106,14 @@ async def test_a_value_near_its_end_is_fetched_again_and_the_old_one_serves_mean
     ],
 )
 async def test_nothing_usable_and_nothing_held_is_unavailable_then_waits(secrets, answer) -> None:
-    host_id = uuid.uuid4()
+    host = _host()
     route = respx.get(ISSUER["url"]).respond(**answer)
 
     with pytest.raises(IssuerUnavailableError):
-        await secrets.current(host_id, "github", ENTRY)
+        await secrets.current(host, "github", ENTRY)
     route.respond(json={"value": "ghs_fine"})
     with pytest.raises(IssuerUnavailableError):
-        await secrets.current(host_id, "github", ENTRY)
+        await secrets.current(host, "github", ENTRY)
 
     assert route.call_count == 1, "the second request waits out the retry delay"
 
@@ -115,7 +123,7 @@ async def test_a_wrong_answer_is_logged_without_its_content(secrets, caplog) -> 
     respx.get(ISSUER["url"]).respond(json={"token": "secret-xyz"})
 
     with caplog.at_level(logging.WARNING), pytest.raises(IssuerUnavailableError):
-        await secrets.current(uuid.uuid4(), "github", ENTRY)
+        await secrets.current(_host(), "github", ENTRY)
 
     assert "answer has the wrong shape" in caplog.text
     assert "secret-xyz" not in caplog.text
@@ -127,13 +135,13 @@ async def test_an_answer_that_has_already_expired_is_a_failure(secrets) -> None:
     respx.get(ISSUER["url"]).respond(json={"value": "ghs_dead", "expires_at": past})
 
     with pytest.raises(IssuerUnavailableError):
-        await secrets.current(uuid.uuid4(), "github", ENTRY)
+        await secrets.current(_host(), "github", ENTRY)
 
 
 async def test_a_value_that_expires_during_a_failed_fetch_is_not_served(
     secrets, monkeypatch
 ) -> None:
-    key = (uuid.uuid4(), "github")
+    key = (_host(), "github")
 
     async def slow_failure(cls, issuer, client):
         await asyncio.sleep(0.3)
@@ -151,7 +159,7 @@ async def test_a_value_that_expires_during_a_failed_fetch_is_not_served(
 
 
 async def test_the_old_value_serves_while_a_fetch_is_under_way(secrets, monkeypatch) -> None:
-    key = (uuid.uuid4(), "github")
+    key = (_host(), "github")
     with respx.mock:
         soon = (datetime.now(UTC) + timedelta(seconds=30)).isoformat()
         respx.get(ISSUER["url"]).respond(json={"value": "ghs_old", "expires_at": soon})
@@ -178,7 +186,7 @@ async def test_the_old_value_serves_while_a_fetch_is_under_way(secrets, monkeypa
 
 
 async def test_the_retry_wait_starts_when_a_slow_fetch_fails(secrets, monkeypatch) -> None:
-    key = (uuid.uuid4(), "github")
+    key = (_host(), "github")
     attempts = 0
 
     async def slow_failure(cls, issuer, client):
@@ -204,30 +212,32 @@ async def _eventually(check) -> None:
 
 
 @respx.mock
+@pytest.mark.usefixtures("stub_provider")
 async def test_a_held_value_is_fetched_and_pushed_once_while_it_lasts(secrets) -> None:
-    injection = _holding_injection()
-    host_id = uuid.uuid4()
+    holding = _holding()
+    host = _host("stub")
     route = respx.get(ISSUER["url"]).respond(json={"value": "ghs_one"})
 
-    await secrets.push(host_id, VM, "github", ENTRY, injection)
-    await secrets.push(host_id, VM, "github", ENTRY, injection)
+    await secrets.push(host, "github", ENTRY)
+    await secrets.push(host, "github", ENTRY)
 
-    injection.push_secret.assert_awaited_once_with(vm=VM, name="github", value="ghs_one")
+    holding.push_secret.assert_awaited_once_with(vm=VM, name="github", value="ghs_one")
     assert route.call_count == 1
 
 
 @respx.mock
+@pytest.mark.usefixtures("stub_provider")
 async def test_a_held_value_that_nears_its_end_is_fetched_and_pushed_again(secrets) -> None:
-    injection = _holding_injection()
-    host_id = uuid.uuid4()
+    holding = _holding()
+    host = _host("stub")
     soon = (datetime.now(UTC) + timedelta(seconds=59)).isoformat()
     route = respx.get(ISSUER["url"]).respond(json={"value": "ghs_one", "expires_at": soon})
 
-    await secrets.push(host_id, VM, "github", ENTRY, injection)
+    await secrets.push(host, "github", ENTRY)
     route.respond(json={"value": "ghs_two", "expires_at": soon})
-    await secrets.push(host_id, VM, "github", ENTRY, injection)
+    await secrets.push(host, "github", ENTRY)
 
-    assert [call.kwargs["value"] for call in injection.push_secret.await_args_list] == [
+    assert [call.kwargs["value"] for call in holding.push_secret.await_args_list] == [
         "ghs_one",
         "ghs_two",
     ]
@@ -235,35 +245,50 @@ async def test_a_held_value_that_nears_its_end_is_fetched_and_pushed_again(secre
 
 
 @respx.mock
+@pytest.mark.usefixtures("stub_provider")
 async def test_a_push_that_fails_waits_then_goes_again_without_a_new_fetch(secrets, caplog) -> None:
-    injection = _holding_injection()
-    injection.push_secret.side_effect = [ProviderTransportError("sbx is down"), None]
-    host_id = uuid.uuid4()
+    holding = _holding()
+    holding.push_secret.side_effect = [ProviderTransportError("sbx is down"), None]
+    host = _host("stub")
     route = respx.get(ISSUER["url"]).respond(json={"value": "ghs_one"})
 
     with caplog.at_level(logging.WARNING):
-        await secrets.push(host_id, VM, "github", ENTRY, injection)
-    await secrets.push(host_id, VM, "github", ENTRY, injection)
-    assert injection.push_secret.await_count == 1, "a failed push waits"
+        await secrets.push(host, "github", ENTRY)
+    await secrets.push(host, "github", ENTRY)
+    assert holding.push_secret.await_count == 1, "a failed push waits"
     assert "github" in caplog.text and VM in caplog.text and "sbx is down" in caplog.text
     assert "ghs_one" not in caplog.text
 
-    secrets._refreshable[(host_id, "github")].next_attempt = datetime.now(UTC)
-    await secrets.push(host_id, VM, "github", ENTRY, injection)
+    secrets._refreshable[(host.id, "github")].next_attempt = datetime.now(UTC)
+    await secrets.push(host, "github", ENTRY)
 
-    assert injection.push_secret.await_count == 2
-    assert injection.push_secret.await_args.kwargs["value"] == "ghs_one"
+    assert holding.push_secret.await_count == 2
+    assert holding.push_secret.await_args.kwargs["value"] == "ghs_one"
     assert route.call_count == 1
 
 
 @respx.mock
+@pytest.mark.usefixtures("stub_provider")
 async def test_a_fetch_that_fails_pushes_nothing(secrets) -> None:
-    injection = _holding_injection()
+    holding = _holding()
     respx.get(ISSUER["url"]).respond(status_code=500)
 
-    await secrets.push(uuid.uuid4(), VM, "github", ENTRY, injection)
+    await secrets.push(_host("stub"), "github", ENTRY)
 
-    injection.push_secret.assert_not_awaited()
+    holding.push_secret.assert_not_awaited()
+
+
+@respx.mock
+@pytest.mark.usefixtures("stub_provider")
+async def test_a_provider_that_holds_no_value_is_never_pushed(secrets) -> None:
+    stub = get_vm_provider("stub")
+    stub.secrets = MagicMock(needs_value=False, push_secret=AsyncMock())
+    route = respx.get(ISSUER["url"]).respond(json={"value": "ghs_one"})
+
+    await secrets.push(_host("stub"), "github", ENTRY)
+
+    stub.secrets.push_secret.assert_not_awaited()
+    assert route.call_count == 0
 
 
 async def test_a_header_h11_refuses_never_reaches_the_error_chain() -> None:
