@@ -89,7 +89,7 @@ class HostCreate(BaseModel):
             raise ValueError(f"reserved env keys are not allowed: {', '.join(reserved_keys)}")
         # Every provider persists env through /etc/environment. persist raises
         # for any entry pam_env would change or drop.
-        environment.persist(env)
+        environment.get_persist(env)
         return env
 
     _validate_expires_at = field_validator("expires_at")(_expires_at_must_be_future_and_tz_aware)

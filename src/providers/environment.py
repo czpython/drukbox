@@ -15,9 +15,12 @@ _VALUE_RE = re.compile(VALUE_PATTERN)
 # pam_env reads a line into a buffer of 8192 bytes. A `KEY=VALUE\n` line that
 # fills it ends the read, and every entry after it is lost too.
 LINE_LIMIT = 8191
+# The proxy's CA certificate, base64. The box installs it.
+PROXY_CA = "SECRETS_PROXY_CA"
+PROXY_CA_PATH = "/usr/local/share/ca-certificates/drukbox.crt"
 
 
-def export(env: dict[str, str]) -> list[str]:
+def get_export(env: dict[str, str]) -> list[str]:
     """Shell ``export`` lines, one per variable, for the running script."""
     exports: list[str] = []
     for key, value in env.items():
@@ -27,7 +30,7 @@ def export(env: dict[str, str]) -> list[str]:
     return exports
 
 
-def persist(env: dict[str, str]) -> list[str]:
+def get_persist(env: dict[str, str]) -> list[str]:
     """Shell lines that write ``env`` to /etc/environment, so every later
     session gets it from PAM.
 
@@ -49,22 +52,41 @@ def persist(env: dict[str, str]) -> list[str]:
     return lines
 
 
-def bashrc(env: dict[str, str]) -> str:
+def get_bashrc(env: dict[str, str]) -> str:
     """Shell that puts the exports at the top of ~/.bashrc. Every bash session reads them."""
     return "\n".join(
         [
             "cat > ~/.bashrc.new <<'DRUKBOX_ENV'",
-            *export(env),
+            *get_export(env),
             "DRUKBOX_ENV",
             "cat ~/.bashrc >> ~/.bashrc.new && mv ~/.bashrc.new ~/.bashrc",
         ]
     )
 
 
-def cloud_init(setup_script: str, env: dict[str, str] | None) -> str:
-    """The user-data for a cloud VM: a shebang, ``env`` for the setup script
-    and for every later session, then the setup script."""
+def get_install_ca(env: dict[str, str], *, sudo: bool = False) -> list[str]:
+    """Lines after ``export``. A failed install ends the script: a box must not
+    come up without trust in the proxy."""
+    privileged = "sudo -n " if sudo else ""
+    if PROXY_CA in env:
+        return [
+            f"printf '%s' \"${PROXY_CA}\" | base64 -d | {privileged}tee {PROXY_CA_PATH} >/dev/null"
+            " || exit 1",
+            f"{privileged}update-ca-certificates >/dev/null || exit 1",
+        ]
+    return []
+
+
+def get_cloud_init(setup_script: str, env: dict[str, str] | None) -> str:
+    """A shebang, ``env`` for the script and every session, the proxy's CA,
+    then the script."""
     script = setup_script if setup_script.startswith("#!") else f"#!/bin/sh\n{setup_script}"
     shebang, _, body = script.partition("\n")
-    lines = [shebang, *export(env or {}), *persist(env or {}), body]
+    lines = [
+        shebang,
+        *get_export(env or {}),
+        *get_persist(env or {}),
+        *get_install_ca(env or {}),
+        body,
+    ]
     return "\n".join(line for line in lines if line)

@@ -34,7 +34,7 @@ def _bootstrap_script(*, public_key: str, env: dict[str, str], ssh_username: str
         f"chown {owner}:{owner} {home}/.ssh/authorized_keys",
     ]
     # The runtime takes no environment at create time. pam_env reads this file.
-    return "\n".join([*lines, *environment.persist(env)]) + "\n"
+    return "\n".join([*lines, *environment.get_persist(env)]) + "\n"
 
 
 class DockerSbxProvider(VMProvider, TemplateCapability):
@@ -94,7 +94,7 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
 
         caller_env = env or {}
         try:
-            environment.persist(caller_env)
+            environment.get_persist(caller_env)
         except ValueError as exc:
             raise ProviderCommandError(str(exc)) from exc
 

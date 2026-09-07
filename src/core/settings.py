@@ -56,6 +56,14 @@ class Settings(BaseSettings):
             "The proxy swaps the sandbox's placeholder for the real credential."
         ),
     )
+    secrets_proxy_ca_file: str = Field(
+        default="",
+        validation_alias="SECRETS_PROXY_CA_FILE",
+        description=(
+            "Path of the proxy's public CA certificate, from the proxy's volume. "
+            "A sandbox with secrets installs it at boot."
+        ),
+    )
 
     service_label: str = Field(
         default="drukbox",

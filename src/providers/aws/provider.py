@@ -107,7 +107,7 @@ class AWSProvider(VMProvider):
                 await self.api.delete_key_pair(key_name)
                 raise ProviderTransportError(str(exc)) from exc
 
-        user_data = environment.cloud_init(setup_script or "", env)
+        user_data = environment.get_cloud_init(setup_script or "", env)
         try:
             instance_id = await self.api.run_instance(
                 client_token=name,

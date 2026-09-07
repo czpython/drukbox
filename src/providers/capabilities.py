@@ -1,15 +1,23 @@
 import abc
+import base64
+import pathlib
 from typing import ClassVar, TypeVar
+
+from cryptography import x509
+from cryptography.hazmat.primitives.serialization import Encoding
 
 from core.settings import get_settings
 from host_secrets.catalog import Service
 from host_secrets.placeholder import Placeholder
-from providers.exceptions import CapabilityUnsupportedError
+from providers import environment
+from providers.exceptions import CapabilityUnsupportedError, ProviderCommandError
 
 CapabilityT = TypeVar("CapabilityT")
 
 # The box itself and the cloud metadata address.
 NO_PROXY = "localhost,127.0.0.1,::1,169.254.169.254"
+# update-ca-certificates writes the system bundle here.
+SYSTEM_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 
 def resolve_capability(provider, capability: type[CapabilityT]) -> CapabilityT:
@@ -42,7 +50,8 @@ class SecretInjectionCapability(abc.ABC):
 
 
 class ProxyInjection(SecretInjectionCapability):
-    """The box sends its HTTPS through the proxy, which swaps the placeholder."""
+    """The box sends its HTTPS through the proxy, which swaps the placeholder.
+    It gets the proxy's CA and the trust variables."""
 
     needs_value = False
 
@@ -54,16 +63,38 @@ class ProxyInjection(SecretInjectionCapability):
         placeholder: Placeholder,
         value: str,
     ) -> dict[str, str]:
-        proxy = get_settings().secrets_proxy_url
+        settings = get_settings()
         return {
             service["auth_variable"]: str(placeholder),
-            "HTTPS_PROXY": proxy,
-            "https_proxy": proxy,
+            "HTTPS_PROXY": settings.secrets_proxy_url,
+            "https_proxy": settings.secrets_proxy_url,
             "NO_PROXY": NO_PROXY,
+            environment.PROXY_CA: base64.b64encode(self.get_public_certificate()).decode(),
+            "SSL_CERT_FILE": SYSTEM_CA_BUNDLE,
+            "REQUESTS_CA_BUNDLE": SYSTEM_CA_BUNDLE,
+            "CURL_CA_BUNDLE": SYSTEM_CA_BUNDLE,
+            "NODE_EXTRA_CA_CERTS": environment.PROXY_CA_PATH,
         }
 
     async def delete_secret(self, *, vm: str, placeholder: Placeholder) -> None:
         return
+
+    def get_public_certificate(self) -> bytes:
+        """mitmproxy writes the key and the certificate into one file and the
+        certificate alone into another. Only the second may reach a box."""
+        path = get_settings().secrets_proxy_ca_file
+        try:
+            pem = pathlib.Path(path).read_bytes()
+            certificate = x509.load_pem_x509_certificate(pem)
+        except (OSError, ValueError) as exc:
+            raise ProviderCommandError(
+                f"SECRETS_PROXY_CA_FILE does not name a readable certificate: {exc}"
+            ) from exc
+        if b"PRIVATE KEY" in pem:
+            raise ProviderCommandError(
+                "SECRETS_PROXY_CA_FILE holds a private key. Name the public certificate only."
+            )
+        return certificate.public_bytes(Encoding.PEM)
 
 
 class TemplateCapability(abc.ABC):
