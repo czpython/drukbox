@@ -268,36 +268,61 @@ settings. The policy needs `ec2:RunInstances`,
 Drukbox tags everything it creates with `managed-by=<SERVICE_LABEL>`,
 so write permissions can be tag-scoped.
 
-## The secrets exchange
+## The secrets exchange and the secrets proxy
 
-A sandbox never holds a real third-party credential. It holds a placeholder.
-It sends every request for a registered service to the secrets exchange. The
-exchange swaps the placeholder for the real credential and forwards the
-request to the service. Two pieces run the exchange:
+A sandbox never holds a real third-party credential. It holds a placeholder,
+and it sends its HTTPS through the secrets proxy. The proxy swaps the
+placeholder for the real credential on the way out. Two pieces run this:
 
-- **Caddy** runs the snippet in `deploy/caddy/secrets_exchange.caddy`. Stock
-  Caddy is enough. Import the file before the site that uses it. Then import
-  the snippet into the site, with the address of the exchange process as the
-  argument.
+- **The proxy** is the official `mitmproxy/mitmproxy` image with the addon
+  `deploy/proxy/swap.py` mounted in. It terminates TLS only for the hosts
+  that have a registered secret and tunnels every other host blind. It
+  refuses a destination that resolves to a loopback, private, link-local, or
+  metadata address. It makes its CA on first start and keeps it in a volume.
 - **The exchange process** runs as `python -m secrets_exchange` from this
-  image. On every request, Caddy asks it with `forward_auth`. The process
-  answers with the upstream host, the header that host reads, and the real
-  credential. Or it refuses. Its answer is the credential, so bind it where
-  only Caddy can reach it.
+  image. The proxy asks it which hosts to terminate, and, for a request with
+  a placeholder, for the header the upstream reads and the real credential.
+  Its answer is the credential, so bind it where only the proxy can reach it.
 
+```yaml
+services:
+  exchange:
+    image: ghcr.io/czpython/drukbox:latest
+    command: [".venv/bin/python", "-m", "secrets_exchange"]
+    env_file: drukbox.env
+    environment:
+      SECRETS_EXCHANGE_BIND_HOST: 0.0.0.0
+
+  proxy:
+    image: mitmproxy/mitmproxy:12.2.3
+    command:
+      - mitmdump
+      - --listen-host=0.0.0.0
+      - --listen-port=8880
+      - --set=exchange_url=http://exchange:8781
+      - --set=flow_detail=1
+      - -s=/addon/swap.py
+    ports:
+      - "8880:8880"
+    volumes:
+      - ./deploy/proxy/swap.py:/addon/swap.py:ro
+      - secrets-proxy-ca:/home/mitmproxy/.mitmproxy
+
+volumes:
+  secrets-proxy-ca:
 ```
-import /etc/caddy/secrets_exchange.caddy
 
-secrets.example.com {
-    import secrets_exchange http://127.0.0.1:8781
-}
-```
+The exchange binds `0.0.0.0` inside the compose network and publishes no
+port, so only the proxy reaches it. The public certificate of the CA in the
+volume is what a sandbox must trust for the hosts with a secret. Keep `flow_detail` at `1` or below. A
+higher level prints request headers, and after the swap those carry the
+real credential. Real credentials exist in three places only. They are
+encrypted in Postgres, they pass through the exchange process for one
+request, and they pass through the proxy for one request.
 
-The snippet has one route, `/<host>/*`, for every service, built in or
-custom. The file is static. It does not change when you register a service.
-Real credentials exist in three places only. They are encrypted in Postgres,
-they pass through the exchange process for one request, and they pass through
-Caddy for one request. Caddy does not log them.
+The proxy is opt in. A deployment with only docker-sbx starts none, since
+sbx does the swap itself. The exchange process runs there too, because it
+fetches issuer values.
 
 `SECRETS_PROXY_URL` is the proxy a sandbox sends its HTTPS through. Every
 provider but docker-sbx sets `HTTPS_PROXY` in the sandbox to it. For local
@@ -384,7 +409,7 @@ Secrets exchange:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SECRETS_PROXY_URL` | — | Proxy a sandbox sends its HTTPS through. Required to create a host with secrets on every provider but docker-sbx. |
-| `SECRETS_EXCHANGE_BIND_HOST` | `127.0.0.1` | Interface the exchange process binds. Bind it where only Caddy can reach it. |
+| `SECRETS_EXCHANGE_BIND_HOST` | `127.0.0.1` | Interface the exchange process binds. Bind it where only the proxy can reach it. |
 | `SECRETS_EXCHANGE_PORT` | `8781` | Port the exchange process listens on. |
 
 Tailscale (required when `TAILSCALE_ENABLED=true`):

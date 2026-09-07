@@ -4,16 +4,12 @@ from pydantic import ValidationError
 from host_secrets.schemas import SecretEntry
 
 
-def _issuer(
-    *,
-    url: str = "https://mint.example.test/token",
-    headers: dict[str, str] | None = None,
-    refresh: str = "50m",
-) -> dict[str, object]:
+def _issuer(**overrides: object) -> dict[str, object]:
     return {
-        "url": url,
-        "headers": headers if headers is not None else {"Authorization": "Bearer secret"},
-        "refresh": refresh,
+        "url": "https://mint.example.test/token",
+        "headers": {"Authorization": "Bearer secret"},
+        "refresh": "50m",
+        **overrides,
     }
 
 
@@ -55,8 +51,6 @@ def test_custom_entry_stores_the_whole_service_with_bearer_defaults() -> None:
         "auth_header": "Authorization",
         "auth_prefix": "Bearer ",
         "auth_variable": "ACME_TOKEN",
-        "endpoint_var": "",
-        "base_path": "",
         "value": "static-secret",
     }
 
@@ -68,7 +62,6 @@ def test_custom_entry_can_override_the_auth_shape() -> None:
             "auth_header": "x-api-key",
             "auth_prefix": "",
             "auth_variable": "ACME_TOKEN",
-            "endpoint_var": "ACME_BASE_URL",
             "value": "static-secret",
         }
     )
@@ -78,8 +71,6 @@ def test_custom_entry_can_override_the_auth_shape() -> None:
         "auth_header": "x-api-key",
         "auth_prefix": "",
         "auth_variable": "ACME_TOKEN",
-        "endpoint_var": "ACME_BASE_URL",
-        "base_path": "",
         "value": "static-secret",
     }
 
@@ -92,7 +83,6 @@ def test_custom_entry_can_override_the_auth_shape() -> None:
         {"host": "api.acme.test", "value": "one"},
         {"auth_variable": "ACME_TOKEN", "value": "one"},
         {"auth_prefix": "", "value": "one"},
-        {"endpoint_var": "", "value": "one"},
         {"placeholder": "managed", "value": "one"},
         {"host": "api.acme.test", "auth_variable": "not a variable", "value": "one"},
     ],

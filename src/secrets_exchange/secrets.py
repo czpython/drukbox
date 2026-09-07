@@ -36,10 +36,6 @@ class Secret(BaseModel):
     expires_at: AwareDatetime | None = None
 
     @classmethod
-    def static(cls, value: str) -> Self:
-        return cls(value=value)
-
-    @classmethod
     async def fetch(cls, issuer: dict[str, Any], client: httpx.AsyncClient) -> Self:
         try:
             response = await client.get(issuer["url"], headers=issuer["headers"])
@@ -79,16 +75,15 @@ class RefreshableSecret:
     wait: timedelta = FIRST_RETRY
 
     async def refresh(self, issuer: dict[str, Any], client: httpx.AsyncClient) -> None:
-        if datetime.now(UTC) < self.next_attempt:
-            return
-        try:
-            self.latest = await Secret.fetch(issuer, client)
-        except IssuerError as exc:
-            logger.warning("issuer %s failed: %s", issuer["url"], exc)
-            self.next_attempt = datetime.now(UTC) + self.wait
-            self.wait = min(self.wait * 2, LONGEST_RETRY)
-        else:
-            self.wait = FIRST_RETRY
+        if datetime.now(UTC) >= self.next_attempt:
+            try:
+                self.latest = await Secret.fetch(issuer, client)
+            except IssuerError as exc:
+                logger.warning("issuer %s failed: %s", issuer["url"], exc)
+                self.next_attempt = datetime.now(UTC) + self.wait
+                self.wait = min(self.wait * 2, LONGEST_RETRY)
+            else:
+                self.wait = FIRST_RETRY
 
     def refresh_in_background(self, issuer: dict[str, Any], client: httpx.AsyncClient) -> None:
         if not self.fetching:
@@ -106,7 +101,7 @@ class Secrets:
 
     async def current(self, host_id: uuid.UUID, service: str, entry: dict[str, Any]) -> Secret:
         if "value" in entry:
-            return Secret.static(entry["value"])
+            return Secret(value=entry["value"])
         refreshable = self._refreshable.setdefault((host_id, service), RefreshableSecret())
         now = datetime.now(UTC)
         if refreshable.latest and refreshable.latest.is_valid(now):

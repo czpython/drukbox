@@ -104,13 +104,18 @@ is never stored. The exchange process keeps it in memory and fetches it again
 whenever it needs to, on first use and after a restart.
 
 A sandbox holds a placeholder, never the credential. The placeholder works
-only at the secrets exchange, and only for the host and the service it names.
+only at the secrets proxy, and only for the host and the service it names.
 The entry stores a fingerprint of it, so a database read cannot replay it. The
 exchange refuses with `403` on any mismatch. It never answers `401`, because
 git answers a `401` with a retry through its own credential store. The
-exchange decides the upstream host, not the sandbox. Caddy drops a forged
-upstream header from the sandbox. Bind the exchange process where only Caddy
-can reach it, because its answer is the real credential.
+exchange decides the header and the credential, and the proxy swaps that one
+header on the host the exchange approved. The proxy refuses a destination
+that resolves to a loopback, private, link-local, or metadata address, so a
+sandbox cannot reach the exchange or the API through it. Bind the exchange
+process where only the proxy can reach it, because its answer is the real
+credential. The sandbox trusts the proxy's CA for the hosts with a secret, so
+whoever holds the CA key can impersonate those hosts to the sandbox. The key
+lives in the proxy's volume.
 
 Two pieces of material reach the VM through its provider's user-data /
 setup-script mechanism, and that channel is the relevant exposure:
