@@ -144,7 +144,8 @@ It terminates TLS only for the hosts the exchange lists at `/upstreams`, the
 hosts with a registered secret, and tunnels every other host blind. For a
 request with a placeholder it asks the exchange at `/authorize`, with the
 placeholder and the destination host, for the header the upstream reads and
-the real credential. It swaps that one header and streams the request on.
+the real credential. It swaps every header that carries a placeholder and
+streams the request on. One refusal refuses the whole request.
 A destination that resolves to a loopback, private, link-local, or metadata
 address is refused, so a sandbox cannot reach the exchange or the API through
 the proxy. Every connection goes to the address the proxy checked, and the
