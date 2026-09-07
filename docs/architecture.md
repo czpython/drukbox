@@ -32,7 +32,7 @@ hosts.service      host lifecycle behavior (HostService)
 host_secrets.api   host secret registration concerns only
 host_secrets       built-in catalog, placeholders, delivery at provisioning
 secrets_exchange   the secrets exchange process behind the secrets proxy
-deploy/proxy       the secrets proxy addon, run by the official mitmproxy image
+deploy/proxy       the secrets proxy addon and the Dockerfile of its image
 templates.api      template request/response concerns only
 templates.service  template build and delete behavior (TemplateService)
 providers/<name>   one package per VM provider
@@ -139,7 +139,7 @@ and the proxy's CA in `SECRETS_PROXY_CA`, which it installs at boot. A box
 with a `github` secret also points git at gh for its credential and rewrites
 SSH remotes to HTTPS, so git sends the placeholder as a Basic password and
 the proxy swaps it.
-The proxy is the official mitmproxy image with the addon in `deploy/proxy`.
+The proxy is the official mitmproxy image with the addon in `deploy/proxy` built in.
 It terminates TLS only for the hosts the exchange lists at `/upstreams`, the
 hosts with a registered secret, and tunnels every other host blind. For a
 request with a placeholder it asks the exchange at `/authorize`, with the

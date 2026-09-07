@@ -8,7 +8,9 @@ behind these defaults, read [Security](security.md).
 
 One image serves everything — API, maintenance commands, migrations.
 It's published to `ghcr.io/czpython/drukbox` on every release; build
-`docker build -t ghcr.io/czpython/drukbox .` only to run a local change.
+`docker build -t ghcr.io/czpython/drukbox .` only to run a local change. The
+secrets proxy image, `ghcr.io/czpython/drukbox/proxy`, is published beside it
+with the same tags.
 
 ```bash
 IMAGE=ghcr.io/czpython/drukbox:latest
@@ -274,8 +276,11 @@ A sandbox never holds a real third-party credential. It holds a placeholder,
 and it sends its HTTPS through the secrets proxy. The proxy swaps the
 placeholder for the real credential on the way out. Two pieces run this:
 
-- **The proxy** is the official `mitmproxy/mitmproxy` image with the addon
-  `deploy/proxy/swap.py` mounted in. It terminates TLS only for the hosts
+- **The proxy** is `ghcr.io/czpython/drukbox/proxy`: the official
+  `mitmproxy/mitmproxy` image with the addon `deploy/proxy/swap.py` built in.
+  It listens on 8880 and reads the exchange address from
+  `SECRETS_EXCHANGE_URL`. A checkout can mount the addon into the official
+  image instead. It terminates TLS only for the hosts
   that have a registered secret and tunnels every other host blind. It
   refuses a destination that resolves to a loopback, private, link-local, or
   metadata address. It makes its CA on first start and keeps it in a volume.
@@ -294,18 +299,12 @@ services:
       SECRETS_EXCHANGE_BIND_HOST: 0.0.0.0
 
   proxy:
-    image: mitmproxy/mitmproxy:12.2.3
-    command:
-      - mitmdump
-      - --listen-host=0.0.0.0
-      - --listen-port=8880
-      - --set=exchange_url=http://exchange:8781
-      - --set=flow_detail=1
-      - -s=/addon/swap.py
+    image: ghcr.io/czpython/drukbox/proxy:latest
+    environment:
+      SECRETS_EXCHANGE_URL: http://exchange:8781
     ports:
       - "8880:8880"
     volumes:
-      - ./deploy/proxy/swap.py:/addon/swap.py:ro
       - secrets-proxy-ca:/home/mitmproxy/.mitmproxy
 
 volumes:
