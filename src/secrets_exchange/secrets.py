@@ -137,6 +137,11 @@ class Secrets:
         self._client = client
         self._refreshable: dict[tuple[uuid.UUID, str], RefreshableSecret] = {}
 
+    def forget_deleted_hosts(self, existing: set[uuid.UUID]) -> None:
+        self._refreshable = {
+            key: secret for key, secret in self._refreshable.items() if key[0] in existing
+        }
+
     async def current(self, host_id: uuid.UUID, service: str, entry: dict[str, Any]) -> Secret:
         if "value" in entry:
             return Secret(value=entry["value"])

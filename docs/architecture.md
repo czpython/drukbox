@@ -127,6 +127,7 @@ value is still valid. With nothing valid in memory it answers `503`.
 A provider that holds the value never asks the exchange. For it, a timer
 fetches a fresh value when less than a minute of the pushed one remains and
 hands it to `push_secret`. A push that fails waits like a fetch that fails.
+A host that is gone is forgotten on the next pass.
 
 Provisioning mints a placeholder per secret. The placeholder names the host
 and the service, `drk.<host id>.<service>.<random>`. The entry keeps only a
@@ -153,7 +154,8 @@ the value in sbx's own secret store for that sandbox, and sbx's proxy swaps
 the placeholder on the way out. sbx reads the value file at each use, so a
 pushed value is a rewritten file. Host deletion calls `delete_secrets` for the
 box before the VM goes, so nothing the seam put anywhere outlives the box. It
-never reads the row's secrets, so a lost key cannot block a teardown.
+never reads the row's secrets, so a lost key cannot block a teardown. The
+janitor deletes an expired host through the same path.
 
 A template is a persistent provider image keyed by provider, base image,
 and setup-script hash. `POST /templates` creates a `building` record and

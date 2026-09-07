@@ -71,7 +71,12 @@ class SbxInjection(SecretInjectionCapability):
                 await self.api.remove_custom_secret(sandbox=vm, placeholder=placeholder)
         except DockerSbxProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
-        shutil.rmtree(self.secrets_root / vm, ignore_errors=True)
+        try:
+            shutil.rmtree(self.secrets_root / vm)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise ProviderCommandError(f"cannot remove the value files: {exc}") from exc
 
     def write_value(self, vm: str, name: str, value: str) -> Path:
         """Replace the value file whole, so sbx never reads a half-written one."""
