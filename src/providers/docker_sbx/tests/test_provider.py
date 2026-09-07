@@ -10,6 +10,7 @@ from providers.docker_sbx.exceptions import (
     DockerSbxTransportError,
 )
 from providers.docker_sbx.provider import DockerSbxProvider
+from providers.docker_sbx.secrets import SbxInjection
 from providers.docker_sbx.settings import DockerSbxSettings
 from providers.exceptions import (
     ProviderCommandError,
@@ -59,13 +60,10 @@ async def test_create_vm_creates_a_sized_sandbox_and_returns_key_material(tmp_pa
     assert create_kwargs["template"] == "drukbox/sbx-sandbox:latest"
     assert create_kwargs["cpus"] == 4
     assert create_kwargs["memory"] == "8g"
-    # The daemon reads the workspace path on its own filesystem. The
-    # directory must exist before the sandbox creation.
+    # The daemon reads the workspace on its own filesystem.
     assert create_kwargs["workspace"] == str(tmp_path / "sb-test")
     assert (tmp_path / "sb-test").is_dir()
 
-    # The sandbox has no reachable address of its own; the service fills
-    # the gateway coordinates in.
     assert result.ssh_host == ""
     assert result.ssh_port == 0
     assert result.ssh_username == "root"
@@ -86,7 +84,6 @@ async def test_create_vm_bootstrap_installs_the_public_key_and_caller_env(tmp_pa
     assert name == "sb-test"
     assert "ssh-ed25519 " in script
     assert "/root/.ssh/authorized_keys" in script
-    # The caller environment goes to SSH sessions through pam_env.
     assert "API_TOKEN=s3cr3t" in script
     assert "/etc/environment" in script
 
@@ -99,8 +96,7 @@ async def test_create_vm_installs_the_key_for_the_configured_ssh_user(tmp_path):
     result = await provider.create_vm(name="sb-test", image="img", env={})
 
     _, script = api.run_bootstrap.await_args.args
-    # The key must go where sshd examines it for the given user. If not,
-    # the host becomes ACTIVE but refuses each login.
+    # sshd reads the key for the given user only.
     assert "/home/dev/.ssh/authorized_keys" in script
     assert result.ssh_username == "dev"
 
@@ -110,8 +106,6 @@ async def test_create_vm_rejects_setup_script_because_tailscale_is_unsupported(t
     api = _api_mock()
     provider = _provider(api, _settings(tmp_path))
 
-    # The service does not send a script, because supports_tailnet is
-    # False. This guard finds a defect in the caller.
     with pytest.raises(ProviderCommandError, match="Tailscale"):
         await provider.create_vm(name="sb-test", image="img", env={}, setup_script="#!/bin/sh\n")
     api.create_sandbox.assert_not_called()
@@ -134,19 +128,22 @@ async def test_create_vm_cleans_up_when_the_sandbox_cannot_be_created(tmp_path):
     api.create_sandbox.side_effect = DockerSbxTransportError("daemon unavailable")
     provider = _provider(api, _settings(tmp_path))
 
+    value = tmp_path / "secrets" / "sb-test" / "anthropic"
+    value.parent.mkdir(parents=True)
+    value.write_text("sk-ant-real")
+
     with pytest.raises(ProviderTransportError):
         await provider.create_vm(name="sb-test", image="img", env={})
-    # The CLI can stop after the daemon makes the sandbox. A failed create
-    # also tries the removal.
+    # The CLI can fail after the daemon made the sandbox.
     api.remove_sandbox.assert_awaited_once_with("sb-test")
     assert not (tmp_path / "sb-test").exists()
+    assert not value.parent.exists()
 
 
 @pytest.mark.asyncio
 async def test_create_vm_translates_an_unwritable_workspace_root(tmp_path):
     api = _api_mock()
-    # A file at the workspace root location makes mkdir fail. The error is
-    # the same OSError type as for a missing bind mount.
+    # A file where the root should be fails like a missing bind mount.
     blocked_root = tmp_path / "blocked"
     blocked_root.touch()
     provider = _provider(api, _settings(blocked_root))
@@ -158,8 +155,6 @@ async def test_create_vm_translates_an_unwritable_workspace_root(tmp_path):
 
 @pytest.mark.asyncio
 async def test_create_vm_tears_down_after_a_failed_bootstrap_and_keeps_the_first_error(tmp_path):
-    # The cleanup of the sandbox can itself fail. The caller must get the
-    # first error, and the workspace must still go.
     api = _api_mock()
     api.run_bootstrap.side_effect = DockerSbxTransportError("exec failed")
     api.remove_sandbox.side_effect = DockerSbxTransportError("cleanup failed")
@@ -171,45 +166,61 @@ async def test_create_vm_tears_down_after_a_failed_bootstrap_and_keeps_the_first
     assert not (tmp_path / "sb-test").exists()
 
 
-@pytest.mark.asyncio
-async def test_delete_vm_removes_the_sandbox_and_its_workspace(tmp_path):
-    api = _api_mock()
-    workspace = tmp_path / "sb-test"
+def _sandbox_files(root: Path) -> tuple[Path, Path]:
+    workspace = root / "sb-test"
     workspace.mkdir(parents=True)
+    value = root / "secrets" / "sb-test" / "anthropic"
+    value.parent.mkdir(parents=True)
+    value.write_text("sk-ant-real")
+    return workspace, value
+
+
+def test_the_value_files_live_beside_the_workspaces(tmp_path):
+    provider = _provider(_api_mock(), _settings(tmp_path))
+
+    injection = provider.secrets
+    assert isinstance(injection, SbxInjection)
+    assert injection.secrets_root == provider.secrets_root == tmp_path / "secrets"
+
+
+@pytest.mark.asyncio
+async def test_delete_vm_removes_the_sandbox_its_workspace_and_its_value_files(tmp_path):
+    api = _api_mock()
+    workspace, value = _sandbox_files(tmp_path)
     provider = _provider(api, _settings(tmp_path))
 
     await provider.delete_vm("sb-test")
 
     api.remove_sandbox.assert_awaited_once_with("sb-test")
     assert not workspace.exists()
+    assert not value.parent.exists()
 
 
 @pytest.mark.asyncio
-async def test_delete_vm_drops_the_workspace_of_a_sandbox_that_never_existed(tmp_path):
+async def test_delete_vm_drops_the_files_of_a_sandbox_that_never_existed(tmp_path):
     api = _api_mock()
     api.remove_sandbox.side_effect = DockerSbxNotFoundError("sandbox 'sb-test' not found")
-    workspace = tmp_path / "sb-test"
-    workspace.mkdir(parents=True)
+    workspace, value = _sandbox_files(tmp_path)
     provider = _provider(api, _settings(tmp_path))
 
     with pytest.raises(ProviderNotFoundError):
         await provider.delete_vm("sb-test")
     assert not workspace.exists()
+    assert not value.parent.exists()
 
 
 @pytest.mark.asyncio
-async def test_delete_vm_keeps_the_workspace_when_teardown_fails(tmp_path):
-    # The sandbox may still be running on the workspace, and HostService keeps
-    # the row so deletion can be retried.
+async def test_delete_vm_keeps_the_files_when_teardown_fails(tmp_path):
+    # The sandbox still runs on its workspace.
     api = _api_mock()
     api.remove_sandbox.side_effect = DockerSbxTransportError("daemon unavailable")
-    workspace = tmp_path / "sb-test"
-    workspace.mkdir(parents=True)
+    workspace, value = _sandbox_files(tmp_path)
     provider = _provider(api, _settings(tmp_path))
 
     with pytest.raises(ProviderTransportError):
         await provider.delete_vm("sb-test")
     assert workspace.is_dir()
+    assert value.is_file()
 
 
 @pytest.mark.asyncio

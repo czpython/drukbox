@@ -4,24 +4,16 @@ import re
 
 from .exceptions import DockerSbxNotFoundError, DockerSbxTransportError
 
-# The first `sbx create` can pull a large template. The time limit is large
-# because it must stop only a blocked daemon, not a slow pull.
+# Long enough for a template pull. It stops a blocked daemon only.
 _SBX_TIMEOUT_SECONDS = 600.0
 
-# Only the CLI message for a missing sandbox is a not-found error. Messages
-# such as "credentials not found" must stay transport errors. If not,
-# delete_vm can identify a live sandbox as removed.
+# "credentials not found" must stay a transport error, or delete_vm takes a
+# live sandbox for a removed one.
 _SANDBOX_NOT_FOUND_RE = re.compile(r"sandbox '[^']*' not found")
 
 
 class SbxCLI:
-    """Thin async wrapper for the local ``sbx`` command-line interface.
-
-    Each method starts ``sbx`` with ``create_subprocess_exec``. Thus the
-    subprocess boundary stays in one place. The CLI selects the daemon: the
-    user socket by default, or the socket that ``DOCKER_SANDBOXES_API`` gives
-    when drukbox runs in a container.
-    """
+    """The local ``sbx`` command. ``DOCKER_SANDBOXES_API`` selects the daemon."""
 
     async def create_sandbox(
         self,
@@ -32,9 +24,8 @@ class SbxCLI:
         cpus: int,
         memory: str,
     ) -> None:
-        # The `shell` agent makes the sandbox start the template entrypoint,
-        # not an AI agent. The sizes are always explicit. Without them, the
-        # daemon gives one sandbox all host CPUs and half of the host memory.
+        # The `shell` agent starts the template entrypoint. Without sizes the
+        # daemon gives one sandbox all CPUs and half of the memory.
         await self._run(
             "create",
             "--name",
@@ -51,9 +42,7 @@ class SbxCLI:
         )
 
     async def run_bootstrap(self, name: str, script: str) -> None:
-        # The script contains caller environment values. All processes can
-        # read argv through /proc. Thus the script goes through stdin, not
-        # argv. `bash -s` reads the program from stdin.
+        # The script holds caller values, and every process can read argv.
         await self._run(
             "exec",
             "--interactive",
@@ -66,15 +55,49 @@ class SbxCLI:
         )
 
     async def remove_sandbox(self, name: str) -> None:
-        # The --force flag stops the confirmation prompt. It also removes a
-        # sandbox that has an open SSH session.
+        # --force also removes a sandbox with an open SSH session.
         await self._run("rm", "--force", name)
+
+    async def set_secret(self, service: str, *, sandbox: str, command: str) -> None:
+        # --token would put the value in argv, which every process can read.
+        await self._run("secret", "set", service, "--sandbox", sandbox, "--command", command)
+
+    async def set_custom_secret(
+        self,
+        *,
+        sandbox: str,
+        host: str,
+        env: str,
+        placeholder: str,
+        command: str,
+    ) -> None:
+        await self._run(
+            "secret",
+            "set-custom",
+            "--sandbox",
+            sandbox,
+            "--host",
+            host,
+            "--env",
+            env,
+            "--placeholder",
+            placeholder,
+            "--command",
+            command,
+        )
+
+    async def remove_secret(self, service: str, *, sandbox: str) -> None:
+        # Without -f the CLI waits for a confirmation.
+        await self._run("secret", "rm", "-f", service, "--sandbox", sandbox)
+
+    async def remove_custom_secret(self, *, sandbox: str, placeholder: str) -> None:
+        await self._run("secret", "rm", "-f", "--placeholder", placeholder, "--sandbox", sandbox)
 
     async def sandbox_count(self) -> int:
         output = await self._run("ls", "--json")
         try:
             payload = json.loads(output)
-            # Go writes an empty list as null. An unused daemon shows null.
+            # Go writes an empty list as null.
             return len(payload["sandboxes"] or [])
         except (json.JSONDecodeError, KeyError, TypeError) as error:
             raise DockerSbxTransportError(
@@ -91,9 +114,6 @@ class SbxCLI:
                 stderr=asyncio.subprocess.PIPE,
             )
         except OSError as error:
-            # The binary can be missing (FileNotFoundError) or not executable
-            # (PermissionError). Translate each OSError type. A raw OSError
-            # must not go out of the provider boundary.
             raise DockerSbxTransportError(f"sbx CLI could not be started: {error}") from error
         try:
             stdout, stderr = await asyncio.wait_for(

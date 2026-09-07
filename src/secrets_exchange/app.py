@@ -76,7 +76,7 @@ async def authorize(
         status_code=status.HTTP_200_OK,
         headers={
             UPSTREAM_HOST: service["host"],
-            UPSTREAM_HEADER: service["credential_header"],
-            UPSTREAM_CREDENTIAL: f"{service['credential_prefix']}{secret.value}",
+            UPSTREAM_HEADER: service["auth_header"],
+            UPSTREAM_CREDENTIAL: f"{service['auth_prefix']}{secret.value}",
         },
     )

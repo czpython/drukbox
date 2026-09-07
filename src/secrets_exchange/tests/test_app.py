@@ -49,9 +49,9 @@ async def test_a_custom_service_gets_its_own_header_shape(edge) -> None:
         {
             "acme": {
                 "host": "api.acme.test",
-                "credential_header": "x-api-key",
-                "credential_prefix": "",
-                "credential_var": "ACME_TOKEN",
+                "auth_header": "x-api-key",
+                "auth_prefix": "",
+                "auth_variable": "ACME_TOKEN",
                 "endpoint_var": "",
                 "base_path": "",
                 "value": "ak_live",

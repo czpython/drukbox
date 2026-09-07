@@ -7,9 +7,7 @@ from providers.base import VMCreateResult, VMProvider
 
 
 class StubVMProvider(VMProvider):
-    """A registry-installable provider for exercising per-call selection
-    without a real backend. Records teardown so tests can assert delete
-    routed to the host's own provider."""
+    """A provider on the registry with no backend. Records its deletions."""
 
     name = "stub"
     diagnose_hint = "check_stub"

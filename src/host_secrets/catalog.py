@@ -5,9 +5,9 @@ BEARER_PREFIX = "Bearer "
 SERVICE_FIELDS = frozenset(
     {
         "host",
-        "credential_header",
-        "credential_prefix",
-        "credential_var",
+        "auth_header",
+        "auth_prefix",
+        "auth_variable",
         "endpoint_var",
         "base_path",
     }
@@ -16,22 +16,21 @@ SERVICE_FIELDS = frozenset(
 
 class Service(TypedDict):
     host: str
-    credential_header: str
-    credential_prefix: str
-    credential_var: str
-    # Empty when the client has no base URL variable, so endpoint
-    # substitution cannot reach the service.
+    auth_header: str
+    auth_prefix: str
+    auth_variable: str
+    # Empty when the client has no base URL variable.
     endpoint_var: str
-    # What the client expects after the host in its base URL, "/v1" for OpenAI.
+    # "/v1" for OpenAI.
     base_path: str
 
 
-def bearer(host: str, credential_var: str, endpoint_var: str = "", base_path: str = "") -> Service:
+def bearer(host: str, auth_variable: str, endpoint_var: str = "", base_path: str = "") -> Service:
     return {
         "host": host,
-        "credential_header": BEARER_HEADER,
-        "credential_prefix": BEARER_PREFIX,
-        "credential_var": credential_var,
+        "auth_header": BEARER_HEADER,
+        "auth_prefix": BEARER_PREFIX,
+        "auth_variable": auth_variable,
         "endpoint_var": endpoint_var,
         "base_path": base_path,
     }
@@ -44,7 +43,13 @@ CATALOG: dict[str, Service] = {
 }
 
 
-def service(name: str, entry: dict[str, Any]) -> dict[str, str]:
-    """The service an entry reaches: host, header, variables, base path."""
-    fields: dict[str, Any] = entry if "host" in entry else dict(CATALOG[name])
-    return {"name": name, **{field: fields[field] for field in SERVICE_FIELDS}}
+def service(name: str, entry: dict[str, Any]) -> Service:
+    fields = entry if "host" in entry else CATALOG[name]
+    return {
+        "host": fields["host"],
+        "auth_header": fields["auth_header"],
+        "auth_prefix": fields["auth_prefix"],
+        "auth_variable": fields["auth_variable"],
+        "endpoint_var": fields["endpoint_var"],
+        "base_path": fields["base_path"],
+    }
