@@ -64,7 +64,7 @@ dependencies = [
     "pydantic-settings>=2.8",
     "psycopg[binary]>=3.2",
     "sqlalchemy[asyncio]>=2.0",
-    "sqlalchemy-encrypted-field==1.0.1",
+    "sqlalchemy-encrypted-field==1.0.2",
     "uuid6>=2024.7.10",
     "uvicorn[standard]>=0.34",
 ]
