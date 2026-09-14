@@ -93,7 +93,7 @@ async def test_docker_host_stays_local_on_a_tailnet_mode_service(
 ) -> None:
     # TAILSCALE_ENABLED=true serves remote VMs over the tailnet, but a local
     # container has no path onto it — a docker host skips the join entirely
-    # and keeps its published 127.0.0.1 port as the only path.
+    # and keeps its published port as the only path.
     tailscale = AsyncMock()
 
     create_vm = AsyncMock(

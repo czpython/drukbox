@@ -2,6 +2,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from providers.docker.exceptions import (
     DockerImageNotFoundError,
@@ -32,10 +33,11 @@ def _api_mock() -> MagicMock:
     return api
 
 
+@pytest.mark.parametrize("ssh_host", ["127.0.0.1", "100.64.0.10"])
 @pytest.mark.asyncio
-async def test_create_vm_runs_container_and_returns_loopback_coords():
+async def test_create_vm_publishes_and_advertises_the_ssh_host(ssh_host: str):
     api = _api_mock()
-    provider = DockerProvider(api, _settings())
+    provider = DockerProvider(api, _settings(ssh_host=ssh_host))
 
     result = await provider.create_vm(name="sb-test", image="drukbox/sandbox:latest", env={})
 
@@ -45,12 +47,19 @@ async def test_create_vm_runs_container_and_returns_loopback_coords():
     assert run_kwargs["labels"] == {"managed-by": "drukbox", "drukbox-host-name": "sb-test"}
     # The public key is injected so the container's entrypoint can seed authorized_keys.
     assert run_kwargs["env"]["DRUKBOX_AUTHORIZED_KEY"].startswith("ssh-ed25519 ")
+    assert run_kwargs["ssh_host"] == ssh_host
 
-    assert result.ssh_host == "127.0.0.1"
+    assert result.ssh_host == ssh_host
     assert result.ssh_port == 49160
     assert result.ssh_username == "root"
     assert result.private_key
     assert "-----BEGIN OPENSSH PRIVATE KEY-----" in result.private_key
+
+
+@pytest.mark.parametrize("ssh_host", ["0.0.0.0", "::", "", "sandbox.example"])
+def test_settings_reject_an_ssh_host_callers_cannot_dial(ssh_host: str):
+    with pytest.raises(ValidationError):
+        _settings(ssh_host=ssh_host)
 
 
 @pytest.mark.asyncio
