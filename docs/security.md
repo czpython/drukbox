@@ -68,6 +68,10 @@ covered in [Networking](networking.md). The security-relevant summary:
 - **Hetzner has no firewall.** A fresh server exposes port 22 to the
   internet; the per-VM key is the only boundary. There is no ingress
   configuration to manage.
+- **Docker shares the daemon host's identity.** A sandbox published on a
+  non-loopback `DOCKER_SSH_HOST` is reachable by everything that
+  reaches that address. On a tailnet it has no device of its own, so ACL
+  tags cannot scope it. Each sandbox's key is the only boundary.
 - **First-keyscan MITM window.** With Tailscale off, the `known_hosts`
   material is scanned over the public network and carries the usual
   trust-on-first-use window. Enable Tailscale to run the scan over the

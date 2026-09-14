@@ -89,9 +89,9 @@ On macOS, use `--group-add 0` instead: Docker Desktop mounts the socket into
 the container as `root:root` mode `0660`, so only group 0 grants access — the
 host socket's own gid is irrelevant.
 
-Host networking is required because Docker sandboxes publish SSH on the
-host's `127.0.0.1`. The loopback Uvicorn binding makes the API reachable
-only from that host. Do not combine this mode with the generic
+Host networking lets the API reach the published sandbox ports on the
+daemon host. The loopback Uvicorn binding keeps the API reachable only
+from that host. Do not combine this mode with the generic
 `-p 8780:8780` invocation above. On macOS, if sandbox SSH is
 unreachable, enable host networking in Docker Desktop's settings.
 
@@ -100,13 +100,19 @@ The sandbox image (`DOCKER_DEFAULT_IMAGE`, default
 To customize it, build [images/local/](../images/local/) and point
 `DOCKER_DEFAULT_IMAGE` at your tag.
 
-Containers publish sshd on a random `127.0.0.1` port and are reachable
-only from the host that runs drukbox; the per-host key is the auth
-boundary. Tailscale is not supported — a local container has no path
-onto the tailnet, so docker hosts stay local under a tailnet-mode
-service: no join, no `internal_ssh_host`, the published port is the only
-path. One drukbox can serve tailnet VMs and local containers side by
-side.
+Docker publishes each sandbox's sshd on a random port at `DOCKER_SSH_HOST`,
+and host responses return that address as `external_ssh_host`. The default
+is `127.0.0.1`, so only the daemon host can connect. For remote callers,
+set it to an address of the daemon host that the callers and the API can
+reach: `DOCKER_SSH_HOST=100.64.0.10`. Bind the API where those callers
+reach it with `UVICORN_HOST`. Docker Desktop publishes only on loopback,
+so remote callers need a Linux daemon. Open the published ports in the
+network policy of the daemon host. A remote caller reaches every sandbox
+port the daemon host exposes, and each sandbox's SSH key is the only
+boundary.
+
+Containers do not join a tailnet and have no `internal_ssh_host`. One
+drukbox can serve tailnet VMs and Docker containers together.
 
 This provider is for local development and demos, not production: it
 talks to the host's Docker daemon, and granting drukbox access to that
@@ -123,8 +129,7 @@ The `docker-sbx` provider runs each sandbox as a
 [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) microVM. Each
 microVM has its own kernel, its own filesystem, and its own Docker
 daemon. The sandboxd network policy controls the egress. This provider
-is local to the drukbox machine, the same as the `docker` provider. It
-does not support Tailscale.
+runs on the drukbox machine. It does not support Tailscale.
 
 Prepare the host fully before drukbox starts. drukbox only connects to
 the host:
@@ -562,13 +567,14 @@ Docker provider:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DOCKER_DEFAULT_IMAGE` | `ghcr.io/czpython/drukbox/sandbox:latest` | Sandbox image with sshd, git, and gh; auto-pulled. Build `images/local/Dockerfile` to customize. |
+| `DOCKER_SSH_HOST` | `127.0.0.1` | Daemon host address where Docker publishes sshd and callers dial it. |
 | `DOCKER_SSH_USERNAME` | `root` | In-container user callers SSH as. |
 | `DOCKER_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `30.0` | ssh-keyscan retry budget for a fresh container. |
 
 The published image includes the Docker CLI. Mount the local daemon socket
 with its supplemental group on Linux, or use `DOCKER_HOST` for a remote or
 rootless daemon. Drukbox mints a per-VM ed25519 key and publishes sshd on a
-random `127.0.0.1` port. See
+random port at `DOCKER_SSH_HOST`. See
 [Local sandboxes with Docker](#local-sandboxes-with-docker) for the
 container command and the trust caveat.
 

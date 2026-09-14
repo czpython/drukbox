@@ -7,7 +7,8 @@ shaped the way it is. For turning these modes on, read
 ## Two modes
 
 `TAILSCALE_ENABLED` selects between two networking models. A provider
-whose hosts cannot join a tailnet (docker — local containers,
+whose hosts cannot join a tailnet (docker — containers published on the
+daemon host,
 docker-sbx — local microVMs) always takes the external path,
 whatever the mode. The API response carries
 both addresses; which is populated depends on the mode and the

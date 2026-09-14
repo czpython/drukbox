@@ -22,10 +22,11 @@ _RESERVED_ENV_KEYS = frozenset({_AUTHORIZED_KEY_ENV, _ENV_KEYS_ENV})
 
 
 class DockerProvider(VMProvider, TemplateCapability):
+    # Containers run a real sshd, published on DOCKER_SSH_HOST, so callers
+    # get scp, sftp, and agent forwarding natively. The SSH gateway is for
+    # providers without an sshd of their own.
     name: ClassVar[str] = "docker"
     diagnose_hint: ClassVar[str] = "check_docker_daemon_is_running"
-    # A local container has no path onto the tailnet; its hosts keep the
-    # published 127.0.0.1 sshd port even on a tailnet-mode service.
     supports_tailnet: ClassVar[bool] = False
 
     def __init__(
@@ -97,7 +98,13 @@ class DockerProvider(VMProvider, TemplateCapability):
         labels = {"managed-by": self._service_label, "drukbox-host-name": name}
 
         try:
-            await self.api.run_container(name=name, image=image, env=container_env, labels=labels)
+            await self.api.run_container(
+                name=name,
+                image=image,
+                env=container_env,
+                labels=labels,
+                ssh_host=str(self.settings.ssh_host),
+            )
         except DockerProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
 
@@ -116,7 +123,7 @@ class DockerProvider(VMProvider, TemplateCapability):
             provider_id=name,
             name=name,
             ssh_port=ssh_port,
-            ssh_host="127.0.0.1",
+            ssh_host=str(self.settings.ssh_host),
             ssh_username=self.settings.ssh_username,
             private_key=private_key,
         )

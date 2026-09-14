@@ -46,17 +46,15 @@ class DockerAPI:
         image: str,
         env: dict[str, str],
         labels: dict[str, str],
+        ssh_host: str,
     ) -> str:
-        # Publish the in-container sshd on a random loopback host port: the
-        # sandbox is reachable from the host that runs drukbox, never from the
-        # network. The per-VM key remains the auth boundary.
         config = {
             "Image": image,
             "Env": [f"{key}={value}" for key, value in env.items()],
             "Labels": labels,
             "ExposedPorts": {"22/tcp": {}},
             "HostConfig": {
-                "PortBindings": {"22/tcp": [{"HostIp": "127.0.0.1", "HostPort": ""}]},
+                "PortBindings": {"22/tcp": [{"HostIp": ssh_host, "HostPort": ""}]},
             },
         }
         try:

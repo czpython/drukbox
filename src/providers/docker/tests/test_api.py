@@ -43,7 +43,7 @@ def _api(fake: SimpleNamespace) -> DockerAPI:
     return DockerAPI(docker=fake)  # type: ignore[arg-type]
 
 
-async def test_run_container_publishes_on_loopback_and_passes_env_in_the_body() -> None:
+async def test_run_container_publishes_on_the_ssh_host_and_passes_env() -> None:
     fake = _fake_docker()
 
     container_id = await _api(fake).run_container(
@@ -51,6 +51,7 @@ async def test_run_container_publishes_on_loopback_and_passes_env_in_the_body() 
         image="sandbox:latest",
         env={"KEY": "value", "MULTI": "line one\nline two"},
         labels={"managed-by": "drukbox"},
+        ssh_host="100.64.0.10",
     )
 
     assert container_id == "abc123"
@@ -60,7 +61,7 @@ async def test_run_container_publishes_on_loopback_and_passes_env_in_the_body() 
     assert config["Env"] == ["KEY=value", "MULTI=line one\nline two"]
     assert config["Labels"] == {"managed-by": "drukbox"}
     assert config["HostConfig"]["PortBindings"] == {
-        "22/tcp": [{"HostIp": "127.0.0.1", "HostPort": ""}]
+        "22/tcp": [{"HostIp": "100.64.0.10", "HostPort": ""}]
     }
 
 
@@ -69,10 +70,12 @@ async def test_run_container_translates_engine_errors() -> None:
     fake.containers.run.side_effect = DockerError(409, "name already in use")
 
     with pytest.raises(DockerTransportError, match="name already in use"):
-        await _api(fake).run_container(name="sb-test", image="sandbox:latest", env={}, labels={})
+        await _api(fake).run_container(
+            name="sb-test", image="sandbox:latest", env={}, labels={}, ssh_host="127.0.0.1"
+        )
 
 
-async def test_published_ssh_port_reads_the_loopback_binding() -> None:
+async def test_published_ssh_port_reads_the_binding() -> None:
     fake = _fake_docker()
 
     assert await _api(fake).published_ssh_port("sb-test") == 49160
