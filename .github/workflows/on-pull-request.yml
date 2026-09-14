@@ -187,6 +187,18 @@ jobs:
           docker logs drukbox-api-test
           exit 1
 
+      - name: Start the secrets exchange
+        run: |
+          docker exec --detach drukbox-api-test \
+            /bin/sh -c '.venv/bin/python -m secrets_exchange > /tmp/secrets_exchange.log 2>&1'
+          for _ in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8781/healthz >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          echo "secrets exchange failed to start" >&2
+          docker exec drukbox-api-test cat /tmp/secrets_exchange.log
+          exit 1
+
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
@@ -211,7 +223,9 @@ jobs:
 
       - name: Dump drukbox log on failure
         if: failure()
-        run: docker logs drukbox-api-test || true
+        run: |
+          docker logs drukbox-api-test || true
+          docker exec drukbox-api-test cat /tmp/secrets_exchange.log || true
 
       - name: Remove drukbox container
         if: always()

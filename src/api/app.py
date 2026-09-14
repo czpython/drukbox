@@ -76,7 +76,7 @@ async def app_exception_handler(_request: Request, exc: AppException) -> JSONRes
     payload: dict[str, str] = {"detail": exc.detail}
     if exc.error_code:
         payload["error_code"] = exc.error_code
-    return JSONResponse(status_code=exc.status_code, content=payload)
+    return JSONResponse(status_code=exc.status_code, content=payload, headers=exc.headers)
 
 
 @app.get("/healthz", include_in_schema=False)

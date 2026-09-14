@@ -7,4 +7,4 @@ LOCAL_ENV = \
 .PHONY: dev
 dev:
 	$(LOCAL_ENV) uv run alembic upgrade head
-	$(LOCAL_ENV) uv run uvicorn api.app:app
+	$(LOCAL_ENV) uv run python -m secrets_exchange & $(LOCAL_ENV) uv run uvicorn api.app:app

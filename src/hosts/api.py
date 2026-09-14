@@ -2,9 +2,10 @@ import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Response, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Response, status
 from sqlalchemy.exc import SQLAlchemyError
 
+from host_secrets.schemas import SECRET_NAME_PATTERN
 from hosts.auth import require_auth
 from hosts.deps import get_host_service
 from hosts.exceptions import HostTeardownError
@@ -97,6 +98,16 @@ async def renew_host(
     ] = None,
 ) -> Host:
     return await service.renew_host(host_id, expires_at=expires_at)
+
+
+@router.post("/{host_id}/secrets/{service}/refresh", status_code=status.HTTP_204_NO_CONTENT)
+async def refresh_secret(
+    host_id: uuid.UUID,
+    secret: Annotated[str, Path(alias="service", pattern=SECRET_NAME_PATTERN)],
+    service: HostServiceDep,
+) -> Response:
+    await service.refresh_secret(host_id, secret)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/{host_id}", status_code=status.HTTP_204_NO_CONTENT)
