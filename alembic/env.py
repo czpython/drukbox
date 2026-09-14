@@ -6,13 +6,14 @@ from sqlalchemy import engine_from_config, pool
 from core.database import Base
 from core.settings import get_settings
 from hosts import models  # noqa: F401
+from service_accounts import models as service_account_models  # noqa: F401
 from templates import models as template_models  # noqa: F401
 
 config = context.config
 
 # Only apply alembic.ini logging when Alembic is the entry point (CLI).
 # When imported by the app or tests, app.py's logging config takes precedence.
-if config.config_file_name is not None and config.attributes.get("configure_logging", True):
+if config.config_file_name and config.attributes.get("configure_logging", True):
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata

@@ -41,6 +41,7 @@ load_test_env()
 async def reset_database() -> AsyncGenerator[None]:
     from core.database import Base, engine
     from hosts import models  # noqa: F401
+    from service_accounts import models as service_account_models  # noqa: F401
     from templates import models as template_models  # noqa: F401
 
     async with engine.begin() as connection:

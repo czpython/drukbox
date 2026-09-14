@@ -9,11 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_session
 from core.settings import get_settings
 from diagnostics.checks import DEFAULT_CHECK_TIMEOUT_SECONDS, Check, CheckStatus, run_check
-from hosts.auth import require_service_auth
+from hosts.auth import require_auth
 from networking.tailscale import Tailscale
 from providers.registry import get_default_vm_provider
 
-router = APIRouter(prefix="/doctor", tags=["doctor"], dependencies=[Depends(require_service_auth)])
+router = APIRouter(prefix="/doctor", tags=["doctor"], dependencies=[Depends(require_auth)])
 
 
 class CheckOut(BaseModel):

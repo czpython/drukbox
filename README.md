@@ -2,7 +2,7 @@
 
 <!-- markdownlint-disable-next-line MD033 -->
 <p align="center">
-  <img src="docs/assets/druks-blue.png" alt="Drukbox thunder dragon logo wrapped around a server box" width="260">
+  <img src="docs/assets/logo-blue.png" alt="Drukbox thunder dragon logo wrapped around a server box" width="260">
 </p>
 
 Drukbox is a FastAPI service that provisions sandbox hosts.
@@ -20,7 +20,7 @@ inside the VM.
 
 ## Quickstart
 
-No cloud account needed — run Drukbox from source on the host, so the
+No provider account needed: run Drukbox from source on the host, so the
 `docker` provider can reach the local Docker daemon and run sandboxes as
 local containers:
 

@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     service_tokens: CsvTuple = Field(
         min_length=1,
         validation_alias="SERVICE_TOKENS",
-        description="Bearer tokens accepted from trusted service clients (comma-separated).",
+        description="Comma-separated admin keys for every route and service account management.",
     )
     secrets_key: SecretsKey = Field(
         validation_alias="SECRETS_KEY",

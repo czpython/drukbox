@@ -47,6 +47,7 @@ documented in this repo.
 src/
   api/               # FastAPI app and global handlers
   core/              # Settings, database, exception base
+  service_accounts/  # Service account API, model, and exceptions
   hosts/             # Host API, models, schemas, service, janitor, pool, auth
   host_secrets/      # Secret catalog and placeholders
   secrets_exchange/  # The secrets exchange process behind the secrets proxy
@@ -157,7 +158,7 @@ refuse with `409` (pool maintenance owns them). The janitor reaps hosts whose
 
 ### Delete Semantics
 
-`DELETE /hosts/{id}` is service-token only.
+`DELETE /hosts/{id}` needs an admin key or a service account token.
 
 Deletion blocks early provisioning states where deletion can race VM creation.
 For VM-backed states, if `host.tailscale_device_id` is present, release that
@@ -171,8 +172,10 @@ Do not fall back to deleting Tailscale machines by hostname.
 
 ### Auth And Data Exposure
 
-- Service bearer tokens can create, list, get, and delete hosts.
-- HTTP proxy endpoints are service-token only.
+- An admin key from `SERVICE_TOKENS` or a service account token can use
+  every host, template, HTTP proxy, and doctor route.
+- Only an admin key can create or remove a service account
+  (`POST /service-accounts`, `DELETE /service-accounts/{name}`).
 - Caller-supplied host `env` must not include keys from
   `hosts.schemas.RESERVED_HOST_ENV_KEYS`.
 - Do not expose caller `env` in API responses.

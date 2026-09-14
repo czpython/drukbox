@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from sqlalchemy.exc import SQLAlchemyError
 
-from hosts.auth import require_service_auth
+from hosts.auth import require_auth
 from hosts.deps import get_host_service
 from hosts.exceptions import HostTeardownError
 from hosts.models import Host
@@ -16,7 +16,7 @@ from providers.exceptions import ProviderError, UnknownProviderError, Unsupporte
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/hosts", tags=["hosts"], dependencies=[Depends(require_service_auth)])
+router = APIRouter(prefix="/hosts", tags=["hosts"], dependencies=[Depends(require_auth)])
 
 HostServiceDep = Annotated[HostService, Depends(get_host_service)]
 
