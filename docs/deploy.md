@@ -43,6 +43,13 @@ The API binds all interfaces by default. When only loopback callers
 reach it (host-networked, co-located client), set `UVICORN_HOST=127.0.0.1`
 to keep the credential-holding control plane off other interfaces.
 
+## Admin keys and service accounts
+
+`SERVICE_TOKENS` holds one or more comma-separated admin keys, read at
+startup. Service accounts live in the `service_accounts` table, so run
+migrations before the API starts. Without the table every service
+account token returns `503`. See [API](api.md#service-accounts).
+
 ## Choose a provider
 
 | Provider | Sandboxes | Where |
@@ -416,7 +423,7 @@ Core, required:
 | --- | --- |
 | `DATABASE_URL` | Async SQLAlchemy URL. |
 | `SECRETS_KEY` | Comma-separated base64 32-byte keys for encrypted host secret recipes. The first key encrypts and every key decrypts. |
-| `SERVICE_TOKENS` | Comma-separated bearer tokens accepted from trusted callers. |
+| `SERVICE_TOKENS` | Comma-separated admin keys. These keys use every protected route and manage service accounts. |
 
 Core, optional:
 

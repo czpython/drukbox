@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Response, status
 
-from hosts.auth import require_service_auth
+from hosts.auth import require_auth
 from http_proxies.deps import get_http_proxy_service
 from http_proxies.schemas import (
     HTTP_PROXY_NAME_PATTERN,
@@ -17,7 +17,7 @@ from http_proxies.service import HTTPProxyService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/http-proxies", tags=["http-proxies"], dependencies=[Depends(require_service_auth)]
+    prefix="/http-proxies", tags=["http-proxies"], dependencies=[Depends(require_auth)]
 )
 
 HTTPProxyServiceDep = Annotated[HTTPProxyService, Depends(get_http_proxy_service)]

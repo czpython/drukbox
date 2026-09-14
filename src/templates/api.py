@@ -7,7 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_session
-from hosts.auth import require_service_auth
+from hosts.auth import require_auth
 from providers.exceptions import ProviderError, UnknownProviderError
 from templates.exceptions import TemplateTeardownError
 from templates.models import Template
@@ -16,9 +16,7 @@ from templates.service import TemplateService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/templates", tags=["templates"], dependencies=[Depends(require_service_auth)]
-)
+router = APIRouter(prefix="/templates", tags=["templates"], dependencies=[Depends(require_auth)])
 
 
 async def get_template_service(

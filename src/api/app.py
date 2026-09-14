@@ -15,6 +15,7 @@ from hosts.api import router as hosts_router
 from http_proxies.api import router as http_proxies_router
 from networking.tailscale import Tailscale
 from providers.registry import iter_initialized_vm_providers
+from service_accounts.api import router as service_accounts_router
 from templates.api import router as templates_router
 
 _log_level = getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO)
@@ -87,3 +88,4 @@ app.include_router(hosts_router)
 app.include_router(http_proxies_router)
 app.include_router(templates_router)
 app.include_router(diagnostics_router)
+app.include_router(service_accounts_router)

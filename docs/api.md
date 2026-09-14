@@ -6,11 +6,24 @@ page is the orientation.
 
 ## Authentication
 
-Every endpoint except `GET /healthz` requires
-`Authorization: Bearer <service-token>`, where the token is one of
-`SERVICE_TOKENS`. See [Security](security.md) for the trust model.
+Every route except `GET /healthz` and the OpenAPI pages takes
+`Authorization: Bearer <token>`. The token is an admin key from
+`SERVICE_TOKENS` or a service account token. Only admin keys manage
+service accounts. A missing token returns `401`, a rejected one `403`.
+
+## Service accounts
+
+`POST /service-accounts` with `{"name": "ci"}` returns
+`{"name": "ci", "token": "drkb_..."}` once. Drukbox stores only the name
+and the SHA-256 fingerprint of the token. Names are 1–64 lowercase
+letters, digits, or hyphens. A duplicate name returns `409`.
+`DELETE /service-accounts/ci` revokes the token on the next request, or
+returns `404` for an unknown name.
 
 ## Endpoints
+
+- `POST /service-accounts` · `DELETE /service-accounts/{name}` —
+  admin keys only
 
 - `POST /hosts` · `GET /hosts` · `GET /hosts/{id}` · `DELETE /hosts/{id}`
 - `POST /templates` · `GET /templates` · `GET /templates/{id}` ·
@@ -23,7 +36,7 @@ Every endpoint except `GET /healthz` requires
 ## The secrets exchange
 
 The exchange is a second process, `python -m secrets_exchange`, on a private
-port with no service token. Only the proxy and an issuer inside the deployment
+port with no bearer token. Only the proxy and an issuer inside the deployment
 reach it. See [Architecture](architecture.md) for the flow.
 
 - `GET /upstreams` — the hosts the proxy terminates TLS for

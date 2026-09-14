@@ -7,11 +7,10 @@ here read [Deploy](deploy.md).
 
 ## Trust model: trusted callers, untrusted sandboxes
 
-Drukbox has one trust tier. A valid service token is full control —
-it can create, list, get, and delete any host. There is no per-token
-scoping, per-tenant isolation, or
-ownership check between token holders. Treat every token as an
-operator-level credential.
+An admin key or service account token can create, list, read, and delete
+every host. Only an admin key can create or remove a service account.
+There are no host filters per service account and no tenant isolation.
+Treat each key and token as an operator credential.
 
 The asymmetry that *is* part of the model: **callers are trusted, the
 sandboxes they provision are not.** Drukbox hands back SSH coordinates
@@ -26,17 +25,17 @@ drukbox tokens to mutually distrusting users.
 
 ## Authentication
 
-Every endpoint except `GET /healthz` requires
-`Authorization: Bearer <service-token>`. Tokens come from
-`SERVICE_TOKENS` (comma-separated) and are compared in constant time,
-so a wrong token leaks no timing signal. `/healthz` is unauthenticated
-by design and returns only `{"status": "ok"}` — no version, config, or
-dependency detail. `/doctor` is authenticated and is the only endpoint
-that reports dependency state.
+`SERVICE_TOKENS` holds the admin keys. Drukbox compares them in constant
+time and never reads the database for them. A service account token is
+stored only as its SHA-256 fingerprint and checked against the database
+on every request, so removal needs no restart. No route returns a token
+or a fingerprint after creation. Only `GET /healthz` and the OpenAPI
+pages skip authentication. `GET /doctor` is the only route that reports
+dependency state.
 
-Rotate a token by adding the new value to `SERVICE_TOKENS`, moving
-callers over, then dropping the old one. Multiple tokens are accepted
-at once precisely so rotation needs no downtime.
+To rotate an admin key, add the new key, restart, move callers, remove
+the old key, and restart again. To rotate a service account, create a new
+one, move the caller, and remove the old one.
 
 ## Control-plane network exposure
 
@@ -183,8 +182,8 @@ quotas and rate limiting in the layer that issues and fronts tokens.
 
 ## Not vulnerabilities by design
 
-- A service token can delete any host. There is no second factor for
-  destructive calls — the token is the boundary.
+- An admin key or service account token can delete any host. There is no
+  second factor for destructive calls — the token is the boundary.
 - Drukbox never opens an SSH session, runs sandbox code, or creates
   Linux users. Everything past the returned SSH coordinates is the
   caller's responsibility.

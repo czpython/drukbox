@@ -11,6 +11,7 @@ const EXPECTED_OPENAPI_OPERATIONS = [
   "DELETE /http-proxies/{name}/hosts/{host_id}",
   "DELETE /hosts/{host_id}",
   "DELETE /templates/{template_id}",
+  "DELETE /service-accounts/{name}",
   "GET /doctor",
   "GET /hosts",
   "GET /hosts/{host_id}",
@@ -21,6 +22,7 @@ const EXPECTED_OPENAPI_OPERATIONS = [
   "POST /hosts",
   "POST /hosts/{host_id}/renew",
   "POST /templates",
+  "POST /service-accounts",
 ];
 
 const HOST_KEYS = [
@@ -109,6 +111,28 @@ test.describe("Drukbox API", () => {
     }
 
     expect(operations.sort()).toEqual([...EXPECTED_OPENAPI_OPERATIONS].sort());
+  });
+
+  test("admin creates and removes a service account", async () => {
+    const name = `api-test-${Date.now().toString(36)}`;
+    const created = await expectJson(await api.post("/service-accounts", { data: { name } }), 201);
+    expect(created.name).toBe(name);
+    const serviceAccountApi = await newServiceContext(created.token);
+
+    try {
+      await expectStatus(await serviceAccountApi.get("/hosts"), 200);
+      await expectStatus(await serviceAccountApi.get("/templates"), 200);
+      await expectStatus(await serviceAccountApi.get("/doctor"), 200);
+      await expectStatus(await api.post("/service-accounts", { data: { name } }), 409);
+      await expectStatus(await api.delete("/service-accounts/Bad-Name"), 422);
+      await expectStatus(await serviceAccountApi.post("/service-accounts", { data: { name: `${name}-other` } }), 403);
+      await expectStatus(await serviceAccountApi.delete(`/service-accounts/${name}`), 403);
+      await expectStatus(await api.delete(`/service-accounts/${name}`), 204);
+      await expectStatus(await serviceAccountApi.get("/hosts"), 403);
+    } finally {
+      await api.delete(`/service-accounts/${name}`);
+      await serviceAccountApi.dispose();
+    }
   });
 
   test("GET /hosts requires auth and returns hosts with service auth", async () => {
