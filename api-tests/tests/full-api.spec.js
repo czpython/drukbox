@@ -28,6 +28,7 @@ const EXPECTED_OPENAPI_OPERATIONS = [
 const HOST_KEYS = [
   "id",
   "name",
+  "service_account",
   "status",
   "provider",
   "image",

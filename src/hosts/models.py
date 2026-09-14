@@ -74,6 +74,7 @@ class Host(Base):
     env: Mapped[dict[str, str]] = mapped_column(_JSONType, default=dict)
     secrets: Mapped[SecretsMapping] = EncryptedJsonField()
     name: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    service_account: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(32), default=HostStatus.PROVISIONING.value)
     provider: Mapped[str] = mapped_column(String(20), default="exe")
     image: Mapped[str] = mapped_column(Text)

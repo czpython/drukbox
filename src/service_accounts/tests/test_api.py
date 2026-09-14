@@ -2,7 +2,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
 
 from api.app import app
 from core.database import Base, async_session_factory, engine
@@ -22,7 +21,7 @@ async def test_create_stores_only_name_and_fingerprint(client: AsyncClient) -> N
     token = await create(client)
 
     async with async_session_factory() as session:
-        stored = (await session.scalars(select(ServiceAccount))).one()
+        stored = await session.get_one(ServiceAccount, "account-a")
         assert stored.name == "account-a"
         assert stored.fingerprint == ServiceAccount.get_fingerprint(token)
         assert set(ServiceAccount.__table__.columns.keys()) == {"name", "fingerprint"}
@@ -118,6 +117,15 @@ async def test_removal_rejects_every_protected_route_without_restart(client: Asy
     assert (
         await client.get("/hosts", headers={"Authorization": f"Bearer {replacement}"})
     ).status_code == 200
+
+
+async def test_admin_account_has_no_token_and_cannot_be_removed(client: AsyncClient) -> None:
+    response = await client.post("/service-accounts", json={"name": "admin"}, headers=ADMIN)
+    assert response.status_code == 409
+    response = await client.delete("/service-accounts/admin", headers=ADMIN)
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "SERVICE_ACCOUNT_STATE"
+    assert (await client.get("/hosts", headers={"Authorization": "Bearer "})).status_code == 401
 
 
 async def test_remove_unknown_name(client: AsyncClient) -> None:

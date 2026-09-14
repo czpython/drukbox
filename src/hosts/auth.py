@@ -28,19 +28,17 @@ def is_admin_key(token: str) -> bool:
 async def require_auth(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> None:
+) -> str | None:
     if not credentials:
         raise HTTPException(status_code=401, detail="admin key or service account token required")
     if is_admin_key(credentials.credentials):
-        return
+        return ServiceAccount.ADMIN
 
     try:
-        if await ServiceAccount.authenticate(session, credentials.credentials):
-            return
+        return await ServiceAccount.authenticate(session, credentials.credentials)
     except SQLAlchemyError:
         logger.exception("service account token lookup failed")
         raise HTTPException(status_code=503, detail="service account tokens unavailable") from None
-    raise HTTPException(status_code=403, detail="admin key or service account token rejected")
 
 
 def require_admin_auth(
