@@ -18,7 +18,8 @@ service accounts. A missing token returns `401`, a rejected one `403`.
 and the SHA-256 fingerprint of the token. Names are 1–64 lowercase
 letters, digits, or hyphens. A duplicate name returns `409`.
 `DELETE /service-accounts/ci` revokes the token on the next request, or
-returns `404` for an unknown name.
+returns `404` for an unknown name. The `admin` account exists from the
+migration, has no token, and cannot be removed. Admin keys act as it.
 
 ## Endpoints
 
@@ -32,6 +33,11 @@ returns `404` for an unknown name.
   `POST|DELETE /http-proxies/{name}/hosts/{host_id}`
 - `GET /doctor` — read-only dependency diagnostics
 - `GET /healthz` — unauthenticated liveness probe
+
+Host responses carry `service_account`: the service account that created
+or claimed the host, `admin` for an admin key, or `null` for an unclaimed
+warm host. Callers cannot set it. An `Idempotency-Key` belongs to the
+service account that first used it. Another one reusing it gets `409`.
 
 ## The secrets exchange
 

@@ -1,8 +1,9 @@
 import re
 import uuid
 from datetime import UTC, datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from host_secrets import catalog
 from host_secrets.schemas import SECRET_NAME_PATTERN, SecretEntry
@@ -13,13 +14,16 @@ _ENV_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _expires_at_must_be_future_and_tz_aware(expires_at: datetime | None) -> datetime | None:
-    if expires_at is None:
-        return None
-    if expires_at.tzinfo is None:
+    if not expires_at:
+        return
+    if not expires_at.tzinfo:
         raise ValueError("expires_at must include a timezone offset")
     if expires_at <= datetime.now(UTC):
         raise ValueError("expires_at must be in the future")
     return expires_at
+
+
+ExpiresAt = Annotated[datetime | None, AfterValidator(_expires_at_must_be_future_and_tz_aware)]
 
 
 class HostCreate(BaseModel):
@@ -36,7 +40,7 @@ class HostCreate(BaseModel):
             "service handle. The sandbox receives a placeholder per entry, never the value."
         ),
     )
-    expires_at: datetime | None = None
+    expires_at: ExpiresAt = None
     provider: str | None = Field(
         default=None,
         description="VM provider to provision on. Omit to use the service default.",
@@ -92,22 +96,13 @@ class HostCreate(BaseModel):
         environment.get_persist(env)
         return env
 
-    _validate_expires_at = field_validator("expires_at")(_expires_at_must_be_future_and_tz_aware)
-
-
-class HostRenew(BaseModel):
-    # Omitted (or null) means "extend by LEASE_DEFAULT_TTL from now"; renewal
-    # never makes a host permanent — that is a create-time choice.
-    expires_at: datetime | None = None
-
-    _validate_expires_at = field_validator("expires_at")(_expires_at_must_be_future_and_tz_aware)
-
 
 class HostOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     name: str
+    service_account: str | None
     status: str
     provider: str
     image: str

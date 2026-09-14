@@ -2,14 +2,14 @@ import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Response, status
 from sqlalchemy.exc import SQLAlchemyError
 
 from hosts.auth import require_auth
 from hosts.deps import get_host_service
 from hosts.exceptions import HostTeardownError
 from hosts.models import Host
-from hosts.schemas import HostCreate, HostOut, HostRenew
+from hosts.schemas import ExpiresAt, HostCreate, HostOut
 from hosts.service import HostService
 from networking.tailscale import NetworkError
 from providers.exceptions import ProviderError, UnknownProviderError, UnsupportedSizingError
@@ -24,6 +24,7 @@ HostServiceDep = Annotated[HostService, Depends(get_host_service)]
 @router.post("", response_model=HostOut, status_code=status.HTTP_201_CREATED)
 async def create_host(
     service: HostServiceDep,
+    service_account: Annotated[str | None, Depends(require_auth)],
     payload: HostCreate | None = None,
     idempotency_key: Annotated[
         str | None,
@@ -47,6 +48,7 @@ async def create_host(
 
     try:
         return await service.get_or_create_host(
+            service_account=service_account,
             env=host_create.env,
             secrets={name: entry.to_storage() for name, entry in host_create.secrets.items()},
             image=host_create.image,
@@ -83,10 +85,18 @@ async def get_host(host_id: uuid.UUID, service: HostServiceDep) -> Host:
 async def renew_host(
     host_id: uuid.UUID,
     service: HostServiceDep,
-    payload: HostRenew | None = None,
+    expires_at: Annotated[
+        ExpiresAt,
+        Body(
+            embed=True,
+            description=(
+                "Omit or null: extend by LEASE_DEFAULT_TTL from now. "
+                "Renewal never makes a host permanent."
+            ),
+        ),
+    ] = None,
 ) -> Host:
-    host_renew = payload or HostRenew()
-    return await service.renew_host(host_id, expires_at=host_renew.expires_at)
+    return await service.renew_host(host_id, expires_at=expires_at)
 
 
 @router.delete("/{host_id}", status_code=status.HTTP_204_NO_CONTENT)

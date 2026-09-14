@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_session
 from core.exceptions import ResourceNotFoundError
 from hosts.auth import require_admin_auth
-from service_accounts.exceptions import ServiceAccountExistsError
+from service_accounts.exceptions import ServiceAccountExistsError, ServiceAccountStateError
 from service_accounts.models import ServiceAccount
 
 SERVICE_ACCOUNT_NAME_PATTERN = r"^[a-z0-9][a-z0-9-]{0,63}$"
@@ -45,6 +45,8 @@ async def create_service_account(
 @router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_service_account(name: ServiceAccountName, session: SessionDep) -> Response:
     if account := await session.get(ServiceAccount, name):
+        if account.name == ServiceAccount.ADMIN:
+            raise ServiceAccountStateError("the admin account has no token to revoke")
         await session.delete(account)
         await session.commit()
         return Response(status_code=status.HTTP_204_NO_CONTENT)

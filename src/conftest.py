@@ -39,14 +39,17 @@ load_test_env()
 
 @pytest.fixture(autouse=True)
 async def reset_database() -> AsyncGenerator[None]:
+    from sqlalchemy import insert
+
     from core.database import Base, engine
     from hosts import models  # noqa: F401
-    from service_accounts import models as service_account_models  # noqa: F401
+    from service_accounts.models import ServiceAccount
     from templates import models as template_models  # noqa: F401
 
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.drop_all)
         await connection.run_sync(Base.metadata.create_all)
+        await connection.execute(insert(ServiceAccount).values(name=ServiceAccount.ADMIN))
 
     yield
 

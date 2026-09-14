@@ -20,7 +20,7 @@ from gateway.settings import GatewaySettings
 from host_secrets import catalog
 from host_secrets.exceptions import SecretsProxyNotConfiguredError
 from host_secrets.placeholder import Placeholder
-from hosts.exceptions import HostStateError, ProvisioningFailedError
+from hosts.exceptions import HostStateError, IdempotencyKeyConflictError, ProvisioningFailedError
 from hosts.models import Host, HostStatus, IdempotencyKey
 from networking.tailscale import (
     DeviceDiscoveryTimeoutError,
@@ -101,6 +101,7 @@ class HostService:
     async def get_or_create_host(
         self,
         *,
+        service_account: str | None = None,
         env: dict[str, str],
         secrets: dict[str, dict[str, Any]] | None = None,
         image: str | None,
@@ -123,7 +124,7 @@ class HostService:
                 raise UnknownProviderError(f"unknown provider {provider!r}; available: {available}")
 
         if idempotency_key:
-            existing = await self._lookup_idempotency_key(idempotency_key)
+            existing = await self._lookup_idempotency_key(idempotency_key, service_account)
             if existing:
                 return existing
 
@@ -136,10 +137,11 @@ class HostService:
         customized = env or secrets or image or template or instance_type or disk_gb
         if not customized and self.settings.get_pool_targets().get(requested_provider):
             host = await self._try_claim_pool_host(
-                provider=requested_provider, expires_at=expires_at
+                service_account=service_account, provider=requested_provider, expires_at=expires_at
             )
         if not host:
             host = await self.create_host(
+                service_account=service_account,
                 env=env,
                 secrets=secrets,
                 image=image,
@@ -158,14 +160,18 @@ class HostService:
                 host.claimed_at,
             )
             await self._release_idempotency_loser(host)
-            winner = await self._lookup_idempotency_key(idempotency_key)
+            winner = await self._lookup_idempotency_key(idempotency_key, service_account)
             if not winner:
                 raise HostStateError("idempotency race could not be resolved") from None
             return winner
         return host
 
     async def _try_claim_pool_host(
-        self, *, provider: str, expires_at: datetime | None | EllipsisType
+        self,
+        *,
+        service_account: str | None = None,
+        provider: str,
+        expires_at: datetime | None | EllipsisType,
     ) -> Host | None:
         # Pick a candidate, then atomically claim it with UPDATE ... WHERE
         # claimed_at IS NULL ... RETURNING. The WHERE predicate is the actual
@@ -198,7 +204,12 @@ class HostService:
             update(Host)
             .where(Host.id == candidate_id)
             .where(Host.claimed_at.is_(None))
-            .values(claimed_at=now, updated_at=now, expires_at=expires_at)
+            .values(
+                service_account=service_account,
+                claimed_at=now,
+                updated_at=now,
+                expires_at=expires_at,
+            )
             .returning(Host)
         )
         host = result.scalar_one_or_none()
@@ -212,6 +223,7 @@ class HostService:
     async def create_host(
         self,
         *,
+        service_account: str | None = None,
         env: dict[str, str],
         secrets: dict[str, dict[str, Any]] | None = None,
         image: str | None,
@@ -259,6 +271,7 @@ class HostService:
         )
         host = Host(
             id=uid,
+            service_account=service_account,
             env=env,
             secrets=secrets or {},
             name=name,
@@ -321,7 +334,7 @@ class HostService:
         template.last_used_at = utc_now()
         return template.image
 
-    async def _lookup_idempotency_key(self, key: str) -> Host | None:
+    async def _lookup_idempotency_key(self, key: str, service_account: str | None) -> Host | None:
         record = (
             await self.session.execute(select(IdempotencyKey).where(IdempotencyKey.key == key))
         ).scalar_one_or_none()
@@ -329,10 +342,15 @@ class HostService:
         if not record:
             return
 
-        if record.expires_at > utc_now():
-            host = await self.session.get(Host, record.host_id)
-            if host:
-                return host
+        host = (
+            await self.session.get(Host, record.host_id) if record.expires_at > utc_now() else None
+        )
+        if host:
+            if host.service_account != service_account:
+                raise IdempotencyKeyConflictError(
+                    f"idempotency key {key} belongs to another service account"
+                )
+            return host
         # Stale: expired, or the host vanished without the FK cascade firing.
         # GC in a dedicated session so we don't autoflush the caller's pending
         # state on `self.session`.
@@ -374,6 +392,7 @@ class HostService:
             now = utc_now()
             if fresh.claimed_at:
                 fresh.claimed_at = None
+                fresh.service_account = None
                 fresh.expires_at = now + timedelta(hours=self.settings.pool_host_max_age_hours)
                 fresh.updated_at = now
                 logger.info(
