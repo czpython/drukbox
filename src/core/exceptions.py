@@ -12,6 +12,7 @@ class AppException(RuntimeError):
 
     status_code: ClassVar[int] = 500
     error_code: ClassVar[str | None] = None
+    headers: ClassVar[dict[str, str]] = {}
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)

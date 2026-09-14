@@ -31,6 +31,7 @@ migration, has no token, and cannot be removed. Admin keys act as it.
   `DELETE /templates/{id}`
 - `POST /http-proxies` · `DELETE /http-proxies/{name}` ·
   `POST|DELETE /http-proxies/{name}/hosts/{host_id}`
+- `POST /hosts/{host_id}/secrets/{service}/refresh` — refresh one secret
 - `GET /doctor` — read-only dependency diagnostics
 - `GET /healthz` — unauthenticated liveness probe
 
@@ -39,11 +40,24 @@ or claimed the host, `admin` for an admin key, or `null` for an unclaimed
 warm host. Callers cannot set it. An `Idempotency-Key` belongs to the
 service account that first used it. Another one reusing it gets `409`.
 
+## Refresh a host secret
+
+`POST /hosts/{host_id}/secrets/{service}/refresh` makes the exchange drop
+its value for that secret and fetch a new one. A provider that stores the
+value receives it at once. The response is `204` with no body. The API
+sends no `Authorization` header to the exchange.
+
+- `404` with `NOT_FOUND`: The host or the secret does not exist.
+- `409` with `SECRET_STATIC`: The secret has a static value.
+- `503` with `SECRET_REFRESH` and `Retry-After`: The exchange did not
+  answer, or the issuer or provider did not supply a value.
+
 ## The secrets exchange
 
-The exchange is a second process, `python -m secrets_exchange`, on a private
-port with no bearer token. Only the proxy and an issuer inside the deployment
-reach it. See [Architecture](architecture.md) for the flow.
+The exchange is a second process, `python -m secrets_exchange`, on loopback
+with no bearer token. The API and proxy share its network namespace.
+Remote callers use the API refresh route. See [Architecture](architecture.md)
+for the flow.
 
 - `GET /upstreams` — the hosts the proxy terminates TLS for
 - `GET /authorize` — the proxy's question: the header and the real credential

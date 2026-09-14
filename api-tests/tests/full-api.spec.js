@@ -21,6 +21,7 @@ const EXPECTED_OPENAPI_OPERATIONS = [
   "POST /http-proxies/{name}/hosts/{host_id}",
   "POST /hosts",
   "POST /hosts/{host_id}/renew",
+  "POST /hosts/{host_id}/secrets/{service}/refresh",
   "POST /templates",
   "POST /service-accounts",
 ];
@@ -136,6 +137,12 @@ test.describe("Drukbox API", () => {
     }
   });
 
+  test("doctor reports all dependencies healthy", async () => {
+    const report = await expectJson(await api.get("/doctor"), 200);
+    expect(report.ok).toBe(true);
+    expect(report.checks.find((check) => check.name === "exchange").status).toBe("ok");
+  });
+
   test("GET /hosts requires auth and returns hosts with service auth", async () => {
     await expectStatus(await publicApi.get("/hosts"), 401);
 
@@ -205,6 +212,14 @@ test.describe("Drukbox API", () => {
     const missingId = "00000000-0000-0000-0000-000000000000";
     const missing = await expectJson(await api.get(`/hosts/${missingId}`), 404);
     expect(missing.detail).toBe("host not found");
+  });
+
+  test("refresh requires auth and returns exchange errors", async () => {
+    const path = `/hosts/${createdHost.id}/secrets/anthropic/refresh`;
+    await expectStatus(await publicApi.post(path), 401);
+    await expectStatus(await badTokenApi.post(path), 403);
+    await expectStatus(await api.post(path), 409);
+    await expectStatus(await api.post(`/hosts/${createdHost.id}/secrets/missing/refresh`), 404);
   });
 
   test("created host is observably active", async () => {

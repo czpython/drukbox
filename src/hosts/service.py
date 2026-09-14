@@ -18,7 +18,7 @@ from core.exceptions import ResourceNotFoundError
 from core.settings import Settings, get_settings
 from gateway.settings import GatewaySettings
 from host_secrets import catalog
-from host_secrets.exceptions import SecretsProxyNotConfiguredError
+from host_secrets.exceptions import SecretsProxyNotConfiguredError, SecretStaticError
 from host_secrets.placeholder import Placeholder
 from hosts.exceptions import HostStateError, IdempotencyKeyConflictError, ProvisioningFailedError
 from hosts.models import Host, HostStatus, IdempotencyKey
@@ -38,6 +38,7 @@ from providers.exceptions import (
     UnsupportedSizingError,
 )
 from providers.registry import get_provider_names, get_vm_provider
+from secrets_exchange.client import SecretsExchange
 from secrets_exchange.secrets import IssuerError, Secret
 from templates.exceptions import TemplateNotAvailableError, UnknownTemplateError
 from templates.models import Template, TemplateStatus
@@ -438,6 +439,20 @@ class HostService:
         await self.session.commit()
         await self.session.refresh(host)
         return host
+
+    async def refresh_secret(self, host_id: uuid.UUID, service: str) -> None:
+        host = await self.get_host(host_id)
+
+        if not host:
+            raise ResourceNotFoundError("host not found")
+
+        if service not in host.secrets:
+            raise ResourceNotFoundError("secret not found")
+
+        if "value" in host.secrets[service]:
+            raise SecretStaticError(f"secret {service} has a static value")
+
+        await SecretsExchange.from_settings().refresh(host.id, service)
 
     async def delete_host(
         self,

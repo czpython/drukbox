@@ -2,7 +2,7 @@ import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,11 +12,14 @@ from diagnostics.checks import DEFAULT_CHECK_TIMEOUT_SECONDS, Check, CheckStatus
 from hosts.auth import require_auth
 from networking.tailscale import Tailscale
 from providers.registry import get_default_vm_provider
+from secrets_exchange.client import SecretsExchange
 
 router = APIRouter(prefix="/doctor", tags=["doctor"], dependencies=[Depends(require_auth)])
 
 
 class CheckOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     name: str
     status: CheckStatus
     detail: str | None
@@ -69,6 +72,13 @@ async def doctor(
         asyncio.ensure_future(
             run_check("provider", _provider_probe, hint=provider_hint, timeout=provider_timeout),
         ),
+        asyncio.ensure_future(
+            run_check(
+                "exchange",
+                SecretsExchange.from_settings().diagnose,
+                hint=SecretsExchange.diagnose_hint,
+            ),
+        ),
     ]
     if settings.tailscale_enabled:
         tasks.append(
@@ -82,16 +92,7 @@ async def doctor(
         ok=ok,
         active_provider=settings.default_host_provider,
         tailscale_enabled=settings.tailscale_enabled,
-        checks=[
-            CheckOut(
-                name=check.name,
-                status=check.status,
-                detail=check.detail,
-                latency_ms=check.latency_ms,
-                hint=check.hint,
-            )
-            for check in checks
-        ],
+        checks=[CheckOut.model_validate(check) for check in checks],
     )
 
 

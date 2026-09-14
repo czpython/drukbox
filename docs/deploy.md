@@ -16,7 +16,10 @@ with the same tags.
 IMAGE=ghcr.io/czpython/drukbox:latest
 
 # API (port 8780; /healthz for liveness probes)
-docker run --rm -p 8780:8780 --env-file drukbox.env "$IMAGE"
+docker run --rm --name drukbox -p 8780:8780 --env-file drukbox.env "$IMAGE"
+
+# Secrets exchange (loopback, in the API network namespace)
+docker run --rm --network container:drukbox --env-file drukbox.env "$IMAGE" .venv/bin/python -m secrets_exchange
 
 # Migrations (one-off, before first start and on upgrades)
 docker run --rm --env-file drukbox.env "$IMAGE" .venv/bin/alembic upgrade head
@@ -296,23 +299,40 @@ placeholder for the real credential on the way out. Two pieces run this:
 - **The exchange process** runs as `python -m secrets_exchange` from this
   image. The proxy asks it which hosts to terminate, and, for a request with
   a placeholder, for the header the upstream reads and the real credential.
-  Its answer is the credential, so bind it where only the proxy can reach it.
+  Its answer contains a credential. Keep its listener on loopback. The API
+  carries remote refresh requests to it and checks its health.
+
+The API, exchange, and proxy must share a network namespace. This Compose
+example uses the API's namespace for the other two processes. Only the API
+and proxy ports are published:
 
 ```yaml
 services:
+  api:
+    image: ghcr.io/czpython/drukbox:latest
+    env_file: drukbox.env
+    environment:
+      SECRETS_PROXY_URL: http://proxy.example:8880
+      SECRETS_PROXY_CA_FILE: /secrets-proxy-ca/mitmproxy-ca-cert.pem
+    ports:
+      - "8780:8780"
+      - "8880:8880"
+    volumes:
+      - secrets-proxy-ca:/secrets-proxy-ca:ro
+
   exchange:
     image: ghcr.io/czpython/drukbox:latest
     command: [".venv/bin/python", "-m", "secrets_exchange"]
+    network_mode: "service:api"
     env_file: drukbox.env
     environment:
-      SECRETS_EXCHANGE_BIND_HOST: 0.0.0.0
+      SECRETS_EXCHANGE_BIND_HOST: 127.0.0.1
 
   proxy:
     image: ghcr.io/czpython/drukbox/proxy:latest
+    network_mode: "service:api"
     environment:
-      SECRETS_EXCHANGE_URL: http://exchange:8781
-    ports:
-      - "8880:8880"
+      SECRETS_EXCHANGE_URL: http://127.0.0.1:8781
     volumes:
       - secrets-proxy-ca:/home/mitmproxy/.mitmproxy
 
@@ -320,21 +340,25 @@ volumes:
   secrets-proxy-ca:
 ```
 
-The exchange binds `0.0.0.0` inside the compose network and publishes no
-port, so only the proxy reaches it. The API reads the public certificate of
-the CA from the same volume, at `SECRETS_PROXY_CA_FILE`, and hands it to
-every sandbox with secrets:
+A recreated `api` container gets a new network namespace and the other two
+stay in the old one. After a change to `api`, recreate all three:
+`docker compose up -d --force-recreate api exchange proxy`.
 
-```yaml
-  api:
-    image: ghcr.io/czpython/drukbox:latest
-    env_file: drukbox.env
-    environment:
-      SECRETS_PROXY_URL: http://proxy.example:8880
-      SECRETS_PROXY_CA_FILE: /secrets-proxy-ca/mitmproxy-ca-cert.pem
-    volumes:
-      - secrets-proxy-ca:/secrets-proxy-ca:ro
-```
+Use Postgres for the shared database. Set `SECRETS_PROXY_URL` to the proxy
+address that sandboxes can contact. Apply the deployment's API and proxy
+access rules to the published ports. Do not publish port 8781 or bind the
+exchange to a public, bridge, or tailnet address.
+
+On a host-network deployment, all three processes use the host namespace.
+Keep `SECRETS_EXCHANGE_BIND_HOST=127.0.0.1`. The API reads
+`SECRETS_EXCHANGE_BIND_HOST` and `SECRETS_EXCHANGE_PORT` from the same env
+file as the exchange. The proxy reads `SECRETS_EXCHANGE_URL`. If you change
+the exchange port, set it in both places.
+
+Remote callers refresh a secret with
+`POST /hosts/{host_id}/secrets/{service}/refresh` on the API. They never
+connect to the exchange. The API reads the public CA certificate from the
+shared volume and gives it to each sandbox with secrets.
 
 A sandbox with secrets gets the certificate in `SECRETS_PROXY_CA`, base64,
 and installs it at boot with `update-ca-certificates`. `SSL_CERT_FILE`,
@@ -401,9 +425,9 @@ takes no secrets: a request with secrets always provisions a new sandbox.
 curl -fsS -H "Authorization: Bearer $TOKEN" http://localhost:8780/doctor
 ```
 
-`/doctor` runs one read-only probe per dependency (database, active
-provider, Tailscale when enabled) and reports per-check status,
-latency, and a remediation hint on failures. It always returns 200 —
+`/doctor` runs one read-only probe per dependency: database, active
+provider, secrets exchange, and Tailscale when enabled. It reports per-check
+status, latency, and a remediation hint on failures. It always returns 200 —
 health is the `ok` field. `GET /healthz` is the unauthenticated
 liveness probe.
 
@@ -449,8 +473,8 @@ Secrets exchange:
 | --- | --- | --- |
 | `SECRETS_PROXY_URL` | — | Proxy a sandbox sends its HTTPS through. Required to create a host with secrets on every provider but docker-sbx. |
 | `SECRETS_PROXY_CA_FILE` | — | Path of the proxy's public CA certificate, from the proxy's volume. Required with `SECRETS_PROXY_URL`. |
-| `SECRETS_EXCHANGE_BIND_HOST` | `127.0.0.1` | Interface the exchange process binds. Bind it where only the proxy can reach it. |
-| `SECRETS_EXCHANGE_PORT` | `8781` | Port the exchange process listens on. |
+| `SECRETS_EXCHANGE_BIND_HOST` | `127.0.0.1` | Loopback listener for the exchange. The API reads it to reach the exchange. |
+| `SECRETS_EXCHANGE_PORT` | `8781` | Port the exchange process listens on. The API reads it to reach the exchange. |
 
 Tailscale (required when `TAILSCALE_ENABLED=true`):
 

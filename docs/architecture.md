@@ -131,10 +131,12 @@ A host that is gone is forgotten on the next pass.
 
 An issuer can end a value before its expiry, as an OAuth provider does when
 it revokes the previous token at a refresh. The issuer then orders a refresh
-at `POST /refresh/<host id>/<service>`. The exchange forgets the held value,
-fetches now, and on a provider that holds the value pushes at once. It answers
-`200` after that, and `503` with `Retry-After` when the issuer gave nothing
-usable. The order carries no value: the exchange only asks the issuer again.
+through the API at `POST /hosts/{host_id}/secrets/{service}/refresh` with a
+bearer token. The API passes the order to the exchange on loopback. The
+exchange forgets the held value, fetches now, and on a provider that holds
+the value pushes at once. The API answers `204` after that, and `503` with
+`Retry-After` when the issuer gave nothing usable. The order carries no
+value: the exchange only asks the issuer again.
 
 Provisioning mints a placeholder per secret. The placeholder names the host
 and the service, `drk.<host id>.<service>.<random>`. The entry keeps only a
@@ -204,7 +206,8 @@ customizes its host — `image`, `env`, `template`, `instance_type`, or
 ## Diagnostics
 
 `GET /doctor` runs one cheap, non-mutating probe per dependency —
-database, active provider, Tailscale when enabled — in parallel with a
+database, active provider, secrets exchange, Tailscale when enabled — in
+parallel with a
 per-probe timeout. Providers own their probe (`diagnose()`) and their
 remediation slug (`diagnose_hint`); the endpoint stays a thin
 orchestrator. It always returns 200; health is the `ok` field in the

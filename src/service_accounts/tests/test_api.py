@@ -54,6 +54,10 @@ async def test_token_works_on_each_router(client: AsyncClient, use_admin: bool) 
         patch("providers.exe.provider.ExeProvider.diagnose", new=AsyncMock(return_value="exe ok")),
         patch("networking.tailscale.Tailscale.diagnose", new=AsyncMock(return_value="tailnet ok")),
         patch(
+            "secrets_exchange.client.SecretsExchange.diagnose",
+            new=AsyncMock(return_value="exchange healthy"),
+        ),
+        patch(
             "http_proxies.service.HTTPProxyService.create_http_proxy", new=AsyncMock()
         ) as create_proxy,
     ):

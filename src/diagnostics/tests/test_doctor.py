@@ -2,11 +2,15 @@ import asyncio
 import contextlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
+from api.app import app
+from core import settings as settings_module
 from networking.tailscale import Tailscale
 from providers.exe.provider import ExeProvider
 from providers.registry import reset_vm_provider_cache
+from secrets_exchange.client import SecretsExchange
 
 
 @pytest.fixture(autouse=True)
@@ -15,8 +19,6 @@ def _reset_doctor_state() -> None:
     # clear cached singletons + the lifespan-installed tailscale slot so a
     # previous test's bindings don't leak in. The FastAPI app is module-scoped
     # so app.state survives between tests.
-    from api.app import app
-
     reset_vm_provider_cache()
     with contextlib.suppress(KeyError):
         del app.state.tailscale
@@ -53,7 +55,12 @@ async def test_doctor_reports_ok_when_all_probes_pass(client) -> None:
     assert body["ok"] is True
     assert body["active_provider"] == "exe"
     assert body["tailscale_enabled"] is True
-    assert [check["name"] for check in body["checks"]] == ["db", "provider", "tailscale"]
+    assert [check["name"] for check in body["checks"]] == [
+        "db",
+        "provider",
+        "exchange",
+        "tailscale",
+    ]
     assert all(check["hint"] is None for check in body["checks"])
     provider = next(check for check in body["checks"] if check["name"] == "provider")
     assert provider["detail"] == "exe ok"
@@ -84,8 +91,6 @@ async def test_doctor_propagates_failure_with_owner_hint(client) -> None:
 
 async def test_doctor_omits_tailscale_when_disabled(client, monkeypatch) -> None:
     """With TAILSCALE_ENABLED=false there is no tailscale row at all."""
-    from core import settings as settings_module
-
     monkeypatch.setenv("TAILSCALE_ENABLED", "false")
     settings_module.get_settings.cache_clear()
 
@@ -97,7 +102,7 @@ async def test_doctor_omits_tailscale_when_disabled(client, monkeypatch) -> None
 
     body = response.json()
     assert body["tailscale_enabled"] is False
-    assert [check["name"] for check in body["checks"]] == ["db", "provider"]
+    assert [check["name"] for check in body["checks"]] == ["db", "provider", "exchange"]
     settings_module.get_settings.cache_clear()
 
 
@@ -195,3 +200,26 @@ async def test_doctor_provider_probe_uses_the_provider_probe_timeout(client) -> 
     provider = next(check for check in response.json()["checks"] if check["name"] == "provider")
     assert provider["status"] == "ok"
     assert provider["detail"] == "slow but healthy"
+
+
+@pytest.fixture(autouse=True)
+def exchange_health(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    diagnose = AsyncMock(return_value="exchange healthy")
+    monkeypatch.setattr(SecretsExchange, "diagnose", diagnose)
+    return diagnose
+
+
+async def test_doctor_reports_exchange_failure(client, exchange_health: AsyncMock) -> None:
+    exchange_health.side_effect = httpx.ConnectError("connection refused")
+
+    with (
+        patch.object(ExeProvider, "diagnose", new=AsyncMock(return_value="exe ok")),
+        patch.object(Tailscale, "diagnose", new=AsyncMock(return_value="tailnet ok")),
+    ):
+        response = await client.get("/doctor", headers={"Authorization": "Bearer service-token"})
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    exchange = next(check for check in response.json()["checks"] if check["name"] == "exchange")
+    assert exchange["status"] == "fail"
+    assert exchange["hint"] == SecretsExchange.diagnose_hint

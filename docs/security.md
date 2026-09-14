@@ -105,10 +105,12 @@ API through it. It logs no credential.
 
 The real value is encrypted in the database. It passes through the exchange
 and the proxy for one request, and the exchange keeps an issuer's value in
-memory. An issuer that ends a value before its expiry orders a refresh with
-`POST /refresh/<host id>/<service>` on the exchange's private port. The order
-carries no value and no token. It makes the exchange ask the issuer again, so
-a stray order costs one fetch and nothing else. On docker-sbx the value lives
+memory. An issuer that ends a value before its expiry orders a refresh
+through the API at `POST /hosts/{host_id}/secrets/{service}/refresh` with an
+admin key or service account token. The exchange listens on loopback beside
+the API and takes the order from the API only. The order carries no value.
+It makes the exchange ask the issuer again, so a stray order costs one fetch
+and nothing else. On docker-sbx the value lives
 in sbx's own store, scoped to that sandbox, and
 drukbox runs no proxy there. Host deletion removes the sandbox's secrets and
 value files before the VM goes. The lease in `expires_at` schedules that

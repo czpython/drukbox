@@ -1,6 +1,6 @@
 """A mitmproxy addon: swaps a sandbox's placeholder for the real credential.
 
-    mitmdump -s /addon/swap.py --set exchange_url=http://exchange:8781
+    mitmdump -s /addon/swap.py --set exchange_url=http://127.0.0.1:8781
 
 TLS is terminated for hosts with a registered secret only. A loopback,
 private, link-local, or metadata destination is refused, for HTTP and CONNECT.
