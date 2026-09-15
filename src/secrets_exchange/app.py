@@ -2,7 +2,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import timedelta
 from typing import Annotated
 
@@ -28,29 +28,27 @@ TICK = timedelta(seconds=5)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """The client closes after the timer ends its round."""
     async with httpx.AsyncClient(timeout=10) as client:
         app.state.secrets = Secrets(client)
-        timer = asyncio.create_task(push_on_expiry(app.state.secrets))
-        timer.add_done_callback(log_stop)
+        stop = asyncio.Event()
+        timer = asyncio.create_task(push_on_expiry(app.state.secrets, stop))
         try:
             yield
         finally:
-            timer.cancel()
+            stop.set()
+            await timer
 
 
-def log_stop(timer: asyncio.Task[None]) -> None:
-    if not timer.cancelled() and (failure := timer.exception()):
-        logger.error("the push timer stopped", exc_info=failure)
-
-
-async def push_on_expiry(secrets: Secrets) -> None:
+async def push_on_expiry(secrets: Secrets, stop: asyncio.Event) -> None:
     """Proxy providers are not visited. Their value refreshes on request."""
-    while True:
+    while not stop.is_set():
         try:
             await push_active_hosts(secrets)
         except SQLAlchemyError as exc:
             logger.warning("the hosts could not be read: %s", exc)
-        await asyncio.sleep(TICK.total_seconds())
+        with suppress(TimeoutError):
+            await asyncio.wait_for(stop.wait(), TICK.total_seconds())
 
 
 async def push_active_hosts(secrets: Secrets) -> None:
@@ -70,6 +68,8 @@ async def push_to_host(secrets: Secrets, host: Host) -> None:
                 await secrets.push(host, service, entry)
     except (ProviderError, SecretDecryptError) as exc:
         logger.error("push for host %s failed: %s", host.name, exc)
+    except Exception:
+        logger.exception("push for host %s failed", host.name)
 
 
 app = FastAPI(title="Drukbox secrets exchange", lifespan=lifespan)

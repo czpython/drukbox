@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import logging
 import uuid
@@ -17,8 +18,14 @@ from hosts.service import utc_now
 from hosts.tests.conftest import stub_provider  # noqa: F401
 from providers.exceptions import ProviderTransportError
 from providers.registry import get_vm_provider
-from secrets_exchange.app import UPSTREAM_CREDENTIAL, UPSTREAM_HEADER, app, push_active_hosts
-from secrets_exchange.secrets import Secrets
+from secrets_exchange.app import (
+    UPSTREAM_CREDENTIAL,
+    UPSTREAM_HEADER,
+    app,
+    lifespan,
+    push_active_hosts,
+)
+from secrets_exchange.secrets import Secret, Secrets
 
 ISSUER = {"url": "https://mint.test/box/anthropic", "headers": {}, "refresh": "1h"}
 
@@ -307,6 +314,63 @@ async def test_one_host_in_trouble_costs_no_other_host_its_value(edge, caplog) -
         vm=f"sb-{healthy.hex[:12]}", name="anthropic", value="sk-ant-fresh"
     )
     assert f"sb-{troubled.hex[:12]}" in caplog.text
+
+
+@respx.mock
+@pytest.mark.usefixtures("stub_provider")
+async def test_a_push_that_fails_unexpectedly_costs_no_other_host_its_value(edge, caplog) -> None:
+    troubled, healthy = uuid.uuid4(), uuid.uuid4()
+
+    async def push_secret(*, vm: str, name: str, value: str) -> None:
+        if vm == f"sb-{troubled.hex[:12]}":
+            raise RuntimeError("the value files went away")
+
+    secrets = MagicMock(needs_value=True, push_secret=AsyncMock(side_effect=push_secret))
+    get_vm_provider("stub").secrets = secrets
+    entry = {"issuer": ISSUER, "placeholder_fingerprint": "a"}
+    await _create_host(troubled, {"anthropic": entry}, provider="stub")
+    await _create_host(healthy, {"anthropic": entry}, provider="stub")
+    respx.get(ISSUER["url"]).respond(json={"value": "sk-ant-fresh"})
+
+    with caplog.at_level(logging.ERROR):
+        await push_active_hosts(app.state.secrets)
+
+    secrets.push_secret.assert_any_await(
+        vm=f"sb-{healthy.hex[:12]}", name="anthropic", value="sk-ant-fresh"
+    )
+    assert f"push for host sb-{troubled.hex[:12]} failed" in caplog.text
+    assert "the value files went away" in caplog.text
+
+
+@respx.mock
+@pytest.mark.usefixtures("stub_provider")
+async def test_shutdown_waits_for_the_round_under_way_before_the_client_closes(
+    monkeypatch,
+) -> None:
+    secrets = MagicMock(needs_value=True, push_secret=AsyncMock())
+    get_vm_provider("stub").secrets = secrets
+    host_id = uuid.uuid4()
+    await _create_host(
+        host_id, {"anthropic": {"issuer": ISSUER, "placeholder_fingerprint": "a"}}, provider="stub"
+    )
+    respx.get(ISSUER["url"]).respond(json={"value": "sk-ant-fresh"})
+    fetch = Secret.fetch
+    fetching, release = asyncio.Event(), asyncio.Event()
+
+    async def paused_fetch(cls, issuer, client):
+        fetching.set()
+        await release.wait()
+        return await fetch(issuer, client)
+
+    monkeypatch.setattr(Secret, "fetch", classmethod(paused_fetch))
+
+    async with lifespan(app):
+        await asyncio.wait_for(fetching.wait(), 1)
+        asyncio.get_running_loop().call_soon(release.set)
+
+    secrets.push_secret.assert_awaited_once_with(
+        vm=f"sb-{host_id.hex[:12]}", name="anthropic", value="sk-ant-fresh"
+    )
 
 
 @respx.mock
