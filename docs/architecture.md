@@ -174,9 +174,9 @@ returns `202 Accepted`. Callers poll until the template becomes
 and deletes its own templates behind `TemplateCapability`.
 
 A host request can name an available template by its ID — the ID that
-the create returned. The template's image becomes the host image. An
-explicit `image`
-wins over the template, and the template wins over the provider default.
+the create returned. The template's image becomes the host image in place
+of the provider default. A request that names both an `image` and a
+template fails with `422`.
 Host creation never builds a missing or unavailable template. It returns
 a client error, and the caller decides when to build.
 
