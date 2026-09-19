@@ -127,10 +127,9 @@ async def test_create_host_rejects_unknown_template_id(client):
     assert response.json()["error_code"] == "UNKNOWN_TEMPLATE"
 
 
-async def test_create_host_explicit_image_wins_without_touching_template(client, monkeypatch):
-    """An explicit image bypasses template resolution and leaves usage unstamped."""
-    template = await create_template_record(image="derived:ignored")
-    monkeypatch.setattr("hosts.service.HostService.provision", AsyncMock())
+async def test_create_host_rejects_an_image_with_a_template(client):
+    """A request names one image source: both would silently drop one of them."""
+    template = await create_template_record(image="derived:image")
 
     response = await client.post(
         "/hosts",
@@ -138,12 +137,8 @@ async def test_create_host_explicit_image_wins_without_touching_template(client,
         json={"image": "explicit:image", "template": str(template.id)},
     )
 
-    assert response.status_code == 201
-    assert response.json()["image"] == "explicit:image"
-    async with async_session_factory() as session:
-        untouched_template = await session.get(Template, template.id)
-    assert untouched_template is not None
-    assert untouched_template.last_used_at is None
+    assert response.status_code == 422
+    assert "an image or a template" in response.text
 
 
 async def test_create_host_template_request_bypasses_pool(client, monkeypatch):

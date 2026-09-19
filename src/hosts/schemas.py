@@ -1,9 +1,17 @@
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Self
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from host_secrets import catalog
 from host_secrets.schemas import SECRET_NAME_PATTERN, SecretEntry
@@ -30,7 +38,7 @@ class HostCreate(BaseModel):
     image: str | None = None
     template: uuid.UUID | None = Field(
         default=None,
-        description="Template ID to fork from. Used only when the request has no image.",
+        description="Template ID to fork from. A request names an image or a template, not both.",
     )
     env: dict[str, str] = Field(default_factory=dict)
     secrets: dict[str, SecretEntry] = Field(
@@ -95,6 +103,12 @@ class HostCreate(BaseModel):
         # for any entry pam_env would change or drop.
         environment.get_persist(env)
         return env
+
+    @model_validator(mode="after")
+    def reject_image_with_template(self) -> Self:
+        if self.image and self.template:
+            raise ValueError("provide an image or a template, not both")
+        return self
 
 
 class HostOut(BaseModel):

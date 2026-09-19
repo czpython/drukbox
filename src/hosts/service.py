@@ -253,7 +253,7 @@ class HostService:
                 "SECRETS_PROXY_URL and SECRETS_PROXY_CA_FILE must name the proxy that "
                 "sandboxes dial and its certificate"
             )
-        if template and not image:
+        if template:
             image = await self._resolve_template_image(template_id=template, provider=vm.name)
         uid = uuid7()
         name = Host.build_name(uid)
