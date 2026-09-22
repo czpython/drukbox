@@ -4,9 +4,15 @@ set -euo pipefail
 
 : "${DRUKBOX_AUTHORIZED_KEY:?DRUKBOX_AUTHORIZED_KEY is required}"
 
-install -d -m 700 /root/.ssh
-printf '%s\n' "$DRUKBOX_AUTHORIZED_KEY" > /root/.ssh/authorized_keys
-chmod 600 /root/.ssh/authorized_keys
+# drukbox names the user callers SSH as. The stock image has root only; a
+# derived image adds its own user and sets DOCKER_SSH_USERNAME to it.
+user="${DRUKBOX_SSH_USER:-root}"
+home="$(getent passwd "$user" | cut -d: -f6)" \
+  || { echo "DRUKBOX_SSH_USER names no user in the image: $user" >&2; exit 1; }
+install -d -m 700 "$home/.ssh"
+printf '%s\n' "$DRUKBOX_AUTHORIZED_KEY" > "$home/.ssh/authorized_keys"
+chmod 600 "$home/.ssh/authorized_keys"
+chown -R "$user:" "$home/.ssh"
 
 # pam_env reads /etc/environment.
 for name in ${DRUKBOX_ENV_KEYS:-}; do

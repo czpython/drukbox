@@ -136,6 +136,25 @@ jobs:
       - name: Build proxy image
         run: docker build -t drukbox-proxy:validate deploy/proxy
 
+      - name: Build sandbox image
+        run: docker build -t drukbox/sandbox:validate images/local/
+
+      # dgoss boots the image the way the docker provider does and checks
+      # images/local/goss.yaml inside it.
+      - name: Validate the sandbox image
+        env:
+          GOSS_VERSION: 0.4.10
+          GOSS_FILES_PATH: images/local
+          GOSS_OPTS: -r 30s -s 1s --format documentation
+        run: |
+          curl -fsSL "https://github.com/goss-org/goss/releases/download/v$GOSS_VERSION/goss_${GOSS_VERSION}_linux_x86_64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" goss
+          curl -fsSL -o "$RUNNER_TEMP/dgoss" "https://github.com/goss-org/goss/releases/download/v$GOSS_VERSION/dgoss"
+          chmod +x "$RUNNER_TEMP/dgoss"
+          GOSS_PATH="$RUNNER_TEMP/goss" "$RUNNER_TEMP/dgoss" run \
+            -e DRUKBOX_SSH_USER=ubuntu -e 'DRUKBOX_AUTHORIZED_KEY=ssh-ed25519 AAAA goss' \
+            drukbox/sandbox:validate
+
   api-tests:
     name: Run API Tests (docker provider)
     runs-on: ubuntu-latest
