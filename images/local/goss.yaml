@@ -1,0 +1,16 @@
+# The boot contract of the image, checked by dgoss in CI with
+# DRUKBOX_SSH_USER=ubuntu and DRUKBOX_AUTHORIZED_KEY="ssh-ed25519 AAAA goss".
+file:
+  /home/ubuntu/.ssh/authorized_keys:
+    exists: true
+    mode: "0600"
+    owner: ubuntu
+    group: ubuntu
+    contents:
+      - ssh-ed25519 AAAA goss
+process:
+  sshd:
+    running: true
+port:
+  tcp:22:
+    listening: true

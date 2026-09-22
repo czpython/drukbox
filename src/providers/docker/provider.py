@@ -17,8 +17,9 @@ from .images import build_derived_image, remove_derived_image
 from .settings import DockerSettings
 
 _AUTHORIZED_KEY_ENV = "DRUKBOX_AUTHORIZED_KEY"
+_SSH_USER_ENV = "DRUKBOX_SSH_USER"
 _ENV_KEYS_ENV = "DRUKBOX_ENV_KEYS"
-_RESERVED_ENV_KEYS = frozenset({_AUTHORIZED_KEY_ENV, _ENV_KEYS_ENV})
+_RESERVED_ENV_KEYS = frozenset({_AUTHORIZED_KEY_ENV, _SSH_USER_ENV, _ENV_KEYS_ENV})
 
 
 class DockerProvider(VMProvider, TemplateCapability):
@@ -77,10 +78,10 @@ class DockerProvider(VMProvider, TemplateCapability):
             )
 
         caller_env = env or {}
-        # These names carry the per-VM public key and the env-key manifest the
-        # entrypoint reads; a caller-supplied value would clobber the generated
-        # key (locking the caller out) or rewrite the manifest. Reject rather
-        # than let `**caller_env` silently win.
+        # These names carry the per-VM public key, the SSH user, and the env-key
+        # manifest the entrypoint reads; a caller-supplied value would clobber
+        # the generated key (locking the caller out), seed another user, or
+        # rewrite the manifest. Reject rather than let `**caller_env` silently win.
         if reserved := _RESERVED_ENV_KEYS.intersection(caller_env):
             raise ProviderCommandError(
                 f"env keys reserved by the docker provider are not allowed: "
@@ -88,10 +89,11 @@ class DockerProvider(VMProvider, TemplateCapability):
             )
 
         private_key, public_key = generate_ed25519_keypair()
-        # The sandbox entrypoint seeds authorized_keys from the public key and
-        # persists the named caller vars into the container's session env.
+        # The sandbox entrypoint seeds the SSH user's authorized_keys from the
+        # public key and persists the named caller vars into the session env.
         container_env = {
             _AUTHORIZED_KEY_ENV: public_key,
+            _SSH_USER_ENV: self.settings.ssh_username,
             _ENV_KEYS_ENV: " ".join(caller_env),
             **caller_env,
         }

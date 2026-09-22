@@ -20,7 +20,10 @@ class DockerSettings(BaseSettings):
     )
     ssh_username: str = Field(
         default="root",
-        description="In-container user callers SSH as. The sandbox image runs sshd for root.",
+        description=(
+            "In-container user callers SSH as. The entrypoint seeds its authorized_keys; "
+            "the stock image has root only."
+        ),
     )
     ssh_host: IPv4Address | IPv6Address = Field(
         default=IPv4Address("127.0.0.1"),

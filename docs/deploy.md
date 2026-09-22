@@ -568,7 +568,7 @@ Docker provider:
 | --- | --- | --- |
 | `DOCKER_DEFAULT_IMAGE` | `ghcr.io/czpython/drukbox/sandbox:latest` | Sandbox image with sshd, git, and gh; auto-pulled. Build `images/local/Dockerfile` to customize. |
 | `DOCKER_SSH_HOST` | `127.0.0.1` | Daemon host address where Docker publishes sshd and callers dial it. |
-| `DOCKER_SSH_USERNAME` | `root` | In-container user callers SSH as. |
+| `DOCKER_SSH_USERNAME` | `root` | In-container user callers SSH as. The entrypoint seeds its `authorized_keys`; a derived image adds the user. |
 | `DOCKER_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `30.0` | ssh-keyscan retry budget for a fresh container. |
 
 The published image includes the Docker CLI. Mount the local daemon socket

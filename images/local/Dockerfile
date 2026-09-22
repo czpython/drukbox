@@ -3,8 +3,9 @@
 #
 #   docker build -t drukbox/sandbox:latest images/local/
 #
-# The entrypoint seeds authorized_keys from $DRUKBOX_AUTHORIZED_KEY (injected by
-# drukbox per host) and runs sshd in the foreground. Key-only auth; no password.
+# The entrypoint seeds authorized_keys for $DRUKBOX_SSH_USER (root by default)
+# from $DRUKBOX_AUTHORIZED_KEY, both injected by drukbox per host, and runs sshd
+# in the foreground. Key-only auth; no password.
 FROM ubuntu:24.04
 
 # gh comes from GitHub's own apt repository, as its install guide says.
