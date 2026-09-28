@@ -198,6 +198,9 @@ docker save drukbox/sbx-sandbox:latest -o /tmp/sbx-sandbox.tar
 sbx template load /tmp/sbx-sandbox.tar
 ```
 
+drukbox does these steps for each template that `POST /templates`
+builds, and then removes the Docker image.
+
 A sandbox creation takes approximately 20 seconds with a warm template
 cache, and more than 30 seconds at the first pull. Thus a warm pool
 (`POOL_SIZES`) is useful. Each sandbox gets the explicit

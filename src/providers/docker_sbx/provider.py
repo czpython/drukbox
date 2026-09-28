@@ -1,6 +1,7 @@
 import contextlib
 import shlex
 import shutil
+import tempfile
 from pathlib import Path
 from typing import ClassVar, Self
 
@@ -10,7 +11,8 @@ from providers import environment
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import TemplateCapability
 from providers.docker.api import DockerAPI
-from providers.docker.images import build_derived_image, remove_derived_image
+from providers.docker.exceptions import DockerProviderError
+from providers.docker.images import build_derived_image
 from providers.exceptions import (
     ProviderCommandError,
     ProviderNotFoundError,
@@ -23,20 +25,6 @@ from .exceptions import DockerSbxNotFoundError, DockerSbxProviderError
 from .process import SbxExecProcess
 from .secrets import SbxInjection
 from .settings import DockerSbxSettings
-
-
-def _bootstrap_script(*, public_key: str, env: dict[str, str], ssh_username: str) -> str:
-    home = "/root" if ssh_username == "root" else f"/home/{ssh_username}"
-    owner = shlex.quote(ssh_username)
-    lines = [
-        "set -euo pipefail",
-        f"install -d -m 700 -o {owner} -g {owner} {home}/.ssh",
-        f"printf '%s\\n' {shlex.quote(public_key)} > {home}/.ssh/authorized_keys",
-        f"chmod 600 {home}/.ssh/authorized_keys",
-        f"chown {owner}:{owner} {home}/.ssh/authorized_keys",
-    ]
-    # The runtime takes no environment at create time. pam_env reads this file.
-    return "\n".join([*lines, *environment.get_persist(env)]) + "\n"
 
 
 class DockerSbxProvider(VMProvider, TemplateCapability):
@@ -122,12 +110,22 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
             self._remove_sandbox_files(name)
             raise ProviderTransportError(str(exc)) from exc
 
+        username = self.settings.ssh_username
+        home = "/root" if username == "root" else f"/home/{username}"
+        owner = shlex.quote(username)
+        script = "\n".join(
+            [
+                "set -euo pipefail",
+                f"install -d -m 700 -o {owner} -g {owner} {home}/.ssh",
+                f"printf '%s\\n' {shlex.quote(public_key)} > {home}/.ssh/authorized_keys",
+                f"chmod 600 {home}/.ssh/authorized_keys",
+                f"chown {owner}:{owner} {home}/.ssh/authorized_keys",
+                # The runtime takes no environment at create time. pam_env reads this file.
+                *environment.get_persist(caller_env),
+                "",
+            ]
+        )
         try:
-            script = _bootstrap_script(
-                public_key=public_key,
-                env=caller_env,
-                ssh_username=self.settings.ssh_username,
-            )
             await self.api.run_bootstrap(name, script)
         except DockerSbxProviderError as exc:
             with contextlib.suppress(DockerSbxProviderError):
@@ -139,7 +137,7 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
         return VMCreateResult(
             provider_id=name,
             name=name,
-            ssh_username=self.settings.ssh_username,
+            ssh_username=username,
             private_key=private_key,
             public_key=public_key,
         )
@@ -180,14 +178,29 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
         setup_script: str,
         label: str,
     ) -> str:
-        return await build_derived_image(
+        image = await build_derived_image(
             self.docker,
             base_image=base_image,
             setup_script=setup_script,
         )
+        # sbx keeps its own image store. The Docker image only carries the build.
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                archive = Path(directory) / "template.tar"
+                await self.docker.save_image(image, archive)
+                await self.api.load_template(archive)
+            await self.docker.remove_image(image)
+        except (OSError, DockerProviderError, DockerSbxProviderError) as exc:
+            raise ProviderTransportError(str(exc)) from exc
+        return image
 
     async def delete_template_image(self, image: str) -> None:
-        await remove_derived_image(self.docker, image)
+        try:
+            await self.api.remove_template(image)
+        except DockerSbxNotFoundError as exc:
+            raise ProviderNotFoundError(f"sbx template '{image}' was not found") from exc
+        except DockerSbxProviderError as exc:
+            raise ProviderTransportError(str(exc)) from exc
 
     async def diagnose(self) -> str:
         return f"sandboxd reachable, {await self.api.sandbox_count()} sandbox(es)"

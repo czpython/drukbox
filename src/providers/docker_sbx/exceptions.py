@@ -3,7 +3,7 @@ class DockerSbxProviderError(RuntimeError):
 
 
 class DockerSbxNotFoundError(DockerSbxProviderError):
-    """The sandbox was not found."""
+    """The sandbox or the template was not found."""
 
 
 class DockerSbxTransportError(DockerSbxProviderError):

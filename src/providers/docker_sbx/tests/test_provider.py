@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from providers.docker.exceptions import DockerImageNotFoundError
 from providers.docker_sbx.exceptions import (
     DockerSbxNotFoundError,
     DockerSbxTransportError,
@@ -29,6 +28,8 @@ def _api_mock() -> MagicMock:
     api.run_bootstrap = AsyncMock()
     api.remove_sandbox = AsyncMock()
     api.sandbox_count = AsyncMock(return_value=2)
+    api.load_template = AsyncMock()
+    api.remove_template = AsyncMock()
     return api
 
 
@@ -36,6 +37,7 @@ def _docker_mock() -> MagicMock:
     docker = MagicMock()
     docker.build_image = AsyncMock()
     docker.remove_image = AsyncMock()
+    docker.save_image = AsyncMock()
     return docker
 
 
@@ -224,7 +226,7 @@ async def test_delete_vm_keeps_the_files_when_teardown_fails(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_build_template_image_builds_and_returns_the_local_image_tag(tmp_path):
+async def test_build_template_image_moves_the_built_image_into_sbx(tmp_path):
     api = _api_mock()
     docker = _docker_mock()
     provider = _provider(api, _settings(tmp_path), docker=docker)
@@ -237,25 +239,42 @@ async def test_build_template_image_builds_and_returns_the_local_image_tag(tmp_p
 
     assert image.startswith("drukbox-template:")
     assert docker.build_image.await_args.args[0] == image
+    saved, archive = docker.save_image.await_args.args
+    assert saved == image
+    api.load_template.assert_awaited_once_with(archive)
+    assert not archive.exists()
+    docker.remove_image.assert_awaited_once_with(image)
 
 
 @pytest.mark.asyncio
-async def test_delete_template_image_removes_the_local_image(tmp_path):
+async def test_build_template_image_translates_a_failed_load(tmp_path):
     api = _api_mock()
-    docker = _docker_mock()
-    provider = _provider(api, _settings(tmp_path), docker=docker)
+    api.load_template.side_effect = DockerSbxTransportError("sandboxd unavailable")
+    provider = _provider(api, _settings(tmp_path))
+
+    with pytest.raises(ProviderTransportError, match="sandboxd unavailable"):
+        await provider.build_template_image(
+            base_image="sandbox:base",
+            setup_script="apt-get update",
+            label="Node tools",
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_template_image_removes_the_sbx_template(tmp_path):
+    api = _api_mock()
+    provider = _provider(api, _settings(tmp_path))
 
     await provider.delete_template_image("drukbox-template:123456789abc")
 
-    docker.remove_image.assert_awaited_once_with("drukbox-template:123456789abc")
+    api.remove_template.assert_awaited_once_with("drukbox-template:123456789abc")
 
 
 @pytest.mark.asyncio
-async def test_delete_template_image_translates_a_missing_image(tmp_path):
+async def test_delete_template_image_translates_a_missing_template(tmp_path):
     api = _api_mock()
-    docker = _docker_mock()
-    docker.remove_image.side_effect = DockerImageNotFoundError("No such image")
-    provider = _provider(api, _settings(tmp_path), docker=docker)
+    api.remove_template.side_effect = DockerSbxNotFoundError('no image "drukbox-template:missing"')
+    provider = _provider(api, _settings(tmp_path))
 
     with pytest.raises(ProviderNotFoundError, match="was not found"):
         await provider.delete_template_image("drukbox-template:missing")
