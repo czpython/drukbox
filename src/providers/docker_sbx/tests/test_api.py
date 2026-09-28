@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -215,8 +216,43 @@ async def test_missing_sandbox_maps_to_not_found(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_template_load_and_removal_address_the_sbx_image_store(monkeypatch):
+    calls: list = []
+
+    async def fake_exec(*args, **kwargs):
+        calls.append(args)
+        return _process()
+
+    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", fake_exec)
+
+    await SbxCLI().load_template(Path("/tmp/template.tar"))
+    await SbxCLI().remove_template("drukbox-template:123456789abc")
+
+    assert calls == [
+        ("sbx", "template", "load", "/tmp/template.tar"),
+        # Without --force, the CLI asks for confirmation.
+        ("sbx", "template", "rm", "--force", "drukbox-template:123456789abc"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_missing_template_maps_to_not_found(monkeypatch):
+    create = AsyncMock(
+        return_value=_process(
+            returncode=1,
+            stderr=b"error: delete template: image not found: request failed: 404 Not Found: "
+            b'no image "drukbox-template:missing"',
+        )
+    )
+    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", create)
+
+    with pytest.raises(DockerSbxNotFoundError):
+        await SbxCLI().remove_template("drukbox-template:missing")
+
+
+@pytest.mark.asyncio
 async def test_stderr_merely_containing_not_found_stays_a_transport_error(monkeypatch):
-    # Only the CLI message for a missing sandbox can map to not-found. If an
+    # Only the CLI messages for a missing sandbox or template map to not-found. If an
     # auth error maps to not-found, delete_vm removes the record and the
     # workspace of a live sandbox.
     create = AsyncMock(

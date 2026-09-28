@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+from pathlib import Path
 
 from .exceptions import DockerSbxNotFoundError, DockerSbxTransportError
 
@@ -9,7 +10,7 @@ _SBX_TIMEOUT_SECONDS = 600.0
 
 # "credentials not found" must stay a transport error, or delete_vm takes a
 # live sandbox for a removed one.
-_SANDBOX_NOT_FOUND_RE = re.compile(r"sandbox '[^']*' not found")
+_NOT_FOUND_RE = re.compile(r"sandbox '[^']*' not found|no image \"[^\"]*\"")
 
 
 class SbxCLI:
@@ -119,6 +120,12 @@ class SbxCLI:
     async def remove_custom_secret(self, *, sandbox: str, placeholder: str) -> None:
         await self._run("secret", "rm", "-f", "--placeholder", placeholder, "--sandbox", sandbox)
 
+    async def load_template(self, archive: Path) -> None:
+        await self._run("template", "load", str(archive))
+
+    async def remove_template(self, template: str) -> None:
+        await self._run("template", "rm", "--force", template)
+
     async def sandbox_count(self) -> int:
         output = await self._run("ls", "--json")
         try:
@@ -154,7 +161,7 @@ class SbxCLI:
             ) from error
         if process.returncode != 0:
             detail = stderr.decode().strip() or f"sbx {args[0]} exited {process.returncode}"
-            if _SANDBOX_NOT_FOUND_RE.search(detail):
+            if _NOT_FOUND_RE.search(detail):
                 raise DockerSbxNotFoundError(detail)
             raise DockerSbxTransportError(detail)
         return stdout.decode()

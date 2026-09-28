@@ -137,6 +137,18 @@ async def test_missing_image_maps_to_not_found() -> None:
         await _api(fake).remove_image("drukbox-template:missing")
 
 
+async def test_save_image_streams_the_archive_to_the_file(tmp_path) -> None:
+    fake = _fake_docker()
+    fake.images.export_image = MagicMock()
+    export = fake.images.export_image.return_value.__aenter__.return_value
+    export.read = AsyncMock(side_effect=[b"layer-", b"data", b""])
+
+    await _api(fake).save_image("drukbox-template:123456789abc", tmp_path / "image.tar")
+
+    fake.images.export_image.assert_called_once_with("drukbox-template:123456789abc")
+    assert (tmp_path / "image.tar").read_bytes() == b"layer-data"
+
+
 async def test_push_image_sends_per_call_credentials() -> None:
     fake = _fake_docker()
 

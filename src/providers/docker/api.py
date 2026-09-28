@@ -1,4 +1,5 @@
 import io
+from pathlib import Path
 
 import aiodocker
 import aiohttp
@@ -101,6 +102,20 @@ class DockerAPI:
     async def remove_image(self, image: str) -> None:
         try:
             await self._get_client().images.delete(image)
+        except aiodocker.DockerError as exc:
+            if exc.status == 404:
+                raise DockerImageNotFoundError(str(exc)) from exc
+            raise DockerTransportError(_detail(exc)) from exc
+        except aiohttp.ClientError as exc:
+            raise DockerTransportError(str(exc)) from exc
+
+    async def save_image(self, image: str, archive: Path) -> None:
+        # An image can hold gigabytes, so it streams to disk and not to memory.
+        try:
+            async with self._get_client().images.export_image(image) as export:
+                with archive.open("wb") as file:
+                    while chunk := await export.read(1 << 20):
+                        file.write(chunk)
         except aiodocker.DockerError as exc:
             if exc.status == 404:
                 raise DockerImageNotFoundError(str(exc)) from exc
