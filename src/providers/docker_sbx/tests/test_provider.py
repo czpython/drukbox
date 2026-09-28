@@ -1,3 +1,4 @@
+import getpass
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -278,3 +279,15 @@ async def test_delete_template_image_translates_a_missing_template(tmp_path):
 
     with pytest.raises(ProviderNotFoundError, match="was not found"):
         await provider.delete_template_image("drukbox-template:missing")
+
+
+@pytest.mark.asyncio
+async def test_open_gateway_tunnel_translates_an_unknown_local_login_name(tmp_path, monkeypatch):
+    def unknown_uid():
+        raise KeyError("getpwuid(): uid not found: 1000")
+
+    monkeypatch.setattr(getpass, "getuser", unknown_uid)
+    provider = _provider(_api_mock(), _settings(tmp_path))
+
+    with pytest.raises(ProviderTransportError):
+        await provider.open_gateway_tunnel("sb-test")
