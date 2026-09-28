@@ -185,6 +185,40 @@ async def test_sandbox_count_treats_a_null_list_as_empty(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_check_ssh_endpoint_accepts_the_daemon_banner(monkeypatch):
+    captured: dict = {}
+
+    async def fake_exec(*args, **kwargs):
+        captured["args"] = args
+        return _process(stdout=b"SSH-2.0-Go\r\n")
+
+    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", fake_exec)
+
+    await SbxCLI().check_ssh_endpoint()
+
+    assert captured["args"][:3] == ("sbx", "ssh", "proxy")
+
+
+@pytest.mark.asyncio
+async def test_check_ssh_endpoint_reports_an_endpoint_the_cli_sees_as_off(monkeypatch):
+    disabled = b"error: the sandboxd SSH endpoint is disabled; restart sandboxd after enabling it"
+    create = AsyncMock(return_value=_process(returncode=1, stderr=disabled))
+    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", create)
+
+    with pytest.raises(DockerSbxTransportError, match="SSH endpoint is disabled"):
+        await SbxCLI().check_ssh_endpoint()
+
+
+@pytest.mark.asyncio
+async def test_check_ssh_endpoint_rejects_output_without_a_banner(monkeypatch):
+    create = AsyncMock(return_value=_process(stdout=b""))
+    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", create)
+
+    with pytest.raises(DockerSbxTransportError, match="no SSH banner"):
+        await SbxCLI().check_ssh_endpoint()
+
+
+@pytest.mark.asyncio
 async def test_remove_sandbox_forces_removal_of_an_attached_sandbox(monkeypatch):
     captured: dict = {}
 
