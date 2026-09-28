@@ -1,9 +1,12 @@
 import asyncio
 import contextlib
 import logging
+from typing import cast
 
 import asyncssh
 import asyncssh.sftp
+from asyncssh.constants import OPEN_ADMINISTRATIVELY_PROHIBITED, OPEN_CONNECT_FAILED
+from asyncssh.forward import SSHForwarder
 from sqlalchemy import select
 
 from core.database import async_session_factory
@@ -19,21 +22,12 @@ logger = logging.getLogger(__name__)
 
 _RECEIVE_CHUNK_BYTES = 32768
 
-# The gateway forwards each file operation to the sandbox by an opaque
-# handle. Two SFTP extensions ask the server to seek inside an open file:
-# server-side copy and sparse-range detection. The gateway cannot serve
-# them on an opaque handle. asyncssh advertises them from this class list
-# and gives no per-server control, so the gateway removes them from the
-# list. The filter is idempotent, thus it can run on each SFTP session.
+# IPv6 loopback does not reach the sandbox, so only IPv4 names are allowed.
+_LOOPBACK = frozenset({"127.0.0.1", "localhost"})
+
+# Server-side copy and sparse ranges seek inside an open file, which the
+# sandbox's opaque handles cannot do. asyncssh lists them per class only.
 _UNSUPPORTED_SFTP_EXTENSIONS = (b"copy-data", b"ranges@asyncssh.com")
-
-
-def _disable_unsupported_sftp_extensions() -> None:
-    asyncssh.sftp.SFTPServerHandler._extensions = [
-        extension
-        for extension in asyncssh.sftp.SFTPServerHandler._extensions
-        if extension[0] not in _UNSUPPORTED_SFTP_EXTENSIONS
-    ]
 
 
 class GatewayConnection(asyncssh.SSHServer):
@@ -41,20 +35,25 @@ class GatewayConnection(asyncssh.SSHServer):
     the same host, so one leaked key cannot probe other host names."""
 
     def __init__(self) -> None:
-        self.host: Host | None = None
+        # Set by validate_public_key: asyncssh opens no channel before auth.
+        self.host: Host
+        self._connection: asyncssh.SSHServerConnection
         self._sftp_backend: SandboxSftpBackend | None = None
         self._cleanup: asyncio.Task[None] | None = None
+        self._tunnel: asyncio.Future[asyncssh.SSHClientConnection] | None = None
 
-    def sftp_backend(self) -> SandboxSftpBackend:
+    def get_sftp_backend(self) -> SandboxSftpBackend:
         """Return the connection's one SFTP backend, shared by every SFTP
         session. It is made on first use; its process opens lazily."""
-        assert self.host is not None
-        if self._sftp_backend is None:
+        if not self._sftp_backend:
             provider = get_vm_provider(self.host.provider)
             if not provider.gateway_process_class:
                 raise asyncssh.SFTPOpUnsupported("cannot open a session for this host")
             self._sftp_backend = SandboxSftpBackend(provider.gateway_process_class, self.host.name)
         return self._sftp_backend
+
+    def connection_made(self, conn: asyncssh.SSHServerConnection) -> None:
+        self._connection = conn
 
     def connection_lost(self, exc: Exception | None) -> None:
         # Close the backend, so its exec process ends and the sandbox can
@@ -63,6 +62,36 @@ class GatewayConnection(asyncssh.SSHServer):
         if self._sftp_backend:
             with contextlib.suppress(RuntimeError):
                 self._cleanup = asyncio.get_running_loop().create_task(self._sftp_backend.aclose())
+        if self._tunnel:
+            # A tunnel that is still opening stops; an open one closes.
+            if not self._tunnel.done():
+                self._tunnel.cancel()
+            elif not self._tunnel.exception():
+                self._tunnel.result().close()
+
+    async def connection_requested(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, dest_host: str, dest_port: int, orig_host: str, orig_port: int
+    ) -> SSHForwarder:
+        """Forward a TCP channel to the sandbox's own loopback. Every channel
+        of this connection shares one tunnel into the sandbox."""
+        if dest_host not in _LOOPBACK:
+            raise asyncssh.ChannelOpenError(
+                OPEN_ADMINISTRATIVELY_PROHIBITED, "only sandbox loopback is allowed"
+            )
+        if not self._tunnel:
+            provider = get_vm_provider(self.host.provider)
+            self._tunnel = asyncio.ensure_future(provider.open_gateway_tunnel(self.host.name))
+        try:
+            tunnel = await self._tunnel
+        except ProviderError as error:
+            self._tunnel = None
+            logger.warning("gateway: forward failed for host=%s: %s", self.host.name, error)
+            raise asyncssh.ChannelOpenError(
+                OPEN_CONNECT_FAILED, "cannot connect to this host"
+            ) from error
+        forwarder = await self._connection.forward_tunneled_connection(tunnel, dest_host, dest_port)
+        logger.info("gateway: forward open host=%s port=%d", self.host.name, dest_port)
+        return forwarder
 
     def begin_auth(self, username: str) -> bool:
         return True
@@ -90,9 +119,7 @@ class GatewayConnection(asyncssh.SSHServer):
 
 
 async def _bridge(process: asyncssh.SSHServerProcess) -> None:
-    connection = process.channel.get_connection()
-    server = connection.get_owner()
-    assert isinstance(server, GatewayConnection) and server.host is not None
+    server = cast(GatewayConnection, process.channel.get_connection().get_owner())
     host = server.host
 
     terminal: TerminalSize | None = None
@@ -170,30 +197,30 @@ async def _pump_channel_to_process(
         sandbox_process.send(data)
 
 
-def _load_host_key(settings: GatewaySettings) -> asyncssh.SSHKey:
-    path = settings.host_key_path
-    if path.exists():
-        return asyncssh.read_private_key(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    key = asyncssh.generate_private_key("ssh-ed25519")
-    path.touch(mode=0o600)
-    path.write_bytes(key.export_private_key("openssh"))
-    logger.info("gateway: made a new host key at %s", path)
-    return key
-
-
 def _open_sftp(channel: asyncssh.SSHServerChannel) -> GatewaySFTPServer:
-    _disable_unsupported_sftp_extensions()
-    server = channel.get_connection().get_owner()
-    assert isinstance(server, GatewayConnection)
-    return GatewaySFTPServer(channel, server.sftp_backend())
+    asyncssh.sftp.SFTPServerHandler._extensions = [
+        extension
+        for extension in asyncssh.sftp.SFTPServerHandler._extensions
+        if extension[0] not in _UNSUPPORTED_SFTP_EXTENSIONS
+    ]
+    server = cast(GatewayConnection, channel.get_connection().get_owner())
+    return GatewaySFTPServer(channel, server.get_sftp_backend())
 
 
 async def start(settings: GatewaySettings) -> asyncssh.SSHAcceptor:
+    path = settings.host_key_path
+    if path.exists():
+        host_key = asyncssh.read_private_key(path)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        host_key = asyncssh.generate_private_key("ssh-ed25519")
+        path.touch(mode=0o600)
+        path.write_bytes(host_key.export_private_key("openssh"))
+        logger.info("gateway: made a new host key at %s", path)
     server = await asyncssh.listen(
         host=settings.bind_host,
         port=settings.ssh_port,
-        server_host_keys=[_load_host_key(settings)],
+        server_host_keys=[host_key],
         server_factory=GatewayConnection,
         process_factory=_bridge,
         encoding=None,
@@ -212,7 +239,6 @@ async def serve() -> None:
 
 
 if __name__ == "__main__":
-    # Service entry point: `python -m gateway.server`.
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",

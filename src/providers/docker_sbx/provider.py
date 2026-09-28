@@ -4,6 +4,8 @@ import shutil
 from pathlib import Path
 from typing import ClassVar, Self
 
+import asyncssh
+
 from providers import environment
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import TemplateCapability
@@ -153,6 +155,23 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
             raise ProviderTransportError(str(exc)) from exc
 
         self._remove_sandbox_files(name)
+
+    async def open_gateway_tunnel(self, name: str) -> asyncssh.SSHClientConnection:
+        # sandboxd authenticates the OS user on its local socket, and sbx itself
+        # trusts the host key on first use. No key crosses a network.
+        try:
+            return await asyncssh.connect(
+                f"{name}.sbx",
+                username=self.settings.ssh_username,
+                proxy_command=["env", "SBX_NO_TELEMETRY=1", "sbx", "ssh", "proxy", f"{name}.sbx"],
+                known_hosts=None,
+                config=None,
+                client_keys=None,
+                agent_path=None,
+                preferred_auth="none",
+            )
+        except (OSError, asyncssh.Error) as exc:
+            raise ProviderTransportError(f"sbx could not open a tunnel: {exc}") from exc
 
     async def build_template_image(
         self,
