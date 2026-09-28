@@ -204,7 +204,9 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
             raise ProviderTransportError(str(exc)) from exc
 
     async def diagnose(self) -> str:
-        return f"sandboxd reachable, {await self.api.sandbox_count()} sandbox(es)"
+        count = await self.api.sandbox_count()
+        await self.api.check_ssh_endpoint()
+        return f"sandboxd reachable, {count} sandbox(es), SSH endpoint ready"
 
     async def aclose(self) -> None:
         await self.docker.aclose()

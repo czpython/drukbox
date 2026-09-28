@@ -137,6 +137,14 @@ class SbxCLI:
                 f"sbx ls returned an unreadable sandbox list: {output.strip()!r}"
             ) from error
 
+    async def check_ssh_endpoint(self) -> None:
+        """The gateway tunnel needs the daemon's SSH endpoint. The CLI reads the
+        endpoint's feature flag from its cache, so a container without the
+        cache sees it as off. The daemon sends its banner for any name."""
+        output = await self._run("ssh", "proxy", "drukbox-diagnose.sbx")
+        if not output.startswith("SSH-"):
+            raise DockerSbxTransportError(f"sbx ssh proxy sent no SSH banner: {output.strip()!r}")
+
     async def _run(self, *args: str, stdin: str | None = None) -> str:
         try:
             process = await asyncio.create_subprocess_exec(

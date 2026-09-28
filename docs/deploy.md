@@ -153,26 +153,50 @@ In this mode, no mounts and no extra variables are necessary. The CLI
 finds the daemon socket automatically.
 
 drukbox can also run as a container adjacent to the daemon. Docker does
-not document this mode; drukbox uses the CLI's own daemon-endpoint
-variable, `DOCKER_SANDBOXES_API`. Mount the daemon socket, the `sbx`
-binary of the host (then the CLI version and the daemon version always
-agree), the CLI auth store, and the workspace root:
+not document this mode. Run the container with the uid of the daemon
+owner. Mount the `sbx` binary of the host, so that the CLI version and
+the daemon version always agree. Mount the sbx directories and the
+drukbox directory at the same paths as on the host:
 
 ```bash
 docker run --rm --network host \
-  --mount type=bind,src=$HOME/.local/state/sandboxes/sandboxes/sandboxd/sandboxd.sock,dst=/run/sandboxd.sock \
+  --user "$(id -u):$(id -g)" \
   --mount type=bind,src=$(command -v sbx),dst=/usr/local/bin/sbx,readonly \
-  --mount type=bind,src=$HOME/.config/com.docker.sandboxes,dst=/root/.config/com.docker.sandboxes,readonly \
-  --mount type=bind,src=$HOME/.drukbox/sbx-workspaces,dst=$HOME/.drukbox/sbx-workspaces \
-  --env DOCKER_SANDBOXES_API=unix:///run/sandboxd.sock \
+  --mount type=bind,src=$HOME/.local/state/sandboxes/sandboxes/sandboxd,dst=$HOME/.local/state/sandboxes/sandboxes/sandboxd \
+  --mount type=bind,src=$HOME/.cache/sandboxes,dst=$HOME/.cache/sandboxes \
+  --mount type=bind,src=$HOME/.config/com.docker.sandboxes,dst=$HOME/.config/com.docker.sandboxes \
+  --mount type=bind,src=$HOME/.config/sandboxes,dst=$HOME/.config/sandboxes \
+  --mount type=bind,src=$HOME/.drukbox,dst=$HOME/.drukbox \
+  --env XDG_CONFIG_HOME=$HOME/.config \
+  --env XDG_CACHE_HOME=$HOME/.cache \
+  --env XDG_STATE_HOME=$HOME/.local/state \
+  --env DOCKER_SANDBOXES_API=unix://$HOME/.local/state/sandboxes/sandboxes/sandboxd/sandboxd.sock \
   --env DOCKER_SBX_WORKSPACE_ROOT=$HOME/.drukbox/sbx-workspaces \
   --env-file drukbox.env \
   ghcr.io/czpython/drukbox:latest
 ```
 
-The daemon reads workspace paths on its own filesystem. Thus the
-workspace mount must have the same path on the host and in the
-container. The janitor and pool containers need the same mounts and
+The container has no home directory for the daemon owner. Thus the
+`XDG_*` variables point the CLI to the mounted directories. The mounts
+have these reasons:
+
+- The daemon reads workspace paths on its own filesystem. Thus the
+  workspace root must have the same path on the host and in the
+  container.
+- The mount holds the directory of the daemon socket, not the socket
+  file. A daemon restart makes a new socket, and a file mount keeps the
+  old one.
+- `sbx ssh proxy` finds the socket through `XDG_STATE_HOME` only, and
+  it ignores `DOCKER_SANDBOXES_API`. The other commands use
+  `DOCKER_SANDBOXES_API`.
+- The CLI reads its feature flags from the cache. Without the cache,
+  it sees the SSH endpoint of the daemon as off, and the gateway tunnel
+  fails. `/doctor` reports this failure.
+- The auth store and the settings store must be writable. The CLI takes
+  a lock file in the auth store also for reads, and it writes the
+  settings store on first use.
+
+The janitor, pool, and gateway containers need the same mounts and
 variables.
 
 Callers reach the sandboxes through
@@ -608,6 +632,6 @@ Docker Sandboxes provider:
 | `DOCKER_SBX_WORKSPACE_ROOT` | `~/.drukbox/sbx-workspaces` | Directory with one temporary workspace for each sandbox, and a `secrets` directory with the value files sbx reads. The path must be the same for drukbox and for the daemon. |
 
 The published image does not contain the `sbx` CLI. Mount the binary and
-the auth store of the host, as
+the sbx directories of the host, as
 [Local microVMs with Docker Sandboxes](#local-microvms-with-docker-sandboxes)
-shows. Set `DOCKER_SANDBOXES_API` to the mounted daemon socket.
+shows.
