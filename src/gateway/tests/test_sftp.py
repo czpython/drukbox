@@ -147,13 +147,6 @@ async def test_concurrent_sftp_sessions_share_one_backend(connected, tmp_path):
     assert LocalProcess.open_count == 1
 
 
-async def test_port_forwarding_stays_refused(connected):
-    # A direct-tcpip channel asks the gateway to open an outbound connection.
-    # The gateway serves no forwarding, thus the request is refused.
-    with pytest.raises(asyncssh.ChannelOpenError):
-        await connected.open_connection("127.0.0.1", 9)
-
-
 async def test_a_command_runs_with_home_at_the_per_host_home(connected, tmp_path):
     result = await connected.run('printf %s "$HOME"')
     assert result.stdout == str(tmp_path / "sb-sftp")

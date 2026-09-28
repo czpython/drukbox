@@ -2,7 +2,10 @@ import abc
 from dataclasses import dataclass
 from typing import ClassVar, NamedTuple, Self
 
+import asyncssh
+
 from providers.capabilities import ProxyInjection, SecretInjectionCapability
+from providers.exceptions import ProviderTransportError
 
 
 @dataclass(frozen=True)
@@ -103,6 +106,11 @@ class VMProvider(abc.ABC):
 
     @abc.abstractmethod
     async def delete_vm(self, name: str) -> None: ...
+
+    async def open_gateway_tunnel(self, name: str) -> asyncssh.SSHClientConnection:
+        """Open an SSH tunnel into a gateway host's sandbox. The gateway
+        forwards TCP channels through it."""
+        raise ProviderTransportError(f"{self.name} hosts have no gateway tunnel")
 
     @abc.abstractmethod
     async def diagnose(self) -> str:

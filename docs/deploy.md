@@ -221,12 +221,27 @@ idle sandbox; a connection through the gateway wakes it (approximately
 6 seconds) and keeps it awake while connected. The first data can
 therefore come after a short delay.
 
-The gateway serves an interactive shell, command execution, and SFTP.
-It refuses scp (the legacy protocol) and port forwarding. SFTP runs the
+The gateway serves an interactive shell, command execution, SFTP, and
+local port forwarding to the sandbox loopback. It refuses scp (the
+legacy protocol) and remote port forwarding. SFTP runs the
 sandbox's own SFTP server over one persistent session for each SSH
 connection, thus repeated file operations on one connection start no new
 session. The session closes after a short idle period, so an inactive
 sandbox still sleeps.
+
+Forward a local port to a service that listens on the sandbox loopback:
+
+```bash
+ssh -N -p 2222 -i <private-key> -L 43123:127.0.0.1:43123 <host-name>@<gateway-address>
+```
+
+The destination must be `127.0.0.1` or `localhost`. The gateway refuses
+all other destinations, also the IPv6 loopback. For `docker-sbx`, the
+gateway opens one tunnel through `sbx ssh proxy` for each caller
+connection. All forwarding channels of that caller connection use it,
+and it closes when the caller disconnects. sandboxd accepts a channel to
+a closed port and then closes it immediately. Thus the caller gets an
+immediate end of data, not a channel-open error.
 
 Every session runs with HOME set to the per-host home directory
 `/home/<host-name>`. The gateway makes this directory and moves into it

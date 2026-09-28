@@ -1,10 +1,13 @@
 import asyncio
+import hashlib
+import os
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import ClassVar
 
 import asyncssh
 import pytest
+from asyncssh.constants import OPEN_ADMINISTRATIVELY_PROHIBITED, OPEN_CONNECT_FAILED
 
 from core.database import async_session_factory
 from gateway import server as gateway_server
@@ -93,6 +96,75 @@ def fake_provider(monkeypatch):
     provider = SimpleNamespace(gateway_process_class=FakeProcess)
     monkeypatch.setattr(gateway_server, "get_vm_provider", lambda name: provider)
     return FakeProcess
+
+
+class FakeSandboxd(asyncssh.SSHServer):
+    """Accepts any user and forwards each TCP channel on this machine."""
+
+    def begin_auth(self, username: str) -> bool:
+        return False
+
+    def connection_requested(self, dest_host, dest_port, orig_host, orig_port) -> bool:
+        return True
+
+
+@pytest.fixture
+async def sandbox_provider(monkeypatch):
+    sandboxd = await asyncssh.listen(
+        "127.0.0.1",
+        0,
+        server_host_keys=[asyncssh.generate_private_key("ssh-ed25519")],
+        server_factory=FakeSandboxd,
+    )
+    provider = SimpleNamespace(gateway_process_class=FakeProcess, tunnels=[])
+
+    async def open_gateway_tunnel(name):
+        tunnel = await asyncssh.connect(
+            "127.0.0.1",
+            sandboxd.get_port(),
+            username=name,
+            known_hosts=None,
+            config=None,
+            client_keys=None,
+            agent_path=None,
+        )
+        provider.tunnels.append(tunnel)
+        return tunnel
+
+    provider.open_gateway_tunnel = open_gateway_tunnel
+    monkeypatch.setattr(gateway_server, "get_vm_provider", lambda name: provider)
+    yield provider
+    sandboxd.close()
+
+
+@pytest.fixture
+async def forwarding_caller(gateway_settings, sandbox_provider):
+    caller_key = asyncssh.generate_private_key("ssh-ed25519")
+    await _insert_active_host("sb-forward", caller_key.export_public_key().decode())
+    server = await gateway_server.start(gateway_settings)
+    connection = await asyncssh.connect(
+        "127.0.0.1",
+        server.get_port(),
+        username="sb-forward",
+        client_keys=[caller_key],
+        known_hosts=None,
+    )
+    yield connection
+    connection.close()
+    server.close()
+
+
+@pytest.fixture
+async def loopback_service():
+    # The digest comes after the caller's EOF, so an answer proves half-close.
+    async def answer(reader, writer):
+        writer.write(hashlib.sha256(await reader.read()).digest())
+        await writer.drain()
+        writer.close()
+
+    service = await asyncio.start_server(answer, "127.0.0.1", 0)
+    yield service.sockets[0].getsockname()[1]
+    service.close()
 
 
 @pytest.fixture
@@ -311,3 +383,47 @@ async def test_gateway_streams_binary_stdin_to_an_exec_and_delivers_the_status(
 
     assert result.exit_status == 4
     assert target.read_bytes() == payload
+
+
+async def test_gateway_forwards_a_channel_to_sandbox_loopback(forwarding_caller, loopback_service):
+    payload = os.urandom(1 << 20)
+    reader, writer = await forwarding_caller.open_connection("127.0.0.1", loopback_service)
+    writer.write(payload)
+    writer.write_eof()
+
+    assert await reader.read() == hashlib.sha256(payload).digest()
+
+
+@pytest.mark.parametrize("destination", ["10.0.0.1", "::1", "example.com"])
+async def test_gateway_refuses_a_destination_outside_sandbox_loopback(
+    forwarding_caller, sandbox_provider, destination
+):
+    with pytest.raises(asyncssh.ChannelOpenError) as refusal:
+        await forwarding_caller.open_connection(destination, 80)
+
+    assert refusal.value.code == OPEN_ADMINISTRATIVELY_PROHIBITED
+    assert not sandbox_provider.tunnels
+
+
+async def test_gateway_shares_one_tunnel_and_closes_it_with_the_caller(
+    forwarding_caller, sandbox_provider, loopback_service
+):
+    for _ in range(2):
+        reader, writer = await forwarding_caller.open_connection("localhost", loopback_service)
+        writer.write_eof()
+        await reader.read()
+    forwarding_caller.close()
+
+    [tunnel] = sandbox_provider.tunnels
+    await asyncio.wait_for(tunnel.wait_closed(), 5)
+
+
+async def test_gateway_reports_a_tunnel_that_fails_to_open(forwarding_caller, sandbox_provider):
+    async def refuse(name):
+        raise ProviderTransportError("sandboxd is not running")
+
+    sandbox_provider.open_gateway_tunnel = refuse
+    with pytest.raises(asyncssh.ChannelOpenError) as refusal:
+        await forwarding_caller.open_connection("127.0.0.1", 80)
+
+    assert refusal.value.code == OPEN_CONNECT_FAILED
