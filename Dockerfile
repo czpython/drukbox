@@ -31,6 +31,10 @@ RUN useradd --system --no-create-home --uid 1001 appuser
 
 USER appuser
 
+# A deployment can run the image as a uid with no passwd entry. getpass,
+# and so asyncssh, reads the login name from LOGNAME first.
+ENV LOGNAME=appuser
+
 EXPOSE 8780
 
 HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=3 \

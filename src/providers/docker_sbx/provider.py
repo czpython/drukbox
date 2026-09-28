@@ -156,7 +156,8 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
 
     async def open_gateway_tunnel(self, name: str) -> asyncssh.SSHClientConnection:
         # sandboxd authenticates the OS user on its local socket, and sbx itself
-        # trusts the host key on first use. No key crosses a network.
+        # trusts the host key on first use. No key crosses a network. asyncssh
+        # raises ValueError when the local login name is unknown.
         try:
             return await asyncssh.connect(
                 f"{name}.sbx",
@@ -168,7 +169,7 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
                 agent_path=None,
                 preferred_auth="none",
             )
-        except (OSError, asyncssh.Error) as exc:
+        except (OSError, ValueError, asyncssh.Error) as exc:
             raise ProviderTransportError(f"sbx could not open a tunnel: {exc}") from exc
 
     async def build_template_image(

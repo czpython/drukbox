@@ -12,6 +12,7 @@ from asyncssh.constants import OPEN_ADMINISTRATIVELY_PROHIBITED, OPEN_CONNECT_FA
 from core.database import async_session_factory
 from gateway import server as gateway_server
 from gateway.settings import GatewaySettings
+from gateway.tests.localprocess import LocalProcess
 from hosts.models import Host, HostStatus
 from providers.base import SandboxProcess, TerminalSize
 from providers.exceptions import ProviderTransportError
@@ -169,8 +170,6 @@ async def loopback_service():
 
 @pytest.fixture
 def local_provider(monkeypatch):
-    from gateway.tests.localprocess import LocalProcess
-
     provider = SimpleNamespace(gateway_process_class=LocalProcess)
     monkeypatch.setattr(gateway_server, "get_vm_provider", lambda name: provider)
     return LocalProcess
@@ -418,7 +417,9 @@ async def test_gateway_shares_one_tunnel_and_closes_it_with_the_caller(
     await asyncio.wait_for(tunnel.wait_closed(), 5)
 
 
-async def test_gateway_reports_a_tunnel_that_fails_to_open(forwarding_caller, sandbox_provider):
+async def test_gateway_fails_only_the_channel_when_the_tunnel_fails_to_open(
+    forwarding_caller, sandbox_provider
+):
     async def refuse(name):
         raise ProviderTransportError("sandboxd is not running")
 
@@ -427,3 +428,4 @@ async def test_gateway_reports_a_tunnel_that_fails_to_open(forwarding_caller, sa
         await forwarding_caller.open_connection("127.0.0.1", 80)
 
     assert refusal.value.code == OPEN_CONNECT_FAILED
+    assert (await forwarding_caller.run("true", input="\n")).exit_status == 7
