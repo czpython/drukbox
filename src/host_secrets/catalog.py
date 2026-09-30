@@ -39,9 +39,14 @@ CATALOG: dict[str, Service] = {
 }
 
 
+# git and gh need the whole service: its variable, and Basic at github.com.
+# An entry for one of these hosts is that service under any name.
+BUILT_IN_HOSTS: dict[str, Service] = {"github.com": CATALOG["github"]}
+
+
 def service(name: str, entry: dict[str, Any]) -> Service:
     if "host" in entry:
-        return Service(
+        return BUILT_IN_HOSTS.get(entry["host"]) or Service(
             entry["auth_variable"],
             (Upstream(entry["host"], entry["auth_header"], entry["auth_prefix"]),),
         )

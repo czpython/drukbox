@@ -74,6 +74,24 @@ async def test_the_git_host_of_github_gets_basic_with_the_token_as_the_password(
     )
 
 
+async def test_an_entry_for_github_com_under_another_name_is_the_github_service(edge) -> None:
+    host_id = uuid.uuid4()
+    minted = Placeholder.mint(host_id, "github_reviewer")
+    entry = {
+        "host": "github.com",
+        "value": "ghs_real",
+        "placeholder_fingerprint": minted.fingerprint,
+    }
+    await _create_host(host_id, {"github_reviewer": entry})
+
+    at_git = await edge.get("/authorize", headers=_headers(str(minted), "github.com"))
+    at_api = await edge.get("/authorize", headers=_headers(str(minted), "api.github.com"))
+
+    assert (at_git.status_code, at_api.status_code) == (200, 200)
+    assert at_git.headers["X-Upstream-Credential"].startswith("Basic ")
+    assert at_api.headers["X-Upstream-Credential"] == "Bearer ghs_real"
+
+
 async def test_a_custom_service_gets_its_own_header_shape(edge) -> None:
     host_id = uuid.uuid4()
     minted = Placeholder.mint(host_id, "acme")

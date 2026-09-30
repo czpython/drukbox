@@ -109,6 +109,22 @@ async def test_a_new_value_replaces_the_file_and_the_secret(tmp_path: Path) -> N
     assert api.set_custom_secret.await_count == 2
 
 
+async def test_the_github_service_under_another_name_is_sbx_own_github_secret(
+    tmp_path: Path,
+) -> None:
+    api = _api_mock()
+    placeholder = Placeholder.mint(uuid.uuid4(), "github_reviewer")
+
+    environment = await SbxInjection(api, tmp_path).put_secret(
+        vm="sb-one", service=CATALOG["github"], placeholder=placeholder, value="ghs_real"
+    )
+
+    path = tmp_path / "sb-one" / "github_reviewer"
+    api.set_secret.assert_awaited_once_with("github", sandbox="sb-one", command=f"cat {path}")
+    api.set_custom_secret.assert_not_awaited()
+    assert environment == {"GH_TOKEN": str(placeholder)}
+
+
 async def test_a_custom_entry_named_github_is_a_custom_secret_on_its_host(tmp_path: Path) -> None:
     api = _api_mock()
     placeholder = Placeholder.mint(uuid.uuid4(), "github")

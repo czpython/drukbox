@@ -11,7 +11,7 @@ from pydantic import (
     model_validator,
 )
 
-from host_secrets.catalog import BEARER_HEADER, BEARER_PREFIX, SERVICE_FIELDS
+from host_secrets.catalog import BEARER_HEADER, BEARER_PREFIX, BUILT_IN_HOSTS, SERVICE_FIELDS
 
 HOST_PATTERN = (
     r"^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
@@ -68,17 +68,31 @@ class SecretEntry(BaseModel):
     value: SecretValue | None = None
     issuer: SecretIssuer | None = None
 
+    @field_validator("host")
+    @classmethod
+    def lower_case(cls, host: str | None) -> str | None:
+        # The proxy and the built-in hosts match a host exactly.
+        if host:
+            return host.lower()
+        return host
+
     @model_validator(mode="after")
     def validate_shape(self) -> Self:
         if bool(self.value) == bool(self.issuer):
             raise ValueError("provide exactly one of value or issuer")
 
-        if SERVICE_FIELDS & self.model_fields_set and not (self.host and self.auth_variable):
+        custom = SERVICE_FIELDS & self.model_fields_set and self.host not in BUILT_IN_HOSTS
+        if custom and not (self.host and self.auth_variable):
             raise ValueError("a custom service needs host and auth_variable")
         return self
 
     def to_storage(self) -> dict[str, Any]:
-        entry = self.model_dump(include=set(SERVICE_FIELDS)) if self.host else {}
+        # A built-in host carries the whole service, so the entry keeps only the host.
+        entry: dict[str, Any] = {}
+        if self.host in BUILT_IN_HOSTS:
+            entry = {"host": self.host}
+        elif self.host:
+            entry = self.model_dump(include=set(SERVICE_FIELDS))
         if self.value:
             entry["value"] = self.value.get_secret_value()
         elif self.issuer:

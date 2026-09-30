@@ -38,5 +38,17 @@ def test_a_custom_entry_names_one_host_with_its_own_header_shape() -> None:
     assert service("acme", entry).upstreams[0].credential("ak_live") == "ak_live"
 
 
+def test_an_entry_for_github_com_is_the_github_service_under_any_name() -> None:
+    entry = {
+        "host": "github.com",
+        "auth_header": "Authorization",
+        "auth_prefix": "Bearer ",
+        "auth_variable": "GITHUB_REVIEWER",
+        "value": "ghs_x",
+    }
+
+    assert service("github_reviewer", entry) is CATALOG["github"]
+
+
 def test_a_built_in_entry_resolves_through_the_catalog() -> None:
     assert service("github", {"value": "ghs_x"}) is CATALOG["github"]

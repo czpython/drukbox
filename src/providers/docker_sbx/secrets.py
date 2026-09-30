@@ -12,9 +12,9 @@ from providers.exceptions import ProviderCommandError, ProviderTransportError
 from .api import SbxCLI
 from .exceptions import DockerSbxProviderError
 
-# sbx's own secret for these covers git and gh, when the entry reaches the
-# service itself. Every other entry is a custom secret on its hosts.
-_NATIVE_SERVICES = {"github": CATALOG["github"]}
+# sbx's own secret for these covers git and gh, under the name sbx gives it.
+# Every other entry is a custom secret on its hosts.
+_NATIVE_SERVICES = {CATALOG["github"]: "github"}
 
 
 class SbxInjection(SecretInjectionCapability):
@@ -43,8 +43,8 @@ class SbxInjection(SecretInjectionCapability):
         path = self.write_value(vm, placeholder.service, value)
         command = f"cat {shlex.quote(str(path))}"
         try:
-            if _NATIVE_SERVICES.get(placeholder.service) == service:
-                await self.api.set_secret(placeholder.service, sandbox=vm, command=command)
+            if service in _NATIVE_SERVICES:
+                await self.api.set_secret(_NATIVE_SERVICES[service], sandbox=vm, command=command)
             else:
                 await self.api.set_custom_secret(
                     sandbox=vm,
@@ -65,7 +65,7 @@ class SbxInjection(SecretInjectionCapability):
         """sbx keeps a sandbox's secrets after the sandbox is removed, and
         answers a missing one with success, so this can run again."""
         try:
-            for name in _NATIVE_SERVICES:
+            for name in _NATIVE_SERVICES.values():
                 await self.api.remove_secret(name, sandbox=vm)
             for placeholder in await self.api.custom_placeholders(sandbox=vm):
                 await self.api.remove_custom_secret(sandbox=vm, placeholder=placeholder)

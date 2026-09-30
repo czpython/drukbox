@@ -78,11 +78,20 @@ class HostCreate(BaseModel):
     def reject_unknown_secret_services(
         cls, secrets: dict[str, SecretEntry]
     ) -> dict[str, SecretEntry]:
+        variables: dict[str, str] = {}
         for name, registration in secrets.items():
             if not re.fullmatch(SECRET_NAME_PATTERN, name):
                 raise ValueError(f"invalid secret service name {name!r}")
             if not registration.host and name not in catalog.CATALOG:
                 raise ValueError(f"unknown secret service {name!r}")
+            # Two entries that resolve to one service would overwrite each other's variable.
+            variable = catalog.service(name, registration.to_storage()).auth_variable
+            if variable in variables:
+                raise ValueError(
+                    f"secret services {variables[variable]!r} and {name!r} share the "
+                    f"variable {variable}"
+                )
+            variables[variable] = name
         return secrets
 
     @field_validator("env")
