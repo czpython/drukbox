@@ -55,6 +55,16 @@ def test_custom_entry_stores_the_whole_service_with_bearer_defaults() -> None:
     }
 
 
+def test_an_entry_for_a_built_in_host_keeps_only_the_host() -> None:
+    registration = SecretEntry.model_validate(
+        {"host": "GitHub.com", "auth_variable": "GITHUB_REVIEWER", "value": "static-secret"}
+    )
+    bare = SecretEntry.model_validate({"host": "github.com", "value": "static-secret"})
+
+    assert registration.to_storage() == {"host": "github.com", "value": "static-secret"}
+    assert bare.to_storage() == registration.to_storage()
+
+
 def test_custom_entry_can_override_the_auth_shape() -> None:
     registration = SecretEntry.model_validate(
         {

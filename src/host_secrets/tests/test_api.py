@@ -74,6 +74,10 @@ async def test_secrets_are_ciphertext_at_rest(client, monkeypatch) -> None:
         ({"acme": {"value": "one"}}, "unknown secret service"),
         ({"GitHub": {"value": "one"}}, "invalid secret service name"),
         (
+            {"github": {"value": "one"}, "reviewer": {"host": "github.com", "value": "one"}},
+            "share the variable GH_TOKEN",
+        ),
+        (
             {
                 "anthropic": {
                     "value": "one",
