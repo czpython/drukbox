@@ -93,8 +93,9 @@ after no stored row needs it.
 
 Provider tokens (`EXE_API_TOKEN`, `HETZNER_API_TOKEN`, Tailscale OAuth), the
 registry password (`REGISTRY_PASSWORD`), and AWS credentials are read from the
-environment or the AWS SDK default chain. They are never written to the
-database and never returned by the API.
+environment, from [secret files](deploy.md#secret-files), or from the AWS SDK
+default chain. They are never written to the database and never returned by
+the API.
 
 ## What the proxy protects
 

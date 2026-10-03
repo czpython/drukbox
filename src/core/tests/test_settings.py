@@ -1,10 +1,15 @@
 import os
+from pathlib import Path
 
 import pytest
+from pydantic_settings import BaseSettings
 
 import conftest
 from core.settings import Settings, get_settings
 from networking.tailscale_settings import TailscaleSettings
+from providers.exe.settings import ExeSettings
+from providers.exoscale.settings import ExoscaleSettings
+from providers.hetzner.settings import HetznerSettings
 
 
 def _base_env() -> dict[str, str]:
@@ -106,6 +111,58 @@ def test_tailscale_settings_with_all_credentials_constructs_ok(
     ts = TailscaleSettings()  # pyright: ignore[reportCallIssue]
     assert ts.tailnet == "example.ts.net"
     assert ts.auth_tags == ("tag:sandbox",)
+
+
+def test_deployment_secrets_come_from_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    secrets = {
+        "DATABASE_URL": "postgresql+psycopg://drukbox:file-password@db/drukbox",
+        "SERVICE_TOKENS": "file-admin-key",
+        "SECRETS_KEY": "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
+        "REGISTRY_PASSWORD": "file-registry-token",
+        "EXE_API_TOKEN": "file-exe-token",
+        "TAILSCALE_OAUTH_CLIENT_SECRET": "file-tailscale-secret",
+    }
+    for name, value in secrets.items():
+        monkeypatch.delenv(name, raising=False)
+        (tmp_path / name).write_text(f"{value}\n")
+    monkeypatch.setenv("REGISTRY_HOST", "ghcr.io")
+    monkeypatch.setenv("REGISTRY_USERNAME", "builder")
+
+    settings = Settings(_secrets_dir=tmp_path)  # pyright: ignore[reportCallIssue]
+    exe = ExeSettings(_secrets_dir=tmp_path)  # pyright: ignore[reportCallIssue]
+    tailscale = TailscaleSettings(_secrets_dir=tmp_path)  # pyright: ignore[reportCallIssue]
+
+    assert settings.database_url == secrets["DATABASE_URL"]
+    assert settings.service_tokens == ("file-admin-key",)
+    assert settings.secrets_key.get_secret_value() == secrets["SECRETS_KEY"]
+    assert settings.registry_password.get_secret_value() == secrets["REGISTRY_PASSWORD"]
+    assert exe.api_token == secrets["EXE_API_TOKEN"]
+    assert tailscale.oauth_client_secret == secrets["TAILSCALE_OAUTH_CLIENT_SECRET"]
+
+
+@pytest.mark.parametrize(
+    ("settings_class", "secret", "missing"),
+    [
+        (ExeSettings, "EXE_API_TOKEN", "EXE_DEFAULT_IMAGE"),
+        (TailscaleSettings, "TAILSCALE_OAUTH_CLIENT_SECRET", "TAILSCALE_TAILNET"),
+        (HetznerSettings, "HETZNER_API_TOKEN", "HETZNER_LOCATION"),
+        (ExoscaleSettings, "EXOSCALE_API_SECRET", "EXOSCALE_ZONE"),
+    ],
+)
+def test_provider_settings_errors_hide_secrets(
+    monkeypatch: pytest.MonkeyPatch, settings_class: type[BaseSettings], secret: str, missing: str
+) -> None:
+    monkeypatch.setenv(secret, "provider-secret")
+    monkeypatch.delenv(missing, raising=False)
+
+    with pytest.raises(ValueError) as error:
+        settings_class()
+
+    # pydantic shortens a long input in the message, so a check for the secret
+    # alone can pass by luck. A hidden input prints no input_value at all.
+    assert "input_value" not in str(error.value)
 
 
 def test_tailscale_disabled_ignores_missing_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
