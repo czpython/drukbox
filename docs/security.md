@@ -91,8 +91,8 @@ Drukbox encrypts the entry in the database with AES-256-GCM under
 can decrypt it. Rotate the key by prepending a new one. Remove an old key only
 after no stored row needs it.
 
-Provider tokens (`EXE_API_TOKEN`, `EXE_REGISTRY_PASSWORD`,
-`HETZNER_API_TOKEN`, Tailscale OAuth) and AWS credentials are read from the
+Provider tokens (`EXE_API_TOKEN`, `HETZNER_API_TOKEN`, Tailscale OAuth), the
+registry password (`REGISTRY_PASSWORD`), and AWS credentials are read from the
 environment or the AWS SDK default chain. They are never written to the
 database and never returned by the API.
 

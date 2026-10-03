@@ -313,6 +313,36 @@ with auth-key write scope, and tailnet ACLs that (a) own the tags in
 `TAILSCALE_AUTH_TAGS` and (b) permit tailscaled-SSH to the tagged
 nodes.
 
+## Private image registry
+
+`REGISTRY_HOST`, `REGISTRY_USERNAME`, and `REGISTRY_PASSWORD` give drukbox
+access to private images on one registry host. Set the three together.
+drukbox sends the credentials only for an image on that host:
+
+- `exe` passes them to exe.dev with the host image.
+- `docker` uses them when the Docker engine pulls a host image that it
+  does not have.
+
+`TEMPLATE_REPOSITORY` is the repository path on that host where drukbox
+publishes template images. The credential needs push permission there.
+Registry access does not require a template repository.
+
+```dotenv
+REGISTRY_HOST=ghcr.io
+REGISTRY_USERNAME=builder
+REGISTRY_PASSWORD=<registry-token>
+TEMPLATE_REPOSITORY=acme/sandbox-templates
+```
+
+`exe` boots hosts from a registry, so its templates require
+`TEMPLATE_REPOSITORY`. `docker` and `docker-sbx` publish each template when
+it is set, and keep the image local when it is not. The `docker-sbx` daemon
+has its own registry login. drukbox loads each template into that daemon
+and does not give it these credentials.
+
+AWS, Hetzner, and Exoscale boot from machine images. They have no
+templates and do not use these settings.
+
 ## AWS credentials and IAM
 
 AWS credentials come from the SDK's default chain (instance profile,
@@ -504,6 +534,10 @@ Core, optional:
 | `SERVICE_LABEL` | `drukbox` | Label stamped onto provider resources (VM tags, SG tags). |
 | `UVICORN_HOST` | `0.0.0.0` | API bind address. Set `127.0.0.1` to restrict to loopback. |
 | `PROVISIONING_GRACE_SECONDS` | `600` | Safety TTL on in-flight hosts so the janitor reaps row + VM if the client disconnects mid-provision. Must exceed the worst-case provision duration. |
+| `REGISTRY_HOST` | — | Registry host for private images, such as `ghcr.io` or `docker.io`, with no scheme or path. See [Private image registry](#private-image-registry). |
+| `REGISTRY_USERNAME` | — | Registry user for private image pulls and template pushes. |
+| `REGISTRY_PASSWORD` | — | Registry password or token. |
+| `TEMPLATE_REPOSITORY` | — | Repository path on `REGISTRY_HOST` for template images, with no tag or digest. |
 | `TEMPLATE_BUILD_TIMEOUT` | `3600` | Max age in seconds of an unfinished template build before the janitor marks it failed. |
 | `TEMPLATE_FAILED_RETENTION` | `86400` | Seconds that failed template records and diagnostics remain before the janitor deletes them. |
 | `TEMPLATE_UNUSED_TTL` | `1209600` | Seconds that an available template remains after its last use, or creation when never used. |
@@ -546,9 +580,6 @@ exe.dev provider:
 | --- | --- | --- |
 | `EXE_API_TOKEN` | — (required) | Bearer token for the exe.dev exec API. |
 | `EXE_DEFAULT_IMAGE` | — (required) | Image used when the caller omits `image`. |
-| `EXE_IMAGE_REGISTRY` | — | Repository prefix for derived template images. A VM created from this registry gets `--registry-auth` so exe.dev can pull a private image. |
-| `EXE_REGISTRY_USERNAME` | — | Username for the derived-template image registry. |
-| `EXE_REGISTRY_PASSWORD` | — | Password or token for the derived-template image registry. |
 | `EXE_API_URL` | `https://exe.dev` | API base URL. |
 | `EXE_API_TIMEOUT` | `30.0` | Timeout for exe.dev API calls. |
 | `EXE_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `30.0` | ssh-keyscan retry budget for a fresh exe.dev sandbox. |

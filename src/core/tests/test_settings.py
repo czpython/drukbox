@@ -185,3 +185,60 @@ def test_load_test_env_overrides_ambient_values(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("TAILSCALE_ENABLED", "false")
     conftest.load_test_env()
     assert os.environ["TAILSCALE_ENABLED"] == "true"
+
+
+def _registry_env(**overrides: str) -> dict[str, str | None]:
+    return {
+        **_base_env(),
+        "REGISTRY_HOST": "ghcr.io",
+        "REGISTRY_USERNAME": "builder",
+        "REGISTRY_PASSWORD": "private-token",
+        "TEMPLATE_REPOSITORY": "",
+        **overrides,
+    }
+
+
+def test_registry_access_does_not_require_a_template_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings_with(monkeypatch, _registry_env())
+
+    assert settings.registry_host == "ghcr.io"
+    assert settings.registry_password.get_secret_value() == "private-token"
+    assert "private-token" not in repr(settings)
+
+
+def test_template_repository_requires_registry_access(monkeypatch: pytest.MonkeyPatch) -> None:
+    env = _registry_env(
+        REGISTRY_HOST="",
+        REGISTRY_USERNAME="",
+        REGISTRY_PASSWORD="",
+        TEMPLATE_REPOSITORY="acme/templates",
+    )
+
+    with pytest.raises(ValueError, match="REGISTRY_HOST, REGISTRY_USERNAME, REGISTRY_PASSWORD"):
+        _settings_with(monkeypatch, env)
+
+
+def test_partial_registry_access_names_the_missing_setting_without_the_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(ValueError) as error:
+        _settings_with(monkeypatch, _registry_env(REGISTRY_USERNAME=""))
+
+    assert "Set: REGISTRY_USERNAME" in str(error.value)
+    assert "private-token" not in str(error.value)
+
+
+@pytest.mark.parametrize("host", ["https://ghcr.io", "ghcr.io/acme"])
+def test_registry_host_rejects_a_scheme_or_path(monkeypatch: pytest.MonkeyPatch, host: str) -> None:
+    with pytest.raises(ValueError, match="REGISTRY_HOST"):
+        _settings_with(monkeypatch, _registry_env(REGISTRY_HOST=host))
+
+
+@pytest.mark.parametrize("repository", ["acme/templates:latest", "acme/templates@sha256:abc"])
+def test_template_repository_rejects_a_tag_or_digest(
+    monkeypatch: pytest.MonkeyPatch, repository: str
+) -> None:
+    with pytest.raises(ValueError, match="TEMPLATE_REPOSITORY"):
+        _settings_with(monkeypatch, _registry_env(TEMPLATE_REPOSITORY=repository))

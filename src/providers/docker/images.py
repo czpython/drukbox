@@ -2,6 +2,7 @@ import hashlib
 import io
 import tarfile
 
+from core.settings import get_settings
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
 
 from .api import DockerAPI
@@ -41,8 +42,11 @@ async def build_derived_image(
     *,
     base_image: str,
     setup_script: str,
-    repository: str = "drukbox-template",
 ) -> str:
+    settings = get_settings()
+    repository = "drukbox-template"
+    if settings.template_repository:
+        repository = f"{settings.registry_host}/{settings.template_repository}"
     image = derive_image_name(
         base_image=base_image,
         setup_script=setup_script,
@@ -51,6 +55,12 @@ async def build_derived_image(
     context_tar = create_build_context(base_image=base_image, setup_script=setup_script)
     try:
         await docker.build_image(image, context_tar)
+        if settings.template_repository:
+            await docker.push_image(
+                image,
+                username=settings.registry_username,
+                password=settings.registry_password.get_secret_value(),
+            )
     except DockerProviderError as exc:
         raise ProviderTransportError(str(exc)) from exc
     return image

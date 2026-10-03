@@ -106,6 +106,7 @@ class DockerProvider(VMProvider, TemplateCapability):
                 env=container_env,
                 labels=labels,
                 ssh_host=str(self.settings.ssh_host),
+                registry_auth=get_settings().get_registry_auth(image),
             )
         except DockerProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc

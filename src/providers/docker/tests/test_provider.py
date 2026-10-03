@@ -2,8 +2,9 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
+from core.settings import get_settings
 from providers.docker.exceptions import (
     DockerImageNotFoundError,
     DockerTransportError,
@@ -54,6 +55,28 @@ async def test_create_vm_publishes_and_advertises_the_ssh_host(ssh_host: str):
     assert result.ssh_username == "root"
     assert result.private_key
     assert "-----BEGIN OPENSSH PRIVATE KEY-----" in result.private_key
+
+
+@pytest.mark.parametrize(
+    ("image", "registry_auth"),
+    [
+        ("ghcr.io/acme/private-base:latest", {"username": "bot", "password": "secret"}),
+        ("docker.io/library/ubuntu:24.04", None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_create_vm_sends_registry_auth_only_to_the_registry_host(
+    monkeypatch: pytest.MonkeyPatch, image: str, registry_auth: dict[str, str] | None
+):
+    monkeypatch.setattr(get_settings(), "registry_host", "ghcr.io")
+    monkeypatch.setattr(get_settings(), "registry_username", "bot")
+    monkeypatch.setattr(get_settings(), "registry_password", SecretStr("secret"))
+    api = _api_mock()
+    provider = DockerProvider(api, _settings())
+
+    await provider.create_vm(name="sb-test", image=image, env={})
+
+    assert api.run_container.await_args.kwargs["registry_auth"] == registry_auth
 
 
 @pytest.mark.parametrize("ssh_host", ["0.0.0.0", "::", "", "sandbox.example"])

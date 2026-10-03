@@ -48,6 +48,7 @@ class DockerAPI:
         env: dict[str, str],
         labels: dict[str, str],
         ssh_host: str,
+        registry_auth: dict[str, str] | None = None,
     ) -> str:
         config = {
             "Image": image,
@@ -59,7 +60,10 @@ class DockerAPI:
             },
         }
         try:
-            container = await self._get_client().containers.run(config, name=name)
+            # The engine pulls an image that it does not have.
+            container = await self._get_client().containers.run(
+                config, name=name, auth=registry_auth
+            )
         except (aiodocker.DockerError, aiohttp.ClientError) as exc:
             raise DockerTransportError(_detail(exc)) from exc
         return container.id
