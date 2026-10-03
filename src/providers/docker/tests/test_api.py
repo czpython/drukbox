@@ -52,11 +52,15 @@ async def test_run_container_publishes_on_the_ssh_host_and_passes_env() -> None:
         env={"KEY": "value", "MULTI": "line one\nline two"},
         labels={"managed-by": "drukbox"},
         ssh_host="100.64.0.10",
+        registry_auth={"username": "bot", "password": "secret"},
     )
 
     assert container_id == "abc123"
     config = fake.containers.run.await_args.args[0]
-    assert fake.containers.run.await_args.kwargs == {"name": "sb-test"}
+    assert fake.containers.run.await_args.kwargs == {
+        "name": "sb-test",
+        "auth": {"username": "bot", "password": "secret"},
+    }
     assert config["Image"] == "sandbox:latest"
     assert config["Env"] == ["KEY=value", "MULTI=line one\nline two"]
     assert config["Labels"] == {"managed-by": "drukbox"}
