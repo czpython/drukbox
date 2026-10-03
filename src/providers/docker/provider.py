@@ -139,6 +139,14 @@ class DockerProvider(VMProvider, TemplateCapability):
         except DockerProviderError as exc:
             raise ProviderTransportError(str(exc)) from exc
 
+    async def refresh_base_image(self, image: str) -> str:
+        try:
+            return await self.api.pull_image(
+                image, registry_auth=get_settings().get_registry_auth(image)
+            )
+        except DockerProviderError as exc:
+            raise ProviderTransportError(str(exc)) from exc
+
     async def build_template_image(
         self,
         *,

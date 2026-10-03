@@ -15,6 +15,9 @@ class StubTemplateProvider(TemplateCapability, VMProvider):
 
     def __init__(self) -> None:
         self.built: list[tuple[str, str, str]] = []
+        self.refreshed: list[str] = []
+        self.base_image_ref = "stub@sha256:" + "a" * 64
+        self.refresh_error: ProviderError | None = None
         self.deleted: list[str] = []
         self.build_error: Exception | None = None
         self.delete_error: ProviderError | None = None
@@ -51,6 +54,12 @@ class StubTemplateProvider(TemplateCapability, VMProvider):
 
     async def aclose(self) -> None:
         return
+
+    async def refresh_base_image(self, image: str) -> str:
+        self.refreshed.append(image)
+        if self.refresh_error:
+            raise self.refresh_error
+        return self.base_image_ref
 
     async def build_template_image(
         self,

@@ -63,6 +63,9 @@ class StubProvider(VMProvider):
 
 
 class StubTemplateProvider(StubProvider, TemplateCapability):
+    async def refresh_base_image(self, image: str) -> str:
+        return "stub@sha256:" + "a" * 64
+
     async def build_template_image(self, *, base_image: str, setup_script: str, label: str) -> str:
         return f"{base_image}:{label}"
 
