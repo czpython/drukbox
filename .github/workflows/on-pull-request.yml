@@ -158,6 +158,11 @@ jobs:
   api-tests:
     name: Run API Tests (docker provider)
     runs-on: ubuntu-latest
+    services:
+      registry:
+        image: registry:3
+        ports:
+          - 5000:5000
     # Black-box e2e against a real deployment. The docker provider provisions
     # local containers on the runner, so this needs no cloud credentials.
     env:
@@ -168,7 +173,7 @@ jobs:
       # The sandbox sends its HTTPS through a proxy on the Docker bridge; the API test only checks delivery.
       SECRETS_PROXY_URL: http://172.17.0.1:8880
       SECRETS_PROXY_CA_FILE: /secrets-proxy-ca.pem
-      DOCKER_DEFAULT_IMAGE: drukbox/sandbox:ci
+      DOCKER_DEFAULT_IMAGE: localhost:5000/drukbox/sandbox:ci
       UVICORN_HOST: 127.0.0.1
 
     steps:
@@ -176,7 +181,9 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Build sandbox image
-        run: docker build -t drukbox/sandbox:ci images/local/
+        run: |
+          docker build -t "$DOCKER_DEFAULT_IMAGE" images/local/
+          docker push "$DOCKER_DEFAULT_IMAGE"
 
       - name: Build drukbox image
         run: docker build -t drukbox:api-test .

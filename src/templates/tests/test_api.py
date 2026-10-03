@@ -52,12 +52,12 @@ async def test_create_template_returns_building_then_becomes_available(client, t
     assert polled.status_code == 200
     assert polled.json()["status"] == TemplateStatus.AVAILABLE.value
     assert polled.json()["image"] == derive_image_name(
-        base_image=template_provider.default_image,
+        base_image=template_provider.base_image_ref,
         setup_script=SETUP_SCRIPT,
     )
     assert "setup_script" not in polled.json()
     assert template_provider.built == [
-        (template_provider.default_image, SETUP_SCRIPT, "Node tools")
+        (template_provider.base_image_ref, SETUP_SCRIPT, "Node tools")
     ]
 
 
@@ -77,8 +77,7 @@ async def test_unexpected_build_crash_is_pollable(client, template_provider):
     assert polled.json()["last_error"] == "OSError: builder crashed"
 
 
-async def test_unsupported_capability_becomes_failed_build(client, monkeypatch):
-    """A provider without template support reports failure through polling."""
+async def test_unsupported_capability_refuses_template_creation(client, monkeypatch):
     provider = MagicMock(spec=VMProvider)
     provider.name = "without-templates"
     provider.default_image = "stub:base"
@@ -90,12 +89,8 @@ async def test_unsupported_capability_becomes_failed_build(client, monkeypatch):
         headers=AUTH_HEADERS,
         json={"provider": provider.name, "setup_script": SETUP_SCRIPT},
     )
-    polled = await client.get(f"/templates/{response.json()['id']}", headers=AUTH_HEADERS)
-
-    assert response.status_code == 202
-    assert polled.json()["status"] == TemplateStatus.FAILED.value
-    assert polled.json()["last_error"].startswith("CapabilityUnsupportedError:")
-    assert "TemplateCapability" in polled.json()["last_error"]
+    assert response.status_code == 400
+    assert "TemplateCapability" in response.json()["detail"]
 
 
 async def test_duplicate_create_returns_existing_without_rebuilding(client, template_provider):
@@ -126,7 +121,9 @@ async def test_duplicate_create_returns_existing_without_rebuilding(client, temp
     assert second.json()["id"] == first.json()["id"]
     assert second.json()["status"] == TemplateStatus.AVAILABLE.value
     assert second.json()["label"] == "first label"
-    assert template_provider.built == [("stub:custom", SETUP_SCRIPT, "first label")]
+    assert template_provider.built == [
+        (template_provider.base_image_ref, SETUP_SCRIPT, "first label")
+    ]
 
 
 async def test_concurrent_creates_resolve_unique_index_race(template_provider):
@@ -331,6 +328,7 @@ async def create_template_record(
         id=uuid7(),
         provider=provider,
         base_image=base_image,
+        base_image_ref="stub@sha256:" + "a" * 64,
         setup_script_hash=hashlib.sha256(SETUP_SCRIPT.encode()).hexdigest(),
         setup_script=SETUP_SCRIPT,
         label=label,

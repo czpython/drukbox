@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_session
 from hosts.auth import require_auth
-from providers.exceptions import ProviderError, UnknownProviderError
+from providers.exceptions import CapabilityUnsupportedError, ProviderError, UnknownProviderError
 from templates.exceptions import TemplateTeardownError
 from templates.models import Template
 from templates.schemas import TemplateCreate, TemplateOut
@@ -41,8 +41,10 @@ async def create_template(
             setup_script=payload.setup_script,
             label=payload.label,
         )
-    except UnknownProviderError as exc:
+    except (UnknownProviderError, CapabilityUnsupportedError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except SQLAlchemyError as exc:
         logger.exception("unexpected database error during template creation")
         raise HTTPException(

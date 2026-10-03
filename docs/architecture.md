@@ -77,7 +77,7 @@ the core settings knowing any provider exists.
 
 Not every provider supports every feature. The host contract must not grow
 fields that only one provider uses. Optional features are capability mix-ins.
-`TemplateCapability` declares the template create and delete surface.
+`TemplateCapability` refreshes base images and builds and deletes templates.
 
 `SecretInjectionCapability` is how a secret reaches a provider's boxes. A
 provider carries it in `secrets`. `ProxyInjection` is the default: the box gets
@@ -167,11 +167,24 @@ box before the VM goes, so nothing the seam put anywhere outlives the box. It
 never reads the row's secrets, so a lost key cannot block a teardown. The
 janitor deletes an expired host through the same path.
 
-A template is a persistent provider image keyed by provider, base image,
-and setup-script hash. `POST /templates` creates a `building` record and
-returns `202 Accepted`. Callers poll until the template becomes
-`available` or `failed`. Templates outlive hosts. Each provider builds
-and deletes its own templates behind `TemplateCapability`.
+A template is a persistent provider image keyed by provider, requested base
+image, resolved base image reference, and setup-script hash. Each
+`POST /templates` pulls the base image. Docker Sandboxes also loads that image
+into its own store, once for each reference. Drukbox saves the immutable
+registry digest reference in the template record. An image that no registry
+holds is a local build, and its image ID is the reference. The API returns
+the requested name in `base_image`.
+
+For example, `{"base_image":"sandbox:latest","setup_script":"echo ready"}`
+reuses a template only while the tag resolves to the same digest. A new digest
+creates a `building` record and returns `202 Accepted`. The build uses the
+saved digest reference even if the tag moves again. Callers poll until the
+template becomes `available` or `failed`. A pull or store failure returns
+`502`; a provider without template support returns `400`.
+
+Templates outlive hosts. Each provider owns these operations through
+`TemplateCapability`. Image pulls and store loads finish before the create
+response, so callers must allow enough time for a base image download.
 
 A host request can name an available template by its ID — the ID that
 the create returned. The template's image becomes the host image in place
@@ -197,7 +210,7 @@ Two maintenance commands run as cron jobs from the same image:
   (`POOL_SIZES`, with `POOL_SIZE` as the default provider's target) to
   hide provider cold starts.
 
-When you edit a template setup script, the hash changes. The old
+When the base digest or setup script changes, the old
 template ages out after its last lease. Pool members
 are warmed with the provider's default image and size, so a request that
 customizes its host — `image`, `env`, `template`, `instance_type`, or

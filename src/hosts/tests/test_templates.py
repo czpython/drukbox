@@ -32,6 +32,7 @@ async def create_template_record(
         id=uuid7(),
         provider=provider,
         base_image=base_image,
+        base_image_ref="stub@sha256:" + "a" * 64,
         setup_script_hash=setup_script_hash,
         setup_script=SETUP_SCRIPT,
         label="",

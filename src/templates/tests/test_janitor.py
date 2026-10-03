@@ -28,6 +28,7 @@ async def _create_template(
         id=uuid7(),
         provider=provider,
         base_image="stub:base",
+        base_image_ref="stub@sha256:" + "a" * 64,
         setup_script_hash=hashlib.sha256(setup_script.encode()).hexdigest(),
         setup_script=setup_script,
         label=name,

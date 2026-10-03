@@ -57,11 +57,14 @@ class TemplateService:
 
         vm = get_vm_provider(provider)
         resolved_base_image = base_image or vm.default_image
+        capability = resolve_capability(vm, TemplateCapability)
+        base_image_ref = await capability.refresh_base_image(resolved_base_image)
         setup_script_hash = hashlib.sha256(setup_script.encode("utf-8")).hexdigest()
         now = utc_now()
         template = Template(
             provider=vm.name,
             base_image=resolved_base_image,
+            base_image_ref=base_image_ref,
             setup_script_hash=setup_script_hash,
             setup_script=setup_script,
             label=label,
@@ -87,6 +90,7 @@ class TemplateService:
                 select(Template)
                 .where(Template.provider == vm.name)
                 .where(Template.base_image == resolved_base_image)
+                .where(Template.base_image_ref == base_image_ref)
                 .where(Template.setup_script_hash == setup_script_hash)
             )
         ).scalar_one_or_none()
@@ -108,7 +112,7 @@ class TemplateService:
                     TemplateCapability,
                 )
                 image = await capability.build_template_image(
-                    base_image=template.base_image,
+                    base_image=template.base_image_ref,
                     setup_script=template.setup_script,
                     label=template.label,
                 )
