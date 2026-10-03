@@ -1,7 +1,7 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from core.settings import CsvTuple
+from core.settings import CsvTuple, get_secrets_dir
 
 
 class TailscaleSettings(BaseSettings):
@@ -12,6 +12,8 @@ class TailscaleSettings(BaseSettings):
         env_file_encoding="utf-8",
         env_prefix="TAILSCALE_",
         extra="ignore",
+        hide_input_in_errors=True,
+        secrets_dir=get_secrets_dir(),
     )
 
     tailnet: str = Field(

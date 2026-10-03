@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Self
 
 from pydantic import BeforeValidator, Field, SecretStr, model_validator
@@ -16,12 +17,21 @@ CsvTuple = Annotated[tuple[str, ...], NoDecode, BeforeValidator(_split_csv)]
 SecretsKey = Annotated[SecretStr, BeforeValidator(validate_keys)]
 
 
+def get_secrets_dir() -> Path | None:
+    # Compose mounts each secret file here. pydantic-settings warns on every load
+    # when the directory is missing, as in a deployment with only environment variables.
+    secrets_dir = Path("/run/secrets")
+    if secrets_dir.is_dir():
+        return secrets_dir
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
         hide_input_in_errors=True,
+        secrets_dir=get_secrets_dir(),
     )
 
     database_url: str = Field(

@@ -46,6 +46,45 @@ The API binds all interfaces by default. When only loopback callers
 reach it (host-networked, co-located client), set `UVICORN_HOST=127.0.0.1`
 to keep the credential-holding control plane off other interfaces.
 
+## Secret files
+
+A process reads a setting from a file in `/run/secrets` when that directory
+exists. The file name is the variable name, for example
+`/run/secrets/DATABASE_URL`. This applies to the core, exe.dev, Hetzner,
+Exoscale, and Tailscale settings. Put each secret in a file and keep the other
+settings in `drukbox.env`. Then `docker inspect` does not show the secrets, and
+subprocesses do not inherit them.
+
+An environment variable or a `.env` entry wins over a file. If a required
+setting has no variable and no file, the process stops at startup. The error
+names the setting and shows no value.
+
+Compose mounts each file secret at `/run/secrets/<name>`. Give the same secrets
+to every drukbox process: the API, the exchange, the SSH gateway, the
+migrations, and the cron jobs.
+
+```yaml
+services:
+  api:
+    image: ghcr.io/czpython/drukbox:latest
+    env_file: drukbox.env
+    secrets: [DATABASE_URL, SERVICE_TOKENS, SECRETS_KEY, EXE_API_TOKEN]
+
+secrets:
+  DATABASE_URL:
+    file: /srv/drukbox/secrets/DATABASE_URL
+  SERVICE_TOKENS:
+    file: /srv/drukbox/secrets/SERVICE_TOKENS
+  SECRETS_KEY:
+    file: /srv/drukbox/secrets/SECRETS_KEY
+  EXE_API_TOKEN:
+    file: /srv/drukbox/secrets/EXE_API_TOKEN
+```
+
+Compose bind-mounts a file secret, so the file keeps its host owner and mode.
+The image runs as UID `1001`. Give each file to UID `1001` with mode `0400`.
+With `docker run`, mount the directory: `-v /srv/drukbox/secrets:/run/secrets:ro`.
+
 ## Admin keys and service accounts
 
 `SERVICE_TOKENS` holds one or more comma-separated admin keys, read at
@@ -517,6 +556,9 @@ SERVICE_URL=http://localhost:8780 SERVICE_TOKEN=... npm --prefix api-tests test
 ```
 
 ## Configuration reference
+
+A core, exe.dev, Hetzner, Exoscale, or Tailscale variable can also come from a
+file. See [Secret files](#secret-files).
 
 Core, required:
 

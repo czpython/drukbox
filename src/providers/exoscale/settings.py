@@ -1,6 +1,8 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from core.settings import get_secrets_dir
+
 
 class ExoscaleSettings(BaseSettings):
     """Exoscale provider configuration."""
@@ -10,6 +12,8 @@ class ExoscaleSettings(BaseSettings):
         env_file_encoding="utf-8",
         env_prefix="EXOSCALE_",
         extra="ignore",
+        hide_input_in_errors=True,
+        secrets_dir=get_secrets_dir(),
     )
 
     api_key: str = Field(
