@@ -1,4 +1,5 @@
 import providers.aws
+import providers.daytona
 import providers.docker
 import providers.docker_sbx
 import providers.exe
