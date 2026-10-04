@@ -143,3 +143,6 @@ class HostOut(BaseModel):
     updated_at: datetime
     activated_at: datetime | None
     expires_at: datetime | None
+    lease_deadline: datetime | None = Field(
+        description="Latest allowed lease expiry; null when the provider has no fixed lifetime."
+    )

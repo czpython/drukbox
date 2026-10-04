@@ -100,6 +100,7 @@ account token returns `503`. See [API](api.md#service-accounts).
 | `aws` | EC2 instances | Remote |
 | `hetzner` | Hetzner Cloud VMs | Remote |
 | `exoscale` | Exoscale VMs | Remote |
+| `vercel` | [Vercel sandboxes](vercel.md) | Remote, Tailscale required |
 | `docker` | Containers ([Local sandboxes with Docker](#local-sandboxes-with-docker)) | Local, no external account |
 | `docker-sbx` | microVMs ([Local microVMs with Docker Sandboxes](#local-microvms-with-docker-sandboxes)) | Local |
 
@@ -583,7 +584,7 @@ Core, optional:
 | `TEMPLATE_BUILD_TIMEOUT` | `3600` | Max age in seconds of an unfinished template build before the janitor marks it failed. |
 | `TEMPLATE_FAILED_RETENTION` | `86400` | Seconds that failed template records and diagnostics remain before the janitor deletes them. |
 | `TEMPLATE_UNUSED_TTL` | `1209600` | Seconds that an available template remains after its last use, or creation when never used. |
-| `LEASE_DEFAULT_TTL` | `86400` | Lease TTL in seconds for hosts created without an explicit `expires_at`, and the extension applied by an empty `POST /hosts/{id}/renew`. An explicit `expires_at: null` at create time opts out of expiry entirely. |
+| `LEASE_DEFAULT_TTL` | `86400` | Lease TTL in seconds for hosts created without an explicit `expires_at`, and the extension applied by an empty `POST /hosts/{id}/renew`. An explicit `expires_at: null` at create time opts out where the provider permits it. Defaults are capped by the host's `lease_deadline`. |
 | `IDEMPOTENCY_KEY_TTL_HOURS` | `24` | Retention period for successful `Idempotency-Key` mappings. |
 | `POOL_SIZES` | `{}` | Warm hosts to keep ready per provider, as JSON (e.g. `{"exe": 2, "hetzner": 1}`). Overrides `POOL_SIZE` for the providers it names. |
 | `POOL_SIZE` | `0` | Warm hosts to keep ready for the default provider. `0` disables its pool. |

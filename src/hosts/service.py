@@ -20,7 +20,12 @@ from gateway.settings import GatewaySettings
 from host_secrets import catalog
 from host_secrets.exceptions import SecretsProxyNotConfiguredError, SecretStaticError
 from host_secrets.placeholder import Placeholder
-from hosts.exceptions import HostStateError, IdempotencyKeyConflictError, ProvisioningFailedError
+from hosts.exceptions import (
+    HostLeaseError,
+    HostStateError,
+    IdempotencyKeyConflictError,
+    ProvisioningFailedError,
+)
 from hosts.models import Host, HostStatus, IdempotencyKey
 from networking.tailscale import (
     DeviceDiscoveryTimeoutError,
@@ -84,11 +89,6 @@ class HostService:
     ) -> None:
         self.session = session
         self.settings = settings or get_settings()
-        # Construct Tailscale only when explicitly enabled. Settings'
-        # model_validator guarantees the credentials are present whenever
-        # tailscale_enabled is true. Tests can inject a mock Tailscale via
-        # the kwarg regardless of the flag — useful for exercising the
-        # tailnet path without real credentials.
         if tailscale:
             self.tailscale: Tailscale | None = tailscale
         elif self.settings.tailscale_enabled:
@@ -113,11 +113,7 @@ class HostService:
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> Host:
-        # ``...`` (omitted) means "default lease"; an explicit None is the
-        # caller's deliberate opt-in to a permanent, never-reaped host. The
-        # sentinel travels to the point where a lease is actually stamped
-        # (pool claim, or the post-provision rewrite) so the in-flight row
-        # keeps the short provisioning safety TTL.
+        # Omission and explicit null must stay distinct until provisioning completes.
         if provider:
             registered = get_provider_names()
             if provider not in registered:
@@ -130,10 +126,7 @@ class HostService:
                 return existing
 
         host: Host | None = None
-        # Warm hosts are provider-specific, so the claim is scoped to the
-        # requested provider's pool. A request is pool-eligible only when it
-        # does not customize the host: no image, template, env, secrets, or
-        # per-request sizing — pool members are warmed at the provider's defaults.
+        # Only requests for the provider defaults can claim a warm host.
         requested_provider = provider or self.settings.default_host_provider
         customized = env or secrets or image or template or instance_type or disk_gb
         if not customized and self.settings.get_pool_targets().get(requested_provider):
@@ -174,36 +167,33 @@ class HostService:
         provider: str,
         expires_at: datetime | None | EllipsisType,
     ) -> Host | None:
-        # Pick a candidate, then atomically claim it with UPDATE ... WHERE
-        # claimed_at IS NULL ... RETURNING. The WHERE predicate is the actual
-        # race guard — concurrent claimants resolve to a single winner per
-        # row regardless of dialect (PG: MVCC + WHERE filter; SQLite: write
-        # lock + WHERE filter). Losers return None and the caller falls
-        # through to fresh provisioning.
+        # The conditional UPDATE gives concurrent claimants one winner.
         now = utc_now()
-        candidate_id = (
-            await self.session.execute(
-                select(Host.id)
-                .where(Host.provider == provider)
-                .where(Host.pool_member.is_(True))
-                .where(Host.claimed_at.is_(None))
-                .where(Host.status == HostStatus.ACTIVE.value)
-                .where(or_(Host.expires_at.is_(None), Host.expires_at > now))
-                .order_by(Host.created_at.asc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if not candidate_id:
+        candidates = (
+            select(Host)
+            .where(Host.provider == provider)
+            .where(Host.pool_member.is_(True))
+            .where(Host.claimed_at.is_(None))
+            .where(Host.status == HostStatus.ACTIVE.value)
+            .where(or_(Host.expires_at.is_(None), Host.expires_at > now))
+            .where(or_(Host.lease_deadline.is_(None), Host.lease_deadline > now))
+            .order_by(Host.created_at.asc())
+            .limit(1)
+        )
+        if expires_at is not ...:
+            if expires_at:
+                candidates = candidates.where(
+                    or_(Host.lease_deadline.is_(None), Host.lease_deadline >= expires_at)
+                )
+            else:
+                candidates = candidates.where(Host.lease_deadline.is_(None))
+        candidate = (await self.session.execute(candidates)).scalar_one_or_none()
+        if not candidate:
             return
-
-        if expires_at is ...:
-            expires_at = self._default_lease_expires_at()
-        # The claim replaces the warm-pool max-age TTL with the caller's lease:
-        # a concrete window (explicit or the default), or None for a caller
-        # who deliberately opted into a permanent host.
+        expires_at = candidate.lease_expiry(expires_at, default=self._default_lease_expires_at())
         result = await self.session.execute(
             update(Host)
-            .where(Host.id == candidate_id)
+            .where(Host.id == candidate.id)
             .where(Host.claimed_at.is_(None))
             .values(
                 service_account=service_account,
@@ -215,11 +205,9 @@ class HostService:
         )
         host = result.scalar_one_or_none()
         await self.session.commit()
-        if not host:
-            # Lost the race to another claimant; let the caller fall through.
-            return
-        logger.info("pool: claimed host_id=%s name=%s", host.id, host.name)
-        return host
+        if host:
+            logger.info("pool: claimed host_id=%s name=%s", host.id, host.name)
+            return host
 
     async def create_host(
         self,
@@ -235,9 +223,6 @@ class HostService:
         disk_gb: int | None = None,
         pool_member: bool = False,
     ) -> Host:
-        # Always provisions a brand-new VM; the pool maintainer calls this
-        # directly (with pool_member=True) so it never recursively claims its
-        # own pool members.
         vm = get_vm_provider(provider)
         if instance_type and not vm.supports_instance_type:
             raise UnsupportedSizingError(
@@ -259,15 +244,11 @@ class HostService:
         name = Host.build_name(uid)
         now = utc_now()
         host_image = image or vm.default_image
-        # Safety TTL covers the strand window: if the client disconnects
-        # mid-provision, this is what makes the janitor reap the row + VM.
-        # Replaced with the caller's value after provisioning succeeds. A
-        # default-lease create keeps just the safety TTL in flight — the
-        # lease is stamped only once the host is usable.
+        # The janitor must be able to reap a VM after a client disconnects during provisioning.
         safety_expires_at = now + timedelta(seconds=self.settings.provisioning_grace_seconds)
         initial_expires_at = (
             max(expires_at, safety_expires_at)
-            if isinstance(expires_at, datetime)
+            if expires_at is not ... and expires_at
             else safety_expires_at
         )
         host = Host(
@@ -285,7 +266,14 @@ class HostService:
             updated_at=now,
             expires_at=initial_expires_at,
             pool_member=pool_member,
+            lease_deadline=now + vm.max_lifetime if vm.max_lifetime else None,
         )
+        if pool_member:
+            expires_at = host.lease_expiry(
+                ..., default=now + timedelta(hours=self.settings.pool_host_max_age_hours)
+            )
+        else:
+            host.lease_expiry(expires_at, default=self._default_lease_expires_at())
         self.session.add(host)
         await self.session.commit()
         await self.session.refresh(host)
@@ -296,14 +284,12 @@ class HostService:
         if host.status == HostStatus.ERROR.value:
             raise ProvisioningFailedError(host.last_error or "provisioning failed")
 
-        # Provisioning won: replace the safety TTL with the caller's intent
-        # in a dedicated session so we don't extend ``self.session``'s
-        # transaction (which can perturb advisory-lock-bearing callers like
-        # the pool maintainer). Guarded on the in-flight value: a renewal
-        # that landed while the host was bootstrapping is newer intent and
-        # must not be clobbered.
-        if expires_at is ...:
-            expires_at = self._default_lease_expires_at()
+        # Use a separate session to preserve pool advisory locks. A concurrent renewal wins.
+        try:
+            expires_at = host.lease_expiry(expires_at, default=self._default_lease_expires_at())
+        except HostLeaseError as exc:
+            await self.mark_failed(host, exc)
+            raise ProvisioningFailedError(str(exc)) from exc
         async with async_session_factory() as ttl_session:
             await ttl_session.execute(
                 update(Host)
@@ -352,9 +338,7 @@ class HostService:
                     f"idempotency key {key} belongs to another service account"
                 )
             return host
-        # Stale: expired, or the host vanished without the FK cascade firing.
-        # GC in a dedicated session so we don't autoflush the caller's pending
-        # state on `self.session`.
+        # A separate session avoids flushing pending host changes during key cleanup.
         async with async_session_factory() as gc_session:
             await gc_session.execute(delete(IdempotencyKey).where(IdempotencyKey.key == key))
             await gc_session.commit()
@@ -383,9 +367,6 @@ class HostService:
         return True
 
     async def _release_idempotency_loser(self, host: Host) -> None:
-        # Two shapes of loser: claimed pool host → return to pool with a
-        # fresh max-age TTL; freshly-created host → mark expired so the
-        # janitor reaps it (delete_host refuses PROVISIONING).
         async with async_session_factory() as fix_session:
             fresh = await fix_session.get(Host, host.id)
             if not fresh:
@@ -394,7 +375,10 @@ class HostService:
             if fresh.claimed_at:
                 fresh.claimed_at = None
                 fresh.service_account = None
-                fresh.expires_at = now + timedelta(hours=self.settings.pool_host_max_age_hours)
+                pool_expiry = now + timedelta(hours=self.settings.pool_host_max_age_hours)
+                fresh.expires_at = (
+                    min(pool_expiry, fresh.lease_deadline) if fresh.lease_deadline else pool_expiry
+                )
                 fresh.updated_at = now
                 logger.info(
                     "idempotency: returned pool host_id=%s to pool after lost race",
@@ -434,7 +418,9 @@ class HostService:
         if host.status not in RENEWABLE_STATUSES:
             raise HostStateError(f"cannot renew a host in status {host.status}")
 
-        host.expires_at = expires_at or self._default_lease_expires_at()
+        host.expires_at = host.lease_expiry(
+            expires_at or ..., default=self._default_lease_expires_at()
+        )
         host.updated_at = utc_now()
         await self.session.commit()
         await self.session.refresh(host)
@@ -469,42 +455,30 @@ class HostService:
             raise ResourceNotFoundError("host not found")
 
         if pool_shed and host.claimed_at:
-            # A caller claimed this host between the maintainer selecting it as
-            # excess and this locked read — leave it for its owner, don't reap it.
+            # A claim can occur after pool maintenance selects an excess host.
             return False
 
         if expired_only and (not host.expires_at or host.expires_at > utc_now()):
-            # The owner renewed this host between the janitor selecting it as
-            # expired and this locked read — the lease is live again, spare it.
+            # A renewal can occur after the janitor selects an expired host.
             return False
 
         if not force and host.status in DELETE_BLOCKED_STATUSES:
             raise HostStateError("host is still provisioning")
 
         if force or host.status in VM_BACKED_STATUSES:
-            # force is the janitor reaping an abandoned provision: attempt
-            # teardown even from an early state, since a row stranded in
-            # CREATING_VM may already have a VM (delete_vm no-ops if it doesn't).
+            # An abandoned create can own a VM before its state reaches BOOTSTRAPPING.
             if host.tailscale_device_id and self.tailscale:
-                # Clear and commit the device_id before deleting the VM:
-                # a later delete_vm transport error must not retry the
-                # already-completed release. Hosts provisioned under
-                # Tailscale but reaped after the operator turned it off
-                # fall through and let the auth-key TTL expire the device.
+                # Commit device release so a failed VM deletion does not repeat it.
                 await self.tailscale.release_device(host.tailscale_device_id)
                 host.tailscale_device_id = None
                 host.updated_at = utc_now()
                 await self.session.commit()
-            # Secrets go before the VM. A provider failure keeps the row for a retry.
+            # Keep the row if secret deletion fails, so cleanup can be retried.
             vm = get_vm_provider(host.provider)
             await vm.secrets.delete_secrets(vm=host.name)
             try:
                 await vm.delete_vm(host.name)
             except ProviderNotFoundError:
-                # VM already absent at the provider — exe.dev may have evicted
-                # it, or a previous delete partially succeeded. Treat as done
-                # so we can clean up the DB row, but log so unexpected
-                # evictions are visible.
                 logger.warning(
                     "host VM already absent at provider during teardown: "
                     "host_id=%s name=%s provider=%s",
@@ -534,8 +508,6 @@ class HostService:
         environment = dict(host.env)
         setup_script: str | None = None
         if tailscale:
-            # The bootstrap script hard-requires TAILSCALE_AUTHKEY; only
-            # deliver it (and mint a key) when Tailscale is in play.
             try:
                 join_credentials = await tailscale.issue_join_credentials(host_name=host.name)
             except NetworkError as exc:
@@ -557,9 +529,6 @@ class HostService:
 
         gateway = GatewaySettings()
         if vm.gateway_process_class and not gateway.ssh_host:
-            # A gateway-provider host is reachable only through the gateway;
-            # provisioning one without an address would hand out dead
-            # coordinates.
             await self.mark_failed(
                 host,
                 ProvisioningFailedError(
@@ -586,15 +555,9 @@ class HostService:
         host.ssh_username = vm_result.ssh_username
         host.public_key = vm_result.public_key or ""
         if vm.gateway_process_class:
-            # The gateway is the SSH path for hosts of a gateway provider.
-            # The username names the host; the per-host key is the credential.
             host.external_ssh_host = gateway.ssh_host
             host.external_ssh_port = gateway.ssh_port
             host.ssh_username = host.name
-        # Stamp the per-VM key onto this instance so the POST response
-        # carries it. There's no column behind `private_key`, so a later
-        # GET that loads a fresh row sees the class default (None) and
-        # never echoes the key back.
         host.private_key = vm_result.private_key
         if tailscale:
             host.internal_ssh_host = tailscale.build_ssh_host(host.name)
@@ -660,24 +623,14 @@ class HostService:
             host.status,
         )
         host.status = HostStatus.ERROR.value
-        # Client-safe summary, not the raw traceback: last_error is echoed back
-        # to callers, while the full traceback stays in the log above.
         host.last_error = f"{type(exc).__name__}: {exc}"
         now = utc_now()
-        # An errored host is dead weight (its VM may be half-created). Expire it
-        # now so the janitor is the single owner of teardown; the POST caller
-        # already got last_error in the 502.
         host.expires_at = now
         host.updated_at = now
         await self.session.commit()
 
     async def scan_known_hosts(self, host: Host) -> bytes:
-        # Scan every reachable address. tailscaled-SSH (internal) and the
-        # provider's edge sshd (external) present different host keys, so
-        # callers picking either path need both entries to verify. Each address
-        # carries its own port: the internal path is always 22 by Tailscale
-        # convention, while the external sshd may be remapped (e.g. a published
-        # container port), so they're scanned separately.
+        # Tailscale SSH and public SSH can present different host keys.
         targets: list[tuple[str, int]] = []
         if host.internal_ssh_host:
             targets.append((host.internal_ssh_host, 22))
@@ -691,8 +644,7 @@ class HostService:
             collected = b"".join(stdout for stdout, _ in scans)
             if all(ssh_host.encode() in collected for ssh_host, _ in targets):
                 return collected
-            # Tailscaled-SSH lags device discovery; keyscan can connect but
-            # read nothing during the gap. Retry within the budget.
+            # Tailscale SSH can become ready after device discovery.
             last_detail = "; ".join(error for _, error in scans if error) or "empty output"
             if time.monotonic() >= deadline:
                 raise RuntimeError(f"ssh-keyscan never returned host keys: {last_detail}")
@@ -710,9 +662,6 @@ class HostService:
                 stderr=asyncio.subprocess.PIPE,
             )
         except OSError as error:
-            # ssh-keyscan missing from the image (or otherwise unspawnable) raises
-            # here; translate to the RuntimeError provision() routes through
-            # mark_failed, so it surfaces as a provisioning failure, not a 500.
             raise RuntimeError(f"could not run ssh-keyscan: {error}") from error
         stdout, stderr = await process.communicate()
         return stdout, stderr.decode().strip()
