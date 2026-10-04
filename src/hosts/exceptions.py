@@ -19,3 +19,8 @@ class HostTeardownError(AppException):
 class ProvisioningFailedError(AppException):
     status_code = 502
     error_code = "PROVISIONING_FAILED"
+
+
+class HostLeaseError(AppException):
+    status_code = 400
+    error_code = "HOST_LEASE"

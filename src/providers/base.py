@@ -1,5 +1,6 @@
 import abc
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import ClassVar, NamedTuple, Self
 
 import asyncssh
@@ -79,6 +80,7 @@ class VMProvider(abc.ABC):
     supports_disk_gb: ClassVar[bool] = False
     # A local provider's hosts keep the external path only.
     supports_tailnet: ClassVar[bool] = True
+    max_lifetime: timedelta | None = None
 
     @classmethod
     @abc.abstractmethod
