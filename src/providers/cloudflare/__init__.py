@@ -1,0 +1,4 @@
+from providers.cloudflare.provider import CloudflareProvider
+from providers.registry import register_vm_provider
+
+register_vm_provider(CloudflareProvider)
