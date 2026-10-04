@@ -96,6 +96,7 @@ account token returns `503`. See [API](api.md#service-accounts).
 
 | Provider | Sandboxes | Where |
 | --- | --- | --- |
+| `e2b` | E2B VMs | Remote |
 | `exe` | exe.dev VMs | Remote |
 | `aws` | EC2 instances | Remote |
 | `hetzner` | Hetzner Cloud VMs | Remote |
@@ -111,8 +112,8 @@ all provider extras.
 ## Local sandboxes with Docker
 
 The `docker` provider runs each sandbox as a local container with sshd,
-so you can try drukbox with no cloud account or API token. The published
-image includes the Docker CLI. Set `DEFAULT_HOST_PROVIDER=docker`,
+so you can try drukbox with no cloud account or API token.
+Set `DEFAULT_HOST_PROVIDER=docker`,
 `TAILSCALE_ENABLED=false`, and `UVICORN_HOST=127.0.0.1` in `drukbox.env`,
 then run:
 
@@ -687,7 +688,7 @@ Docker provider:
 | `DOCKER_SSH_USERNAME` | `root` | In-container user callers SSH as. The entrypoint seeds its `authorized_keys`; a derived image adds the user. |
 | `DOCKER_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `30.0` | ssh-keyscan retry budget for a fresh container. |
 
-The published image includes the Docker CLI. Mount the local daemon socket
+Mount the local daemon socket
 with its supplemental group on Linux, or use `DOCKER_HOST` for a remote or
 rootless daemon. Drukbox mints a per-VM ed25519 key and publishes sshd on a
 random port at `DOCKER_SSH_HOST`. See
@@ -709,3 +710,8 @@ The published image does not contain the `sbx` CLI. Mount the binary and
 the sbx directories of the host, as
 [Local microVMs with Docker Sandboxes](#local-microvms-with-docker-sandboxes)
 shows.
+
+## E2B
+
+See [E2B setup](e2b.md) for image preparation, all provider settings,
+Tailscale SSH, and lifecycle limits.
