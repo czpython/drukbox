@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "drukbox-sandboxes",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-04",
+  "observability": { "enabled": false },
+  "containers": [{
+    "class_name": "Sandbox",
+    "scheduling_policy": "durable_object",
+    "images": { "base": { "dockerfile": "Dockerfile" } }
+  }],
+  "durable_objects": { "bindings": [{ "name": "SANDBOXES", "class_name": "Sandbox" }] },
+  "exports": { "Sandbox": { "type": "durable-object", "storage": "sqlite" } }
+}
