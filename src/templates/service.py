@@ -92,10 +92,17 @@ class TemplateService:
                 .where(Template.base_image == resolved_base_image)
                 .where(Template.base_image_ref == base_image_ref)
                 .where(Template.setup_script_hash == setup_script_hash)
+                .with_for_update()
             )
         ).scalar_one_or_none()
         if not winner:
             raise TemplateStateError("template creation race could not be resolved")
+        if winner.status == TemplateStatus.FAILED.value:
+            # last_error stays readable until the new build ends.
+            winner.status = TemplateStatus.BUILDING.value
+            winner.updated_at = now
+            await self.session.commit()
+            return winner, True
         return winner, False
 
     async def build(self, template_id: uuid.UUID) -> None:

@@ -179,8 +179,10 @@ For example, `{"base_image":"sandbox:latest","setup_script":"echo ready"}`
 reuses a template only while the tag resolves to the same digest. A new digest
 creates a `building` record and returns `202 Accepted`. The build uses the
 saved digest reference even if the tag moves again. Callers poll until the
-template becomes `available` or `failed`. A pull or store failure returns
-`502`; a provider without template support returns `400`.
+template becomes `available` or `failed`. A `POST` for a `failed` template
+builds the same record again, and its `last_error` stays until that build
+ends. A pull or store failure returns `502`; a provider without template
+support returns `400`.
 
 Templates outlive hosts. Each provider owns these operations through
 `TemplateCapability`. Image pulls and store loads finish before the create

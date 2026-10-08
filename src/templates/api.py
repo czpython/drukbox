@@ -35,7 +35,7 @@ async def create_template(
     service: TemplateServiceDep,
 ) -> Template:
     try:
-        template, created = await service.get_or_create(
+        template, needs_build = await service.get_or_create(
             provider=payload.provider,
             base_image=payload.base_image,
             setup_script=payload.setup_script,
@@ -52,7 +52,7 @@ async def create_template(
             detail="template creation could not be completed",
         ) from exc
 
-    if created:
+    if needs_build:
         background_tasks.add_task(service.build, template.id)
     return template
 
