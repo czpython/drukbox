@@ -109,6 +109,10 @@ class TemplateCapability(abc.ABC):
     """An ABC, not a Protocol, so ``resolve_capability`` can test inheritance."""
 
     @abc.abstractmethod
+    async def refresh_base_image(self, image: str) -> str:
+        """Pull the image into the provider's stores and return its immutable reference."""
+
+    @abc.abstractmethod
     async def build_template_image(
         self,
         *,

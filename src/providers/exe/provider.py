@@ -4,6 +4,7 @@ from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import TemplateCapability
 from providers.docker.api import DockerAPI
+from providers.docker.exceptions import DockerProviderError
 from providers.docker.images import build_derived_image, remove_derived_image
 from providers.exceptions import (
     ProviderCommandError,
@@ -11,6 +12,7 @@ from providers.exceptions import (
     ProviderHttpProxyNotFoundError,
     ProviderNotFoundError,
     ProviderTargetVMNotFoundError,
+    ProviderTransportError,
 )
 from providers.exe.api import ExeAPI
 from providers.exe.exceptions import (
@@ -97,6 +99,14 @@ class ExeProvider(VMProvider, TemplateCapability):
             await self.api.delete_vm(name)
         except ExeVMNotFoundError as exc:
             raise ProviderNotFoundError(str(exc)) from exc
+
+    async def refresh_base_image(self, image: str) -> str:
+        try:
+            return await self.docker.pull_image(
+                image, registry_auth=get_settings().get_registry_auth(image)
+            )
+        except DockerProviderError as exc:
+            raise ProviderTransportError(str(exc)) from exc
 
     async def build_template_image(
         self,

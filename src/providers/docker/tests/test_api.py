@@ -27,6 +27,7 @@ def _fake_docker(**overrides: object) -> SimpleNamespace:
             container=MagicMock(return_value=container),
         ),
         images=SimpleNamespace(
+            pull=AsyncMock(return_value=[{"status": "Digest: sha256:" + "a" * 64}]),
             build=AsyncMock(),
             delete=AsyncMock(),
             push=AsyncMock(),
@@ -131,6 +132,58 @@ async def test_build_failure_keeps_the_engine_detail() -> None:
 
     with pytest.raises(DockerTransportError, match="exit code 127"):
         await _api(fake).build_image("drukbox-template:123456789abc", b"")
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        "sandbox:latest",
+        "sandbox:stable",
+        "registry:5000/sandbox:latest",
+        "sandbox@sha256:" + "a" * 64,
+    ],
+)
+async def test_pull_keeps_the_requested_name_and_pins_the_registry_digest(image) -> None:
+    fake = _fake_docker()
+
+    assert await _api(fake).pull_image(image) == image.partition("@")[0] + "@sha256:" + "a" * 64
+    fake.images.pull.assert_awaited_once_with(image, auth=None)
+
+
+async def test_pull_failure_does_not_reuse_the_cached_image() -> None:
+    fake = _fake_docker()
+    fake.images.pull.side_effect = DockerError(503, "registry unavailable")
+
+    with pytest.raises(
+        DockerTransportError,
+        match=r"could not pull 'sandbox:latest' from its registry: .*registry unavailable",
+    ):
+        await _api(fake).pull_image("sandbox:latest")
+
+
+async def test_pull_pins_a_local_build_by_its_image_id() -> None:
+    fake = _fake_docker()
+    fake.images.pull.side_effect = DockerError(404, "pull access denied")
+    fake.images.inspect = AsyncMock(return_value={"Id": "sha256:" + "b" * 64})
+
+    assert await _api(fake).pull_image("druks-sandbox:local") == "sha256:" + "b" * 64
+
+
+async def test_pull_reports_an_image_that_no_registry_and_no_local_build_has() -> None:
+    fake = _fake_docker()
+    fake.images.pull.side_effect = DockerError(404, "pull access denied")
+    fake.images.inspect = AsyncMock(side_effect=DockerError(404, "No such image"))
+
+    with pytest.raises(DockerTransportError, match="pull access denied"):
+        await _api(fake).pull_image("druks-sandbox:local")
+
+
+async def test_pull_requires_a_registry_digest() -> None:
+    fake = _fake_docker()
+    fake.images.pull.return_value = [{"status": "pull finished"}]
+
+    with pytest.raises(DockerTransportError, match="no registry digest"):
+        await _api(fake).pull_image("sandbox:latest")
 
 
 async def test_missing_image_maps_to_not_found() -> None:

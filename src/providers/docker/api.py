@@ -103,6 +103,29 @@ class DockerAPI:
         except (aiodocker.DockerError, aiohttp.ClientError) as exc:
             raise DockerTransportError(_detail(exc)) from exc
 
+    async def pull_image(self, image: str, *, registry_auth: dict[str, str] | None = None) -> str:
+        try:
+            progress = await self._get_client().images.pull(image, auth=registry_auth)
+        except aiodocker.DockerError as exc:
+            failure = DockerTransportError(
+                f"could not pull {image!r} from its registry: {_detail(exc)}"
+            )
+            if exc.status != 404:
+                raise failure from exc
+            # No registry holds the image. A local build is pinned by its image ID.
+            try:
+                metadata = await self._get_client().images.inspect(image)
+            except (aiodocker.DockerError, aiohttp.ClientError):
+                raise failure from exc
+            return metadata["Id"]
+        except aiohttp.ClientError as exc:
+            raise DockerTransportError(str(exc)) from exc
+        for event in reversed(progress):
+            status = event.get("status", "")
+            if status.startswith("Digest: "):
+                return f"{image.partition('@')[0]}@{status.removeprefix('Digest: ')}"
+        raise DockerTransportError(f"image {image!r} has no registry digest after pulling")
+
     async def remove_image(self, image: str) -> None:
         try:
             await self._get_client().images.delete(image)

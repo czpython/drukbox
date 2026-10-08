@@ -7,6 +7,7 @@ from typing import ClassVar, Self
 
 import asyncssh
 
+from core.settings import get_settings
 from providers import environment
 from providers.base import VMCreateResult, VMProvider
 from providers.capabilities import TemplateCapability
@@ -48,6 +49,7 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
         # A workspace is mounted into its box, so the value files live beside them.
         self.secrets_root = settings.workspace_root / "secrets"
         self.secrets = SbxInjection(api, self.secrets_root)
+        self._loaded_base_images: set[str] = set()
 
     @classmethod
     def from_settings(cls) -> Self:
@@ -171,6 +173,22 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
             )
         except (OSError, ValueError, asyncssh.Error) as exc:
             raise ProviderTransportError(f"sbx could not open a tunnel: {exc}") from exc
+
+    async def refresh_base_image(self, image: str) -> str:
+        try:
+            reference = await self.docker.pull_image(
+                image, registry_auth=get_settings().get_registry_auth(image)
+            )
+            # Each template request refreshes the base. sbx needs one load per reference.
+            if reference not in self._loaded_base_images:
+                with tempfile.TemporaryDirectory() as directory:
+                    archive = Path(directory) / "base.tar"
+                    await self.docker.save_image(image, archive)
+                    await self.api.load_template(archive)
+                self._loaded_base_images.add(reference)
+        except (OSError, DockerProviderError, DockerSbxProviderError) as exc:
+            raise ProviderTransportError(str(exc)) from exc
+        return reference
 
     async def build_template_image(
         self,
