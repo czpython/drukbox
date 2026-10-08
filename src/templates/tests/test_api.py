@@ -126,6 +126,29 @@ async def test_duplicate_create_returns_existing_without_rebuilding(client, temp
     ]
 
 
+async def test_create_builds_a_failed_template_again_and_keeps_its_error_while_it_builds(
+    client, template_provider
+):
+    """A failed record builds again on the next create; its error stays until that build ends."""
+    template_provider.build_error = OSError("builder crashed")
+    body = {"provider": template_provider.name, "setup_script": SETUP_SCRIPT, "label": "retry"}
+    first = await client.post("/templates", headers=AUTH_HEADERS, json=body)
+    template_provider.build_error = None
+
+    second = await client.post("/templates", headers=AUTH_HEADERS, json=body)
+    polled = await client.get(f"/templates/{first.json()['id']}", headers=AUTH_HEADERS)
+
+    assert second.status_code == 202
+    assert second.json()["id"] == first.json()["id"]
+    assert second.json()["status"] == TemplateStatus.BUILDING.value
+    assert second.json()["last_error"] == "OSError: builder crashed"
+    assert polled.json()["status"] == TemplateStatus.AVAILABLE.value
+    assert polled.json()["last_error"] == ""
+    assert (
+        template_provider.built == [(template_provider.base_image_ref, SETUP_SCRIPT, "retry")] * 2
+    )
+
+
 async def test_concurrent_creates_resolve_unique_index_race(template_provider):
     """Concurrent identical inserts converge on the unique-index winner."""
     async with (
@@ -150,7 +173,7 @@ async def test_concurrent_creates_resolve_unique_index_race(template_provider):
         )
 
     assert results[0][0].id == results[1][0].id
-    assert sorted(created for _, created in results) == [False, True]
+    assert sorted(needs_build for _, needs_build in results) == [False, True]
 
     async with async_session_factory() as session:
         count = await session.scalar(select(func.count()).select_from(Template))
