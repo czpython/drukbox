@@ -71,7 +71,7 @@ class StubTemplateProvider(TemplateCapability, VMProvider):
         self.built.append((base_image, setup_script, label))
         if self.build_error:
             raise self.build_error
-        return derive_image_name(base_image=base_image, setup_script=setup_script)
+        return derive_image_name(base_image=base_image, setup_script=setup_script, label=label)
 
     async def delete_template_image(self, image: str) -> None:
         self.deleted.append(image)

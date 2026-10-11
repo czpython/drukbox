@@ -189,8 +189,7 @@ async def test_build_template_image_builds_logs_in_and_pushes(
         label="Node tools",
     )
 
-    assert image.startswith("ghcr.io/acme/drukbox-templates:")
-    assert len(image.rpartition(":")[2]) == 12
+    assert image.startswith("ghcr.io/acme/drukbox-templates:node-tools-")
     assert docker.build_image.await_args.args[0] == image
     docker.push_image.assert_awaited_once_with(image, username="bot", password="secret")
 
