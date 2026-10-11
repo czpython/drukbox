@@ -1,5 +1,6 @@
 import hashlib
 import io
+import re
 import tarfile
 
 from core.settings import get_settings
@@ -13,10 +14,15 @@ def derive_image_name(
     *,
     base_image: str,
     setup_script: str,
+    label: str,
     repository: str = "drukbox-template",
 ) -> str:
     identity = base_image.encode("utf-8") + b"\0" + setup_script.encode("utf-8")
     digest = hashlib.sha256(identity).hexdigest()[:12]
+    # A tag holds at most 128 characters, and the digest needs 13 of them.
+    purpose = re.sub(r"[^a-z0-9]+", "-", label.lower())[:115].strip("-")
+    if purpose:
+        return f"{repository}:{purpose}-{digest}"
     return f"{repository}:{digest}"
 
 
@@ -42,6 +48,7 @@ async def build_derived_image(
     *,
     base_image: str,
     setup_script: str,
+    label: str,
 ) -> str:
     settings = get_settings()
     repository = "drukbox-template"
@@ -50,6 +57,7 @@ async def build_derived_image(
     image = derive_image_name(
         base_image=base_image,
         setup_script=setup_script,
+        label=label,
         repository=repository,
     )
     context_tar = create_build_context(base_image=base_image, setup_script=setup_script)

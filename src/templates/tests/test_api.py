@@ -54,6 +54,7 @@ async def test_create_template_returns_building_then_becomes_available(client, t
     assert polled.json()["image"] == derive_image_name(
         base_image=template_provider.base_image_ref,
         setup_script=SETUP_SCRIPT,
+        label="Node tools",
     )
     assert "setup_script" not in polled.json()
     assert template_provider.built == [

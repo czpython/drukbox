@@ -201,6 +201,7 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
             self.docker,
             base_image=base_image,
             setup_script=setup_script,
+            label=label,
         )
         # sbx keeps its own image store. The Docker image only carries the build.
         try:

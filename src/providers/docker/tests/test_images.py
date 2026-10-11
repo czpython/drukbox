@@ -32,14 +32,33 @@ def test_create_build_context_contains_the_base_and_verbatim_script() -> None:
 
 
 def test_derive_image_name_is_deterministic_and_base_specific() -> None:
-    first = derive_image_name(base_image="sandbox:base", setup_script="apt-get update")
-    repeated = derive_image_name(base_image="sandbox:base", setup_script="apt-get update")
-    different_base = derive_image_name(base_image="sandbox:other", setup_script="apt-get update")
+    first = derive_image_name(base_image="sandbox:base", setup_script="apt-get update", label="")
+    repeated = derive_image_name(base_image="sandbox:base", setup_script="apt-get update", label="")
+    different_base = derive_image_name(
+        base_image="sandbox:other", setup_script="apt-get update", label=""
+    )
 
     assert first == repeated
     assert first.startswith("drukbox-template:")
     assert len(first.removeprefix("drukbox-template:")) == 12
     assert different_base != first
+
+
+@pytest.mark.parametrize(
+    ("label", "purpose"),
+    [
+        ("site-builder-build", "site-builder-build"),
+        ("Site_Builder / Build.sh", "site-builder-build-sh"),
+        ("x" * 200, "x" * 115),
+    ],
+)
+def test_derive_image_name_leads_the_tag_with_the_label(label: str, purpose: str) -> None:
+    image = derive_image_name(base_image="sandbox:base", setup_script="apt-get update", label=label)
+
+    tag = image.removeprefix("drukbox-template:")
+    assert tag.startswith(f"{purpose}-")
+    assert len(tag) == len(purpose) + 13
+    assert len(tag) <= 128
 
 
 async def test_build_derived_image_publishes_to_the_template_repository(
@@ -52,9 +71,9 @@ async def test_build_derived_image_publishes_to_the_template_repository(
     docker = MagicMock(build_image=AsyncMock(), push_image=AsyncMock())
 
     image = await build_derived_image(
-        docker, base_image="sandbox:base", setup_script="apt-get update"
+        docker, base_image="sandbox:base", setup_script="apt-get update", label="node-tools"
     )
 
-    assert image.startswith("ghcr.io/acme/templates:")
+    assert image.startswith("ghcr.io/acme/templates:node-tools-")
     assert docker.build_image.await_args.args[0] == image
     docker.push_image.assert_awaited_once_with(image, username="bot", password="secret")
