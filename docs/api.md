@@ -40,6 +40,10 @@ or claimed the host, `admin` for an admin key, or `null` for an unclaimed
 warm host. Callers cannot set it. An `Idempotency-Key` belongs to the
 service account that first used it. Another one reusing it gets `409`.
 
+`POST /hosts` returns `503` with `CAPACITY` and `Retry-After` when the
+provider has `HOST_LIMITS` live hosts. A live host is not in `error` and
+has not expired.
+
 ## Refresh a host secret
 
 `POST /hosts/{host_id}/secrets/{service}/refresh` makes the exchange drop

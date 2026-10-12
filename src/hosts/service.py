@@ -8,7 +8,7 @@ from types import EllipsisType
 from typing import Any
 
 import httpx
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
@@ -20,7 +20,12 @@ from gateway.settings import GatewaySettings
 from host_secrets import catalog
 from host_secrets.exceptions import SecretsProxyNotConfiguredError, SecretStaticError
 from host_secrets.placeholder import Placeholder
-from hosts.exceptions import HostStateError, IdempotencyKeyConflictError, ProvisioningFailedError
+from hosts.exceptions import (
+    HostCapacityError,
+    HostStateError,
+    IdempotencyKeyConflictError,
+    ProvisioningFailedError,
+)
 from hosts.models import Host, HostStatus, IdempotencyKey
 from networking.tailscale import (
     DeviceDiscoveryTimeoutError,
@@ -286,6 +291,25 @@ class HostService:
             expires_at=initial_expires_at,
             pool_member=pool_member,
         )
+        if vm.name in self.settings.host_limits:
+            # The lock serializes this provider's creates until the insert
+            # commits, so two requests cannot both pass the count. SQLite has
+            # no advisory locks; it serves single-process quickstarts.
+            if self.session.get_bind().dialect.name == "postgresql":
+                await self.session.execute(
+                    select(func.pg_advisory_xact_lock(func.hashtext(vm.name)))
+                )
+            live = (
+                await self.session.execute(
+                    select(func.count())
+                    .select_from(Host)
+                    .where(Host.provider == vm.name)
+                    .where(Host.status != HostStatus.ERROR.value)
+                    .where(or_(Host.expires_at.is_(None), Host.expires_at > now))
+                )
+            ).scalar_one()
+            if live >= self.settings.host_limits[vm.name]:
+                raise HostCapacityError(f"provider {vm.name!r} is at its host limit")
         self.session.add(host)
         await self.session.commit()
         await self.session.refresh(host)

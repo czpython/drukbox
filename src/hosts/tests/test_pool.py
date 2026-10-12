@@ -7,7 +7,8 @@ from sqlalchemy import func, select
 from uuid6 import uuid7
 
 from core.database import async_session_factory
-from core.settings import get_settings
+from core.settings import Settings, get_settings
+from hosts.exceptions import HostCapacityError
 from hosts.models import Host, HostStatus
 from hosts.pool import _MAX_CONSECUTIVE_CREATE_FAILURES, maintain_pool
 from hosts.service import HostService, utc_now
@@ -206,6 +207,27 @@ async def test_create_host_never_claims_another_providers_pool_member(
     assert result.provider == "stub"
     assert result.claimed_at is None
     mocked_provision.assert_awaited_once()
+
+
+async def test_create_host_refuses_a_provider_at_its_host_limit(monkeypatch, stub_provider):
+    # The warm pool member counts toward exe's limit; stub has none.
+    monkeypatch.setenv("HOST_LIMITS", '{"exe": 1}')
+    settings = Settings()  # pyright: ignore[reportCallIssue]
+    await _seed_pool_host(name="lb-pool-exe")
+    monkeypatch.setattr("hosts.service.HostService.provision", AsyncMock())
+
+    async with async_session_factory() as session:
+        with pytest.raises(HostCapacityError):
+            await HostService(session, settings=settings).create_host(
+                env={}, image=None, provider="exe"
+            )
+    async with async_session_factory() as session:
+        await HostService(session, settings=settings).create_host(
+            env={}, image=None, provider="stub"
+        )
+        counted = await session.execute(select(Host.provider, func.count()).group_by(Host.provider))
+
+    assert {provider: count for provider, count in counted.all()} == {"exe": 1, "stub": 1}
 
 
 async def test_create_host_skips_pool_when_sized(multi_pool_settings, monkeypatch, stub_provider):

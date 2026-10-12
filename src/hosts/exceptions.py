@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 from core.exceptions import AppException
 
 
@@ -14,6 +16,12 @@ class IdempotencyKeyConflictError(AppException):
 class HostTeardownError(AppException):
     status_code = 503
     error_code = "HOST_TEARDOWN"
+
+
+class HostCapacityError(AppException):
+    status_code = 503
+    error_code = "CAPACITY"
+    headers: ClassVar[dict[str, str]] = {"Retry-After": "30"}
 
 
 class ProvisioningFailedError(AppException):
