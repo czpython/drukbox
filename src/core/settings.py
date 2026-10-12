@@ -165,6 +165,14 @@ class Settings(BaseSettings):
             "Overrides POOL_SIZE for the providers it names."
         ),
     )
+    host_limits: dict[str, Annotated[int, Field(ge=0)]] = Field(
+        default_factory=dict,
+        validation_alias="HOST_LIMITS",
+        description=(
+            'Most live hosts per provider, as JSON (e.g. {"exe": 28, "docker": 6}). '
+            "A provider it does not name has no limit."
+        ),
+    )
     pool_size: int = Field(
         default=0,
         ge=0,

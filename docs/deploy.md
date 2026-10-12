@@ -586,6 +586,7 @@ Core, optional:
 | `LEASE_DEFAULT_TTL` | `86400` | Lease TTL in seconds for hosts created without an explicit `expires_at`, and the extension applied by an empty `POST /hosts/{id}/renew`. An explicit `expires_at: null` at create time opts out of expiry entirely. |
 | `IDEMPOTENCY_KEY_TTL_HOURS` | `24` | Retention period for successful `Idempotency-Key` mappings. |
 | `POOL_SIZES` | `{}` | Warm hosts to keep ready per provider, as JSON (e.g. `{"exe": 2, "hetzner": 1}`). Overrides `POOL_SIZE` for the providers it names. |
+| `HOST_LIMITS` | `{}` | Most live hosts per provider, as JSON (e.g. `{"exe": 28, "docker": 6}`). A create at the limit returns `503` with `CAPACITY`. Warm pool hosts count. A provider it does not name has no limit. |
 | `POOL_SIZE` | `0` | Warm hosts to keep ready for the default provider. `0` disables its pool. |
 | `POOL_HOST_MAX_AGE_HOURS` | `4` | Max age before the janitor reaps an unclaimed pool host. |
 | `POOL_MAX_CREATES_PER_TICK` | `2` | Upper bound on pool provisions per tick, across all providers; caps over-provision blast radius when ticks overlap. |
