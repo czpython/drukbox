@@ -95,6 +95,13 @@ provider with a secret store of its own, such as docker-sbx, implements
 Do not add provider-specific fields to the host schema. Add a capability
 instead.
 
+Set `max_lifetime` to a `timedelta` when the provider has a fixed VM
+lifetime. Drukbox stores `lease_deadline` before provisioning, caps default
+leases and pool ages, and rejects explicit leases beyond that limit.
+The value must be conservative: the provider must grant at least that
+lifetime after creation begins. Leave it `None` for providers with no
+fixed lifetime.
+
 ## 7. Tests
 
 - Unit-test the provider with a mocked api object

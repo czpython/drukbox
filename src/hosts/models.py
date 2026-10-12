@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
+from types import EllipsisType
 
 from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, TypeDecorator, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
@@ -9,10 +10,9 @@ from sqlalchemy_encrypted_field import EncryptedJsonField, SecretsMapping
 from uuid6 import uuid7
 
 from core.database import Base
+from hosts.exceptions import HostLeaseError
 
-# Use JSONB on Postgres (indexable, binary storage); fall back to JSON
-# (TEXT-backed) on SQLite and other dialects so the OSS quickstart works
-# without Postgres.
+# JSONB is available on Postgres; SQLite keeps the local development database usable.
 _JSONType = JSON().with_variant(JSONB(), "postgresql")
 
 
@@ -31,8 +31,7 @@ class _UTCDateTime(TypeDecorator[datetime]):
 
     def process_bind_param(self, value: datetime | None, dialect: object) -> datetime | None:
         if value and value.tzinfo:
-            # SQLite drops the offset, so store the equivalent UTC instant —
-            # otherwise 00:00-08:00 reads back as 00:00Z, not 08:00Z.
+            # SQLite drops timezone offsets, so normalize before storage.
             return value.astimezone(UTC)
         return value
 
@@ -45,11 +44,7 @@ class _UTCDateTime(TypeDecorator[datetime]):
 UTCDateTime = _UTCDateTime()
 
 _HOST_NAME_PREFIX = "sb-"
-# 48 bits of UUIDv7 entropy for a short readable name. UUIDv7's leading 48
-# bits are the millisecond timestamp — concurrent creates in the same ms
-# share an identical leading-hex prefix and collided on the unique index.
-# Slice from the trailing random segment (rand_b, bits 64..125) so names
-# are derived from actual entropy, not a clock reading.
+# Use UUIDv7's random suffix because its timestamp prefix is shared by concurrent creates.
 _HOST_NAME_UID_CHARS = 12
 
 
@@ -64,10 +59,7 @@ class HostStatus(StrEnum):
 
 class Host(Base):
     __tablename__ = "hosts"
-    # Allow non-Mapped[] annotations on this class (we use it for
-    # `private_key`, a transient per-instance attribute that must never
-    # be persisted). Without this flag SQLAlchemy 2.0's annotated
-    # declarative mapper rejects plain annotations.
+    # The private key exists only on the create response and must never be stored.
     __allow_unmapped__ = True
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid7)
@@ -78,20 +70,14 @@ class Host(Base):
     status: Mapped[str] = mapped_column(String(32), default=HostStatus.PROVISIONING.value)
     provider: Mapped[str] = mapped_column(String(20), default="exe")
     image: Mapped[str] = mapped_column(Text)
-    # Per-request sizing, provider-native values (EC2 instance type, Hetzner
-    # server type). NULL means the provider's configured default size.
+    # Null sizing selects the provider default.
     instance_type: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     disk_gb: Mapped[int | None] = mapped_column(nullable=True, default=None)
-    # Reachable SSH addresses. Both populated when Tailscale is enabled
-    # (internal = MagicDNS name, external = provider-given address); only
-    # external_ssh_host is populated when Tailscale is disabled. The
-    # internal path is always reached on port 22 by Tailscale convention,
-    # so no internal_ssh_port column.
+    # The internal Tailscale SSH port is always 22.
     external_ssh_host: Mapped[str] = mapped_column(Text, default="")
     external_ssh_port: Mapped[int] = mapped_column(default=22)
     ssh_username: Mapped[str] = mapped_column(Text, default="")
-    # The public half of the per-host keypair. The gateway authenticates
-    # callers against it. The private half is returned once and never stored.
+    # Gateway callers authenticate against this public key.
     public_key: Mapped[str] = mapped_column(Text, default="")
     internal_ssh_host: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     known_hosts: Mapped[str] = mapped_column(Text, default="")
@@ -108,24 +94,31 @@ class Host(Base):
         nullable=True,
         default=None,
     )
+    lease_deadline: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(
         UTCDateTime,
         nullable=True,
         default=None,
     )
-    # True only for hosts the pool maintainer warmed. Demand-provisioned hosts
-    # are False so pool claim/count/shed never hand out or delete a caller-owned
-    # sandbox — both kinds start with claimed_at NULL, so claimed_at alone can't
-    # tell them apart.
+    # An unclaimed caller-owned host must never be counted or removed as pool capacity.
     pool_member: Mapped[bool] = mapped_column(default=False)
     last_error: Mapped[str] = mapped_column(Text, default="")
-    # Non-persisted, transient per-instance attribute. provision() assigns
-    # the freshly-minted private key here so HostOut returns it exactly
-    # once at create time; a subsequent GET reads a row from disk where
-    # this attribute falls back to None. `__allow_unmapped__` above lets
-    # SQLAlchemy treat the plain annotation as a class attribute instead
-    # of a missing column.
     private_key: str | None = None
+
+    def lease_expiry(
+        self, requested: datetime | None | EllipsisType, *, default: datetime
+    ) -> datetime | None:
+        expiry = default if requested is ... else requested
+        if self.lease_deadline:
+            if self.lease_deadline <= datetime.now(UTC):
+                raise HostLeaseError("The provider lifetime has ended")
+            if requested is ...:
+                return min(default, self.lease_deadline)
+            if not expiry or expiry > self.lease_deadline:
+                raise HostLeaseError(
+                    f"expires_at must be at or before {self.lease_deadline.isoformat()}"
+                )
+        return expiry
 
     def __str__(self) -> str:
         return f"{self.provider}:{self.name}"

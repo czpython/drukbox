@@ -40,6 +40,20 @@ or claimed the host, `admin` for an admin key, or `null` for an unclaimed
 warm host. Callers cannot set it. An `Idempotency-Key` belongs to the
 service account that first used it. Another one reusing it gets `409`.
 
+## Host leases
+
+`POST /hosts` without `expires_at` uses the default lease. An explicit
+`null` requests a permanent host. `POST /hosts/{id}/renew` with an empty
+body renews from now; supply `expires_at` to request a specific expiry.
+
+A host response includes `lease_deadline`. A date means that the provider
+will stop the VM after a fixed lifetime. Default leases and renewals are
+capped at that date. A permanent lease or an explicit expiry beyond the
+limit returns `400` with `HOST_LEASE`. The limit is stored per host and
+does not change when provider settings change. `null` means there is no
+fixed provider lifetime. Renewal does not restart a VM or extend its
+provider lifetime.
+
 ## Refresh a host secret
 
 `POST /hosts/{host_id}/secrets/{service}/refresh` makes the exchange drop
