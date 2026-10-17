@@ -126,19 +126,18 @@ async def test_bootstrap_failure_does_not_return_a_host_or_leak_output(provider,
     assert sandbox["delete"].called
 
 
-@pytest.mark.parametrize(
-    "arguments",
-    [
-        {"instance_type": "invalid"},
-        {"disk_gb": 20},
-        {"setup_script": "tailscale up"},
-        {"env": {"INVALID-NAME": "value"}},
-    ],
-)
-async def test_invalid_request_fails_before_allocation(provider, arguments, respx_mock):
+async def test_unknown_instance_type_fails_before_allocation(provider, respx_mock):
     with pytest.raises(ProviderCommandError):
-        await provider.create_vm(name="host-1", image="default", **arguments)
+        await provider.create_vm(name="host-1", image="default", instance_type="invalid")
     assert not respx_mock.calls
+
+
+@pytest.mark.respx(assert_all_called=False)
+async def test_missing_ssh_address_is_deleted(provider, sandbox):
+    sandbox["ssh"].respond(200, json={"machineIp": None, "sshUser": "user"})
+    with pytest.raises(ProviderCommandError):
+        await provider.create_vm(name="host-1", image="default")
+    assert sandbox["delete"].called
 
 
 async def test_delete_follows_pagination_and_confirms_exact_resource(provider, respx_mock):

@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
@@ -11,6 +12,9 @@ from .exceptions import (
     BoatTransportError,
 )
 from .settings import BoatSettings
+
+# Every attempt reuses one idempotency key, so a lost response cannot allocate twice.
+CREATE_RETRIES = 2
 
 
 class BoatAPI:
@@ -31,21 +35,14 @@ class BoatAPI:
         }
         if image != "default":
             body["from"] = image
-        for attempt in range(3):
-            try:
-                payload = await self.request(
-                    "POST",
-                    "sandboxes",
-                    json=body,
-                    headers={"Idempotency-Key": str(uuid5(NAMESPACE_URL, name))},
-                )
-            except BoatTransportError:
-                if attempt == 2:
-                    raise
-                await asyncio.sleep(1)
-            else:
+        headers = {"Idempotency-Key": str(uuid5(NAMESPACE_URL, name))}
+        for _ in range(CREATE_RETRIES):
+            with contextlib.suppress(BoatTransportError):
+                payload = await self.request("POST", "sandboxes", json=body, headers=headers)
                 return payload["sandbox"]["id"]
-        raise AssertionError("creation attempts exhausted")
+            await asyncio.sleep(1)
+        payload = await self.request("POST", "sandboxes", json=body, headers=headers)
+        return payload["sandbox"]["id"]
 
     async def name_sandbox(self, sandbox_id: str, name: str) -> None:
         await self.request("PATCH", f"sandboxes/{sandbox_id}", json={"name": name})
@@ -65,10 +62,15 @@ class BoatAPI:
         except TimeoutError as exc:
             raise BoatTransportError("Boat sandbox did not become ready") from exc
 
-    async def configure_ssh(self, sandbox_id: str, public_key: str) -> dict[str, Any]:
-        return await self.request(
-            "POST", f"sandboxes/{sandbox_id}/sshkey", json={"key": public_key}
-        )
+    async def configure_ssh(self, sandbox_id: str, public_key: str) -> tuple[str, int, str]:
+        """The host, port, and user that accept the key."""
+        ssh = await self.request("POST", f"sandboxes/{sandbox_id}/sshkey", json={"key": public_key})
+        if endpoint := ssh.get("sshEndpoint"):
+            host, _, port = endpoint.rpartition(":")
+            return host, int(port), ssh["sshUser"]
+        if ssh["machineIp"]:
+            return ssh["machineIp"], 22, ssh["sshUser"]
+        raise BoatCommandError("Boat returned no SSH address")
 
     async def run_command(self, sandbox_id: str, command: str) -> None:
         result = await self.request(
@@ -78,7 +80,7 @@ class BoatAPI:
             timeout=130,
         )
         if result["timedOut"] or result["exitCode"] != 0 or not result["success"]:
-            raise BoatCommandError("Boat sandbox bootstrap failed")
+            raise BoatCommandError("Boat sandbox command failed")
 
     async def find_sandbox(self, name: str) -> str:
         params = {"limit": "100"}

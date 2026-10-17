@@ -12,7 +12,7 @@ It owns:
 - Host records and lifecycle state in Postgres
 - Template records, async template builds, and their provider images
 - Inline provisioning in `POST /hosts`
-- Provider VM creation and deletion (exe.dev, AWS, Hetzner, Exoscale,
+- Provider VM creation and deletion (exe.dev, AWS, Hetzner, Exoscale, Boat,
   local Docker, Docker Sandboxes)
 - Tailscale auth key creation, device discovery, and cleanup
 - SSH host key scanning and `known_hosts` material

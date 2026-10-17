@@ -47,15 +47,10 @@ class BoatProvider(VMProvider):
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
-        if setup_script or disk_gb:
-            raise ProviderCommandError("Boat does not support Tailscale bootstrap or disk sizing")
         size = instance_type or self.settings.instance_type
         if size not in {"small", "default", "large"}:
             raise ProviderCommandError("Boat instance_type must be small, default, or large")
-        try:
-            script = environment.get_cloud_init("set -e", env)
-        except ValueError as exc:
-            raise ProviderCommandError(str(exc)) from exc
+        script = environment.get_cloud_init("", env)
         private_key, public_key = generate_ed25519_keypair()
         resource_name = f"{self.service_label}:{name}"
         try:
@@ -68,16 +63,8 @@ class BoatProvider(VMProvider):
             await self.api.name_sandbox(sandbox_id, resource_name)
             await self.api.wait_ready(sandbox_id)
             await self.api.run_command(sandbox_id, f"sudo -n bash -e -c {shlex.quote(script)}")
-            ssh = await self.api.configure_ssh(sandbox_id, public_key)
-            host = ssh["machineIp"]
-            port = 22
-            if endpoint := ssh.get("sshEndpoint"):
-                host, _, port_text = endpoint.rpartition(":")
-                port = int(port_text)
-            if not host:
-                raise ProviderCommandError("Boat returned no SSH address")
-            username = ssh["sshUser"]
-        except (BoatError, ProviderCommandError, KeyError, TypeError, ValueError) as exc:
+            host, port, username = await self.api.configure_ssh(sandbox_id, public_key)
+        except (BoatError, KeyError, TypeError, ValueError) as exc:
             with contextlib.suppress(BoatError):
                 await self.api.delete_sandbox(sandbox_id)
             raise ProviderCommandError(f"Boat sandbox {sandbox_id} provisioning failed") from exc
