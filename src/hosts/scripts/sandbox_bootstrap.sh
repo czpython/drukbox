@@ -1,19 +1,4 @@
 #!/usr/bin/env bash
-# Sandbox host first-boot bootstrap. Delivered to the VM at create time via the
-# VM provider's setup-script mechanism (exe.dev's --setup-script today).
-#
-# The VM brings itself onto the tailnet and exits. Drukbox observes the new
-# device by polling Tailscale's API from outside; no callback into drukbox
-# is made from this script, and drukbox is never reachable from the box.
-#
-# Required env:
-#   TAILSCALE_AUTHKEY
-#   TAILSCALE_HOSTNAME
-#
-# Optional env:
-#   TAILSCALE_ADVERTISE_TAGS              (default: tag:sandbox)
-#   TAILSCALE_LOGIN_SERVER                (default: unset)
-
 set -euo pipefail
 
 state_dir=/var/lib/sandbox
@@ -35,9 +20,6 @@ run_privileged() {
 
 run_privileged install -d -m 755 -o "$(id -u)" -g "$(id -g)" "$state_dir"
 
-# Defensive against re-runs: --setup-script is documented as run-once, and the
-# legacy in-image systemd unit (if present on transitional images) also gates on
-# this flag. Either path converges on the same end state.
 if [[ -f "$done_path" ]]; then
   exit 0
 fi
@@ -54,7 +36,22 @@ require_var TAILSCALE_HOSTNAME
 
 advertise_tags="${TAILSCALE_ADVERTISE_TAGS:-tag:sandbox}"
 
-run_privileged systemctl enable --now tailscaled.service
+if [[ -d /run/systemd/system ]]; then
+  run_privileged systemctl enable --now tailscaled.service
+else
+  run_privileged install -d -m 755 /var/run/tailscale
+  run_privileged sh -c 'nohup tailscaled --tun=userspace-networking --state=mem: </dev/null >/var/log/tailscaled.log 2>&1 &'
+  for attempt in {1..60}; do
+    if [[ -S /var/run/tailscale/tailscaled.sock ]]; then
+      break
+    fi
+    sleep 0.5
+  done
+  if [[ ! -S /var/run/tailscale/tailscaled.sock ]]; then
+    echo "Tailscale did not create its control socket." >&2
+    exit 1
+  fi
+fi
 
 tailscale_running() {
   tailscale status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null
