@@ -54,12 +54,13 @@ async def test_requires_tailscale_before_any_request(provider: CloudflareProvide
 
 
 @respx.mock
-async def test_rejects_unknown_size(provider: CloudflareProvider):
-    with pytest.raises(ProviderCommandError, match="instance_type"):
+async def test_unknown_size_is_rejected_by_the_worker(provider: CloudflareProvider):
+    respx.put("https://worker.test/sandboxes/sb-test").respond(400)
+    with pytest.raises(ProviderCommandError, match="rejected"):
         await provider.create_vm(
             name="sb-test", image="base", setup_script="true", instance_type="huge"
         )
-    assert not respx.calls
+    assert len(respx.calls) == 1
 
 
 @respx.mock

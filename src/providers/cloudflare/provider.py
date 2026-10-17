@@ -52,16 +52,13 @@ class CloudflareProvider(VMProvider):
     ) -> VMCreateResult:
         if not setup_script:
             raise ProviderCommandError("Cloudflare requires TAILSCALE_ENABLED=true")
-        size = instance_type or self.settings.instance_type
-        if size not in {"lite", "standard-1", "standard-2", "standard-3", "standard-4"}:
-            raise ProviderCommandError("Unsupported Cloudflare instance_type")
-        try:
-            script = environment.get_cloud_init(setup_script, env)
-        except ValueError as exc:
-            raise ProviderCommandError(str(exc)) from exc
         try:
             await self.api.create_sandbox(
-                name, image=image, instance=size, script=script, label=self.service_label
+                name,
+                image=image,
+                instance=instance_type or self.settings.instance_type,
+                script=environment.get_cloud_init(setup_script, env),
+                label=self.service_label,
             )
         except ProviderAuthError as exc:
             raise ProviderCommandError("Cloudflare Worker authentication failed") from exc

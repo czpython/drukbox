@@ -23,7 +23,7 @@ class CloudflareAPI:
         await self.request(
             "PUT",
             f"sandboxes/{name}",
-            status="active",
+            expected="active",
             json={
                 "image": image,
                 "instance": instance,
@@ -33,17 +33,17 @@ class CloudflareAPI:
         )
 
     async def delete_sandbox(self, name: str) -> None:
-        await self.request("DELETE", f"sandboxes/{name}", status="deleted")
+        await self.request("DELETE", f"sandboxes/{name}", expected="deleted")
 
     async def diagnose(self) -> str:
-        await self.request("GET", "health", status="ok")
+        await self.request("GET", "health", expected="ok")
         return "Cloudflare Worker authentication succeeded"
 
     async def aclose(self) -> None:
         await self.client.aclose()
 
     async def request(
-        self, method: str, path: str, *, status: str, json: dict[str, str] | None = None
+        self, method: str, path: str, *, expected: str, json: dict[str, str] | None = None
     ) -> None:
         try:
             response = await self.client.request(method, path, json=json)
@@ -58,7 +58,7 @@ class CloudflareAPI:
                 f"Cloudflare Worker rejected request: HTTP {response.status_code}"
             )
         try:
-            if response.status_code not in {200, 201} or response.json()["status"] != status:
+            if response.status_code not in {200, 201} or response.json()["status"] != expected:
                 raise ProviderTransportError("Unexpected Cloudflare Worker response")
         except (ValueError, KeyError, TypeError) as exc:
             raise ProviderTransportError("Invalid Cloudflare Worker response") from exc

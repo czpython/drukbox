@@ -74,7 +74,7 @@ It does not test capacity or tailnet SSH.
 ## Verify
 
 ```bash
-uv run pytest src/providers/cloudflare/tests src/hosts/tests/test_userspace_bootstrap.py
+uv run pytest src/providers/cloudflare/tests src/hosts/tests/test_bootstrap.py
 cd deploy/cloudflare
 npm ci
 npm run check

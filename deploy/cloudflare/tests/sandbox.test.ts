@@ -121,6 +121,13 @@ test("delete is repeatable and a later alarm cannot restart the VM", async () =>
 test("a stopped VM is not silently recreated", async () => {
   values.set("status", "active");
   await sandbox().alarm();
-  expect(values.get("status")).toBe("stopped");
+  expect(storage.setAlarm).not.toHaveBeenCalled();
   expect(container.start).not.toHaveBeenCalled();
+});
+
+test("a wrong token of the same length is rejected", async () => {
+  const response = await worker.fetch(new Request("https://worker.test/health", {
+    headers: { Authorization: "Bearer test-tokem" },
+  }), env as never);
+  expect(response.status).toBe(401);
 });

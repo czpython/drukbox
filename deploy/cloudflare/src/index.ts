@@ -5,16 +5,24 @@ interface Env {
   SANDBOXES: DurableObjectNamespace<Sandbox>;
 }
 
+const INSTANCES = ["lite", "standard-1", "standard-2", "standard-3", "standard-4"] as const;
+
 interface SandboxRequest {
   image: string;
-  instance: "lite" | "standard-1" | "standard-2" | "standard-3" | "standard-4";
+  instance: (typeof INSTANCES)[number];
   script: string;
   label: string;
 }
 
 const INACTIVITY_MS = 5 * 60 * 1000;
 const ALARM_MS = 60 * 1000;
-const INSTANCES = new Set(["lite", "standard-1", "standard-2", "standard-3", "standard-4"]);
+const encoder = new TextEncoder();
+
+function isAuthorized(request: Request, token: string): boolean {
+  const supplied = encoder.encode(request.headers.get("Authorization") ?? "");
+  const expected = encoder.encode(`Bearer ${token}`);
+  return supplied.byteLength === expected.byteLength && crypto.subtle.timingSafeEqual(supplied, expected);
+}
 
 export class Sandbox extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -32,10 +40,6 @@ export class Sandbox extends DurableObject<Env> {
       await this.ctx.storage.deleteAlarm();
       return Response.json({ status: "deleted" });
     }
-    if (request.method === "GET") {
-      const status = await this.ctx.storage.get<string>("status");
-      return Response.json({ status: container.running ? status : "stopped" });
-    }
     if (request.method !== "PUT") {
       return new Response(null, { status: 405 });
     }
@@ -48,7 +52,7 @@ export class Sandbox extends DurableObject<Env> {
     }
     if (
       !body || typeof body.image !== "string" || !Object.hasOwn(container.images, body.image) ||
-      !INSTANCES.has(body.instance) || typeof body.script !== "string" ||
+      !INSTANCES.includes(body.instance) || typeof body.script !== "string" ||
       body.script.length > 65536 || typeof body.label !== "string" ||
       body.label.length > 64
     ) {
@@ -109,20 +113,16 @@ export class Sandbox extends DurableObject<Env> {
 
   async alarm(): Promise<void> {
     const status = await this.ctx.storage.get<string>("status");
-    if (status === "active" || status === "creating") {
-      if (this.ctx.container!.running) {
-        await this.ctx.container!.setInactivityTimeout(INACTIVITY_MS);
-        await this.ctx.storage.setAlarm(Date.now() + ALARM_MS);
-      } else {
-        await this.ctx.storage.put("status", "stopped");
-      }
+    if (this.ctx.container!.running && (status === "active" || status === "creating")) {
+      await this.ctx.container!.setInactivityTimeout(INACTIVITY_MS);
+      await this.ctx.storage.setAlarm(Date.now() + ALARM_MS);
     }
   }
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (!env.DRUKBOX_TOKEN || request.headers.get("Authorization") !== `Bearer ${env.DRUKBOX_TOKEN}`) {
+    if (!env.DRUKBOX_TOKEN || !isAuthorized(request, env.DRUKBOX_TOKEN)) {
       return new Response(null, { status: 401 });
     }
     const url = new URL(request.url);

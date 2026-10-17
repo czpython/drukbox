@@ -41,7 +41,7 @@ if [[ -d /run/systemd/system ]]; then
 else
   run_privileged install -d -m 755 /var/run/tailscale
   run_privileged sh -c 'nohup tailscaled --tun=userspace-networking --state=mem: </dev/null >/var/log/tailscaled.log 2>&1 &'
-  for attempt in {1..60}; do
+  for _ in {1..60}; do
     if [[ -S /var/run/tailscale/tailscaled.sock ]]; then
       break
     fi
