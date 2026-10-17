@@ -102,6 +102,7 @@ account token returns `503`. See [API](api.md#service-accounts).
 | `exoscale` | Exoscale VMs | Remote |
 | `docker` | Containers ([Local sandboxes with Docker](#local-sandboxes-with-docker)) | Local, no external account |
 | `docker-sbx` | microVMs ([Local microVMs with Docker Sandboxes](#local-microvms-with-docker-sandboxes)) | Local |
+| `boat` | Sandboxes ([Boat configuration](boat.md)) | Cloud |
 
 `DEFAULT_HOST_PROVIDER` selects the provider for `POST /hosts` (default
 `exe`). Set the matching provider variables below. The image contains
