@@ -1,19 +1,4 @@
 #!/usr/bin/env bash
-# Sandbox host first-boot bootstrap. Delivered to the VM at create time via the
-# VM provider's setup-script mechanism (exe.dev's --setup-script today).
-#
-# The VM brings itself onto the tailnet and exits. Drukbox observes the new
-# device by polling Tailscale's API from outside; no callback into drukbox
-# is made from this script, and drukbox is never reachable from the box.
-#
-# Required env:
-#   TAILSCALE_AUTHKEY
-#   TAILSCALE_HOSTNAME
-#
-# Optional env:
-#   TAILSCALE_ADVERTISE_TAGS              (default: tag:sandbox)
-#   TAILSCALE_LOGIN_SERVER                (default: unset)
-
 set -euo pipefail
 
 state_dir=/var/lib/sandbox
@@ -35,9 +20,6 @@ run_privileged() {
 
 run_privileged install -d -m 755 -o "$(id -u)" -g "$(id -g)" "$state_dir"
 
-# Defensive against re-runs: --setup-script is documented as run-once, and the
-# legacy in-image systemd unit (if present on transitional images) also gates on
-# this flag. Either path converges on the same end state.
 if [[ -f "$done_path" ]]; then
   exit 0
 fi
@@ -52,26 +34,31 @@ require_var() {
 require_var TAILSCALE_AUTHKEY
 require_var TAILSCALE_HOSTNAME
 
-advertise_tags="${TAILSCALE_ADVERTISE_TAGS:-tag:sandbox}"
+if [[ -d /run/systemd/system ]]; then
+  run_privileged systemctl enable --now tailscaled.service
+else
+  tailscaled_tun=userspace-networking
+  if [[ -c /dev/net/tun ]]; then
+    tailscaled_tun=tailscale0
+  fi
+  # Tailscale SSH keeps its host keys in the state directory.
+  run_privileged sh -c "nohup tailscaled --tun=$tailscaled_tun --statedir=/var/lib/tailscale </dev/null >/var/log/tailscaled.log 2>&1 &"
+  for _ in {1..60}; do
+    [[ -S /var/run/tailscale/tailscaled.sock ]] && break
+    sleep 0.5
+  done
+fi
 
-run_privileged systemctl enable --now tailscaled.service
-
-tailscale_running() {
-  tailscale status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null
-}
-
-if ! tailscale_running; then
+if ! tailscale status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null; then
   tailscale_args=(
     up
     "--authkey=$TAILSCALE_AUTHKEY"
     --accept-dns=true
     --ssh
     "--hostname=$TAILSCALE_HOSTNAME"
+    "--advertise-tags=${TAILSCALE_ADVERTISE_TAGS:-tag:sandbox}"
     --reset
   )
-  if [[ -n "$advertise_tags" ]]; then
-    tailscale_args+=("--advertise-tags=$advertise_tags")
-  fi
   if [[ -n "${TAILSCALE_LOGIN_SERVER:-}" ]]; then
     tailscale_args+=("--login-server=$TAILSCALE_LOGIN_SERVER")
   fi
