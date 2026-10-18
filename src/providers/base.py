@@ -1,5 +1,6 @@
 import abc
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import ClassVar, NamedTuple, Self
 
 import asyncssh
@@ -79,6 +80,8 @@ class VMProvider(abc.ABC):
     supports_disk_gb: ClassVar[bool] = False
     # A local provider's hosts keep the external path only.
     supports_tailnet: ClassVar[bool] = True
+    # Set when the provider stops every VM this long after create.
+    max_lifetime: timedelta | None = None
 
     @classmethod
     @abc.abstractmethod
@@ -106,6 +109,12 @@ class VMProvider(abc.ABC):
 
     @abc.abstractmethod
     async def delete_vm(self, name: str) -> None: ...
+
+    def lease_end(self, created_at: datetime, expires_at: datetime | None) -> datetime | None:
+        if self.max_lifetime:
+            stop = created_at + self.max_lifetime
+            return min(expires_at, stop) if expires_at else stop
+        return expires_at
 
     async def open_gateway_tunnel(self, name: str) -> asyncssh.SSHClientConnection:
         """Open an SSH tunnel into a gateway host's sandbox. The gateway

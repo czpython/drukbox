@@ -95,6 +95,9 @@ provider with a secret store of its own, such as docker-sbx, implements
 Do not add provider-specific fields to the host schema. Add a capability
 instead.
 
+Set `max_lifetime` when the provider stops every VM after a fixed time. No
+lease then ends later than that time.
+
 ## 7. Tests
 
 - Unit-test the provider with a mocked api object

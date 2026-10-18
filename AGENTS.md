@@ -13,7 +13,7 @@ It owns:
 - Template records, async template builds, and their provider images
 - Inline provisioning in `POST /hosts`
 - Provider VM creation and deletion (exe.dev, AWS, Hetzner, Exoscale, Boat,
-  Cloudflare, Daytona, local Docker, Docker Sandboxes)
+  Cloudflare, Daytona, Vercel, local Docker, Docker Sandboxes)
 - Tailscale auth key creation, device discovery, and cleanup
 - SSH host key scanning and `known_hosts` material
 - An SSH gateway for hosts of gateway providers (`python -m gateway.server`)
@@ -155,6 +155,9 @@ the given future instant, or by `LEASE_DEFAULT_TTL` from now on an empty body.
 Only `active` and `bootstrapping` hosts renew, and unclaimed pool members
 refuse with `409` (pool maintenance owns them). The janitor reaps hosts whose
 `expires_at` has passed.
+
+A provider whose VMs stop after a fixed time sets `max_lifetime`.
+`VMProvider.lease_end` cuts every lease at `created_at + max_lifetime`.
 
 ### Delete Semantics
 

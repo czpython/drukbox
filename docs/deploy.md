@@ -102,6 +102,7 @@ account token returns `503`. See [API](api.md#service-accounts).
 | `hetzner` | Hetzner Cloud VMs | Remote |
 | `exoscale` | Exoscale VMs | Remote |
 | `cloudflare` | Containers ([Cloudflare setup](cloudflare.md)) | Remote |
+| `vercel` | microVMs ([Vercel setup](vercel.md)) | Remote |
 | `docker` | Containers ([Local sandboxes with Docker](#local-sandboxes-with-docker)) | Local, no external account |
 | `docker-sbx` | microVMs ([Local microVMs with Docker Sandboxes](#local-microvms-with-docker-sandboxes)) | Local |
 | `boat` | Sandboxes ([Boat configuration](boat.md)) | Cloud |
