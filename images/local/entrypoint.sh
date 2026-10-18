@@ -33,7 +33,7 @@ if [ -n "${GH_TOKEN:-}" ]; then
   git config --system --add url.https://github.com/.insteadOf ssh://git@github.com/
 fi
 
-# Generate host keys if the image doesn't ship any.
+# The image ships no host keys, so each box makes its own.
 ssh-keygen -A
 
 exec /usr/sbin/sshd -D -e

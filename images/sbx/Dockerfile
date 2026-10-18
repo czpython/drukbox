@@ -10,7 +10,7 @@ FROM ubuntu:24.04
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssh-server ca-certificates sudo \
-    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
     && mkdir -p /run/sshd
 
 COPY entrypoint.sh /usr/local/bin/drukbox-entrypoint

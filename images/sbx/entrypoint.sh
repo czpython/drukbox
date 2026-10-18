@@ -15,6 +15,7 @@ install -d -m 700 /root/.ssh
 # privilege-separation directory.
 mkdir -p /run/sshd
 
+# The image ships no host keys, so each box makes its own.
 ssh-keygen -A
 
 exec /usr/sbin/sshd -D -e
