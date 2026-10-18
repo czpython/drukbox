@@ -1,5 +1,6 @@
 import providers.aws
 import providers.boat
+import providers.cloudflare
 import providers.daytona
 import providers.docker
 import providers.docker_sbx
