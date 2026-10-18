@@ -73,6 +73,9 @@ dependencies = [
 aws = [
     "aioboto3>=13",
 ]
+e2b = [
+    "e2b>=2.52.0,<3",
+]
 
 [project.urls]
 Homepage = "https://github.com/czpython/drukbox"
@@ -81,10 +84,10 @@ Issues = "https://github.com/czpython/drukbox/issues"
 
 [dependency-groups]
 dev = [
-    # aioboto3 is the optional `aws` extra, but the AWS tests import it at
-    # collection time. Keep it in the dev group so a bare `uv sync` runs the
-    # full suite and pyright without needing --all-extras.
+    # The optional extras: their tests import them at collection time, so a
+    # bare `uv sync` needs them to run the full suite and pyright.
     "aioboto3>=13",
+    "e2b>=2.52.0,<3",
     "pyright>=1.1",
     "pytest>=8.0",
     "pytest-asyncio>=0.25",
