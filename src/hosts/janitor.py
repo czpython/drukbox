@@ -5,7 +5,6 @@ from sqlalchemy import select
 
 from core.database import async_session_factory
 from core.exceptions import ResourceNotFoundError
-from core.settings import get_settings
 from hosts.models import Host
 from hosts.service import HostService, utc_now
 from networking.tailscale import Tailscale
@@ -33,9 +32,7 @@ async def reap_expired_hosts() -> list[uuid.UUID]:
         expired_ids = list(result.scalars())
 
     reaped: list[uuid.UUID] = []
-    tailscale: Tailscale | None = (
-        Tailscale.from_settings() if get_settings().tailscale_enabled else None
-    )
+    tailscale = Tailscale.from_settings()
 
     try:
         for host_id in expired_ids:
@@ -50,14 +47,12 @@ async def reap_expired_hosts() -> list[uuid.UUID]:
             except Exception:
                 logger.exception("janitor: failed to reap expired host: host_id=%s", host_id)
                 continue
-            else:
-                if not deleted:
-                    # Renewed between selection and the locked delete — spared.
-                    continue
+            # A host renewed between selection and the locked delete is spared.
+            if deleted:
                 logger.info("janitor: reaped expired host: host_id=%s", host_id)
                 reaped.append(host_id)
     finally:
-        if tailscale is not None:
+        if tailscale:
             await tailscale.aclose()
 
     return reaped

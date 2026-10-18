@@ -28,7 +28,6 @@ class DockerProvider(VMProvider, TemplateCapability):
     # providers without an sshd of their own.
     name: ClassVar[str] = "docker"
     diagnose_hint: ClassVar[str] = "check_docker_daemon_is_running"
-    supports_tailnet: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -68,15 +67,6 @@ class DockerProvider(VMProvider, TemplateCapability):
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
-        # A setup script only ever arrives when Tailscale is enabled, and a
-        # local container has no path onto the tailnet. Fail loud rather than
-        # silently start a box that never joins.
-        if setup_script:
-            raise ProviderCommandError(
-                "docker provider runs sandboxes locally and does not support "
-                "Tailscale networking; set TAILSCALE_ENABLED=false"
-            )
-
         caller_env = env or {}
         # These names carry the per-VM public key, the SSH user, and the env-key
         # manifest the entrypoint reads; a caller-supplied value would clobber

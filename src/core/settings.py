@@ -52,11 +52,6 @@ class Settings(BaseSettings):
         validation_alias="DEFAULT_HOST_PROVIDER",
         description="Name of the VM provider used when callers don't specify one.",
     )
-    default_network_provider: str = Field(
-        default="tailscale",
-        validation_alias="DEFAULT_NETWORK_PROVIDER",
-        description="Name of the network provider used when callers don't specify one.",
-    )
 
     secrets_proxy_url: str = Field(
         default="",
@@ -81,11 +76,6 @@ class Settings(BaseSettings):
         description="Identifier stamped onto provider resources (e.g. VM tags).",
     )
 
-    tailscale_enabled: bool = Field(
-        default=False,
-        validation_alias="TAILSCALE_ENABLED",
-        description="Enable Tailscale-based reachability for provisioned hosts.",
-    )
     device_discovery_timeout_seconds: float = Field(
         default=180.0,
         gt=0,

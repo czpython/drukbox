@@ -73,19 +73,6 @@ def test_secrets_key_rejects_invalid_key_without_echoing_it(
     assert invalid_key not in str(error.value)
 
 
-def test_tailscale_disabled_by_default_with_no_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    env: dict[str, str | None] = {
-        **_base_env(),
-        "TAILSCALE_ENABLED": None,
-        "TAILSCALE_TAILNET": None,
-        "TAILSCALE_AUTH_TAGS": None,
-        "TAILSCALE_OAUTH_CLIENT_ID": None,
-        "TAILSCALE_OAUTH_CLIENT_SECRET": None,
-    }
-    settings = _settings_with(monkeypatch, env)
-    assert settings.tailscale_enabled is False
-
-
 def test_tailscale_settings_requires_all_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     missing = ("TAILSCALE_AUTH_TAGS", "TAILSCALE_OAUTH_CLIENT_ID", "TAILSCALE_OAUTH_CLIENT_SECRET")
     for key in missing:
@@ -93,7 +80,7 @@ def test_tailscale_settings_requires_all_credentials(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("TAILSCALE_TAILNET", "example.ts.net")
 
     with pytest.raises(ValueError) as excinfo:
-        TailscaleSettings()  # pyright: ignore[reportCallIssue]
+        TailscaleSettings()
     message = str(excinfo.value)
     assert "TAILSCALE_AUTH_TAGS" in message
     assert "TAILSCALE_OAUTH_CLIENT_ID" in message
@@ -108,7 +95,7 @@ def test_tailscale_settings_with_all_credentials_constructs_ok(
     monkeypatch.setenv("TAILSCALE_OAUTH_CLIENT_ID", "client-id")
     monkeypatch.setenv("TAILSCALE_OAUTH_CLIENT_SECRET", "client-secret")
 
-    ts = TailscaleSettings()  # pyright: ignore[reportCallIssue]
+    ts = TailscaleSettings()
     assert ts.tailnet == "example.ts.net"
     assert ts.auth_tags == ("tag:sandbox",)
 
@@ -163,16 +150,6 @@ def test_provider_settings_errors_hide_secrets(
     # pydantic shortens a long input in the message, so a check for the secret
     # alone can pass by luck. A hidden input prints no input_value at all.
     assert "input_value" not in str(error.value)
-
-
-def test_tailscale_disabled_ignores_missing_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    env: dict[str, str | None] = {
-        **_base_env(),
-        "TAILSCALE_ENABLED": "false",
-        "TAILSCALE_TAILNET": None,
-    }
-    settings = _settings_with(monkeypatch, env)
-    assert settings.tailscale_enabled is False
 
 
 @pytest.mark.parametrize(
@@ -239,9 +216,9 @@ def test_pool_sizes_rejects_negative_targets(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_load_test_env_overrides_ambient_values(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TAILSCALE_ENABLED", "false")
+    monkeypatch.setenv("EXE_TAILNET", "false")
     conftest.load_test_env()
-    assert os.environ["TAILSCALE_ENABLED"] == "true"
+    assert os.environ["EXE_TAILNET"] == "true"
 
 
 def _registry_env(**overrides: str) -> dict[str, str | None]:

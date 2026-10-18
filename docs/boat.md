@@ -5,8 +5,8 @@ direct SSH coordinates. The response contains a per-host private key once.
 The provider uses the public Boat HTTP API. It needs no Boat CLI or SDK.
 
 Boat supplies an Ubuntu VM with passwordless sudo. The provider uses this
-external SSH path even when `TAILSCALE_ENABLED` is true. The provider does not
-join the tailnet. The secrets proxy must accept connections from the sandbox.
+external SSH path and does not join the tailnet. The secrets proxy must accept
+connections from the sandbox.
 
 ## Configuration
 

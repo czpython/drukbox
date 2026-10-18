@@ -98,6 +98,10 @@ instead.
 Set `max_lifetime` when the provider stops every VM after a fixed time. No
 lease then ends later than that time.
 
+Set `tailnet = True` when the provider's hosts have no public SSH address.
+A provider that offers both paths reads a `<NAME>_TAILNET` setting into
+`self.tailnet`, like `providers/hetzner/`.
+
 ## 7. Tests
 
 - Unit-test the provider with a mocked api object

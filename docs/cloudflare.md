@@ -2,7 +2,7 @@
 
 `POST /hosts` with `{"provider": "cloudflare"}` starts a Cloudflare container,
 joins it to Tailscale, and returns `internal_ssh_host`. The container has no
-public SSH address, so this provider requires `TAILSCALE_ENABLED=true`.
+public SSH address, so this provider requires the Tailscale settings.
 
 Cloudflare starts containers only from a Durable Object in a Worker. Drukbox
 calls the Worker in `deploy/cloudflare`, which you deploy to your account.
@@ -25,7 +25,6 @@ callers reach the sandbox tag as `root`.
 ```dotenv
 CLOUDFLARE_WORKER_URL=https://drukbox-sandboxes.YOUR-SUBDOMAIN.workers.dev
 CLOUDFLARE_WORKER_TOKEN=YOUR-DEDICATED-TOKEN
-TAILSCALE_ENABLED=true
 ```
 
 The token can also come from `/run/secrets/CLOUDFLARE_WORKER_TOKEN`.

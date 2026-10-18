@@ -2,7 +2,7 @@
 
 `POST /hosts` with `{"provider": "vercel"}` starts a Vercel sandbox, joins it
 to Tailscale, and returns `internal_ssh_host`. The sandbox has no public SSH
-address, so this provider requires `TAILSCALE_ENABLED=true`.
+address, so this provider requires the Tailscale settings.
 
 ## Prepare the image
 
@@ -29,7 +29,6 @@ VERCEL_TOKEN=YOUR-ACCESS-TOKEN
 VERCEL_TEAM_ID=team_YOUR_TEAM
 VERCEL_PROJECT_ID=prj_YOUR_PROJECT
 VERCEL_DEFAULT_IMAGE=drukbox-sandbox:v1
-TAILSCALE_ENABLED=true
 ```
 
 The token can also come from `/run/secrets/VERCEL_TOKEN`.

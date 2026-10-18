@@ -6,7 +6,6 @@ import httpx
 import pytest
 
 from api.app import app
-from core import settings as settings_module
 from networking.tailscale import Tailscale
 from providers.exe.provider import ExeProvider
 from providers.registry import reset_vm_provider_cache
@@ -54,7 +53,7 @@ async def test_doctor_reports_ok_when_all_probes_pass(client) -> None:
     assert response.status_code == 200
     assert body["ok"] is True
     assert body["active_provider"] == "exe"
-    assert body["tailscale_enabled"] is True
+    assert body["tailnet"] is True
     assert [check["name"] for check in body["checks"]] == [
         "db",
         "provider",
@@ -89,10 +88,9 @@ async def test_doctor_propagates_failure_with_owner_hint(client) -> None:
     assert tailscale["hint"] == "check_tailscale_oauth_and_api_reachability"
 
 
-async def test_doctor_omits_tailscale_when_disabled(client, monkeypatch) -> None:
-    """With TAILSCALE_ENABLED=false there is no tailscale row at all."""
-    monkeypatch.setenv("TAILSCALE_ENABLED", "false")
-    settings_module.get_settings.cache_clear()
+async def test_doctor_omits_tailscale_off_the_tailnet(client, monkeypatch) -> None:
+    """A provider off the tailnet has no tailscale row at all."""
+    monkeypatch.setenv("EXE_TAILNET", "false")
 
     with patch.object(ExeProvider, "diagnose", new=AsyncMock(return_value="exe ok")):
         response = await client.get(
@@ -101,9 +99,25 @@ async def test_doctor_omits_tailscale_when_disabled(client, monkeypatch) -> None
         )
 
     body = response.json()
-    assert body["tailscale_enabled"] is False
+    assert body["tailnet"] is False
     assert [check["name"] for check in body["checks"]] == ["db", "provider", "exchange"]
-    settings_module.get_settings.cache_clear()
+
+
+async def test_doctor_fails_tailscale_without_tailscale_settings(
+    client, no_tailscale_settings: None
+) -> None:
+    """A provider on the tailnet fails the tailscale check when the settings are unset."""
+    with patch.object(ExeProvider, "diagnose", new=AsyncMock(return_value="exe ok")):
+        response = await client.get(
+            "/doctor",
+            headers={"Authorization": "Bearer service-token"},
+        )
+
+    body = response.json()
+    assert body["ok"] is False
+    tailscale = next(check for check in body["checks"] if check["name"] == "tailscale")
+    assert tailscale["status"] == "fail"
+    assert "TAILSCALE_TAILNET" in tailscale["detail"]
 
 
 async def test_doctor_reports_provider_construction_failure(client) -> None:

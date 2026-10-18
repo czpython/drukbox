@@ -2,7 +2,7 @@
 
 `POST /hosts` with `{"provider": "e2b"}` starts an E2B sandbox, joins it to
 Tailscale, and returns `internal_ssh_host`. The sandbox has no public SSH
-address, so this provider requires `TAILSCALE_ENABLED=true`.
+address, so this provider requires the Tailscale settings.
 
 ## Prepare the template
 
@@ -24,7 +24,6 @@ callers reach the sandbox tag as `root`.
 ```dotenv
 E2B_API_KEY=YOUR-API-KEY
 E2B_DEFAULT_IMAGE=drukbox
-TAILSCALE_ENABLED=true
 ```
 
 The key can also come from `/run/secrets/E2B_API_KEY`.

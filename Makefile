@@ -1,8 +1,7 @@
 LOCAL_ENV = \
 	DATABASE_URL=sqlite+aiosqlite:///./drukbox.db \
 	SERVICE_TOKENS=dev-token \
-	DEFAULT_HOST_PROVIDER=docker \
-	TAILSCALE_ENABLED=false
+	DEFAULT_HOST_PROVIDER=docker
 
 .PHONY: dev
 dev:

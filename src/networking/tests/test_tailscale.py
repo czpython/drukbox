@@ -232,6 +232,7 @@ async def test_aclose_delegates_to_api() -> None:
 
 def test_from_settings_constructs_with_tailscale_api() -> None:
     network = Tailscale.from_settings()
+    assert network
     assert isinstance(network.api, TailscaleAPI)
 
 

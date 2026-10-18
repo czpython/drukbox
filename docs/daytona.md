@@ -55,7 +55,6 @@ Image builds, stored snapshots, and sandboxes use provider resources.
 | `DAYTONA_API_TIMEOUT` | API request timeout in seconds; default `150` |
 | `DAYTONA_LIFECYCLE_TIMEOUT_SECONDS` | Start or deletion polling budget; default `180` |
 | `DAYTONA_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | SSH readiness budget; default `120` |
-| `TAILSCALE_ENABLED` | Required: `true` |
 
 Configure the tailnet and Tailscale credentials as described in
 [Networking](networking.md). Hosts use Tailscale SSH as `root`; they have no

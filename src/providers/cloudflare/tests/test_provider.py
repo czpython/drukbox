@@ -52,13 +52,6 @@ async def test_create_uses_named_image_and_returns_tailnet_only_host(provider: C
 
 
 @respx.mock
-async def test_requires_tailscale_before_any_request(provider: CloudflareProvider):
-    with pytest.raises(ProviderCommandError, match="TAILSCALE_ENABLED"):
-        await provider.create_vm(name="sb-test", image="base")
-    assert not respx.calls
-
-
-@respx.mock
 @pytest.mark.parametrize("status", [429, 500])
 async def test_worker_failure_is_a_transport_error_without_its_body(
     provider: CloudflareProvider, status: int

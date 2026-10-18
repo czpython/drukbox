@@ -32,7 +32,6 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
     name: ClassVar[str] = "docker-sbx"
     diagnose_hint: ClassVar[str] = "check_sandboxd_is_running_and_logged_in"
     gateway_process_class = SbxExecProcess
-    supports_tailnet: ClassVar[bool] = False
     # sbx spends about 3 seconds on startup per call.
     diagnose_timeout_seconds: ClassVar[float] = 15.0
 
@@ -77,13 +76,6 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
-        # A script here is a caller defect: supports_tailnet is False.
-        if setup_script:
-            raise ProviderCommandError(
-                "docker-sbx provider runs sandboxes locally and does not "
-                "support Tailscale networking"
-            )
-
         caller_env = env or {}
         try:
             environment.get_persist(caller_env)

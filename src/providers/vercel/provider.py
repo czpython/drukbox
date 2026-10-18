@@ -13,6 +13,8 @@ from .settings import VercelSettings
 class VercelProvider(VMProvider):
     name: ClassVar[str] = "vercel"
     diagnose_hint: ClassVar[str] = "check_vercel_and_tailscale_settings"
+    # The sandbox has no public SSH address.
+    tailnet = True
     supports_instance_type = True
 
     def __init__(self, api: VercelAPI, settings: VercelSettings, *, service_label: str) -> None:
@@ -44,8 +46,6 @@ class VercelProvider(VMProvider):
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
-        if not setup_script:
-            raise ProviderCommandError("Vercel requires TAILSCALE_ENABLED=true")
         try:
             vcpus = int(instance_type or self.settings.vcpus)
         except ValueError:
@@ -53,15 +53,13 @@ class VercelProvider(VMProvider):
         session_id = await self.api.create_sandbox(
             name, image=image, vcpus=vcpus, label=self.service_label
         )
-        await self.api.bootstrap(session_id, environment.get_cloud_init(setup_script, env))
+        await self.api.bootstrap(session_id, environment.get_cloud_init(setup_script or "", env))
         return VMCreateResult(provider_id=session_id, name=name, ssh_username="root")
 
     async def delete_vm(self, name: str) -> None:
         await self.api.delete_sandbox(name)
 
     async def diagnose(self) -> str:
-        if not get_settings().tailscale_enabled:
-            raise ProviderCommandError("Vercel requires TAILSCALE_ENABLED=true")
         return await self.api.diagnose()
 
     async def aclose(self) -> None:

@@ -39,11 +39,11 @@ async def maintain_pool() -> PoolMaintenanceSummary:
     targets = settings.get_pool_targets()
     if not targets:
         return PoolMaintenanceSummary()
-    tailscale: Tailscale | None = Tailscale.from_settings() if settings.tailscale_enabled else None
+    tailscale = Tailscale.from_settings()
     try:
         return await _maintain(settings, targets, tailscale)
     finally:
-        if tailscale is not None:
+        if tailscale:
             await tailscale.aclose()
 
 

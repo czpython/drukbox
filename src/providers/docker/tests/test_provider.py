@@ -108,16 +108,6 @@ async def test_create_vm_names_the_ssh_user_for_the_entrypoint():
     assert result.ssh_username == "druks"
 
 
-@pytest.mark.asyncio
-async def test_create_vm_rejects_setup_script_because_tailscale_is_unsupported():
-    api = _api_mock()
-    provider = DockerProvider(api, _settings())
-
-    with pytest.raises(ProviderCommandError):
-        await provider.create_vm(name="sb-test", image="img", env={}, setup_script="#!/bin/sh\n")
-    api.run_container.assert_not_called()
-
-
 @pytest.mark.parametrize("key", ["DRUKBOX_AUTHORIZED_KEY", "DRUKBOX_SSH_USER", "DRUKBOX_ENV_KEYS"])
 @pytest.mark.asyncio
 async def test_create_vm_rejects_caller_env_that_collides_with_reserved_keys(key: str):

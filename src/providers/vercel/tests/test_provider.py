@@ -66,13 +66,6 @@ async def test_create_bootstraps_sandbox_on_the_tailnet(
 
 
 @respx.mock
-async def test_requires_tailscale_before_api_calls(provider: VercelProvider):
-    with pytest.raises(ProviderCommandError, match="TAILSCALE_ENABLED"):
-        await provider.create_vm(name="sb-test", image="sandbox:v1")
-    assert not respx.calls
-
-
-@respx.mock
 async def test_rejects_instance_type_that_is_not_a_vcpu_count(provider: VercelProvider):
     with pytest.raises(ProviderCommandError, match="vCPU count"):
         await provider.create_vm(

@@ -53,7 +53,7 @@ no rate limiting (see [Resource exhaustion](#resource-exhaustion)).
 How a caller reaches a sandbox, and the tradeoffs of each path, are
 covered in [Networking](networking.md). The security-relevant summary:
 
-- **Per-VM keys.** On AWS (Tailscale off), Hetzner, docker, and
+- **Per-VM keys.** On AWS (off the tailnet), Hetzner, docker, and
   docker-sbx, drukbox mints a fresh ed25519 keypair per VM, returns
   the private half **once** in the create response, and never persists
   it — a later `GET /hosts/{id}` returns `private_key: null`. The key
@@ -72,10 +72,10 @@ covered in [Networking](networking.md). The security-relevant summary:
   non-loopback `DOCKER_SSH_HOST` is reachable by everything that
   reaches that address. On a tailnet it has no device of its own, so ACL
   tags cannot scope it. Each sandbox's key is the only boundary.
-- **First-keyscan MITM window.** With Tailscale off, the `known_hosts`
+- **First-keyscan MITM window.** Off the tailnet, the `known_hosts`
   material is scanned over the public network and carries the usual
-  trust-on-first-use window. Enable Tailscale to run the scan over the
-  authenticated overlay.
+  trust-on-first-use window. Put the provider on the tailnet to run the
+  scan over the authenticated overlay.
 
 ## Secrets: which field to use
 
