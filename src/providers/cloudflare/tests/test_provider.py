@@ -8,7 +8,12 @@ import respx
 from providers.cloudflare.api import CloudflareAPI
 from providers.cloudflare.provider import CloudflareProvider
 from providers.cloudflare.settings import CloudflareSettings
-from providers.exceptions import ProviderCommandError, ProviderTransportError
+from providers.exceptions import (
+    ProviderAuthError,
+    ProviderCommandError,
+    ProviderError,
+    ProviderTransportError,
+)
 from providers.registry import get_provider_names
 
 
@@ -65,10 +70,14 @@ async def test_worker_failure_is_a_transport_error_without_its_body(
 
 
 @respx.mock
-@pytest.mark.parametrize("status", [400, 401])
-async def test_rejected_request_is_a_command_error(provider: CloudflareProvider, status: int):
+@pytest.mark.parametrize(
+    ("status", "error"), [(400, ProviderCommandError), (401, ProviderAuthError)]
+)
+async def test_rejected_request_is_a_typed_error(
+    provider: CloudflareProvider, status: int, error: type[ProviderError]
+):
     respx.put("https://worker.test/sandboxes/sb-test").respond(status)
-    with pytest.raises(ProviderCommandError):
+    with pytest.raises(error):
         await provider.create_vm(name="sb-test", image="base", setup_script="true")
 
 
