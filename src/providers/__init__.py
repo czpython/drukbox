@@ -1,5 +1,6 @@
 import providers.aws
 import providers.boat
+import providers.daytona
 import providers.docker
 import providers.docker_sbx
 import providers.exe
