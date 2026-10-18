@@ -50,3 +50,4 @@ db.sqlite3
 api-tests/node_modules/
 api-tests/playwright-report/
 api-tests/test-results/
+deploy/cloudflare/.wrangler/
