@@ -42,3 +42,7 @@ class HetznerSettings(BaseSettings):
         default="root",
         description="In-VM user callers SSH as. Hetzner cloud images default to root.",
     )
+    tailnet: bool = Field(
+        default=False,
+        description="Join each host to the tailnet. The host keeps its key-locked public IP.",
+    )

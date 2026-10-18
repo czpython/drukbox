@@ -21,7 +21,7 @@ async def test_diagnose_returns_account_and_arn_from_caller_identity() -> None:
             "arn": "arn:aws:iam::111122223333:user/drukbox",
         }
     )
-    provider = AWSProvider(api, _settings(), tailscale_enabled=True)
+    provider = AWSProvider(api, _settings())
 
     detail = await provider.diagnose()
     assert "account=111122223333" in detail
@@ -35,7 +35,7 @@ async def test_diagnose_raises_on_caller_identity_failure() -> None:
     api.get_caller_identity = AsyncMock(
         side_effect=AwsTransportError("AccessDenied: not authorized")
     )
-    provider = AWSProvider(api, _settings(), tailscale_enabled=True)
+    provider = AWSProvider(api, _settings())
 
     with pytest.raises(AwsTransportError, match="AccessDenied"):
         await provider.diagnose()

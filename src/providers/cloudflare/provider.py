@@ -3,7 +3,6 @@ from typing import ClassVar, Self
 from core.settings import get_settings
 from providers import environment
 from providers.base import VMCreateResult, VMProvider
-from providers.exceptions import ProviderCommandError
 
 from .api import CloudflareAPI
 from .settings import CloudflareSettings
@@ -12,6 +11,8 @@ from .settings import CloudflareSettings
 class CloudflareProvider(VMProvider):
     name: ClassVar[str] = "cloudflare"
     diagnose_hint: ClassVar[str] = "check_cloudflare_worker_and_tailscale_settings"
+    # The container has no public SSH address.
+    tailnet = True
     supports_instance_type = True
 
     def __init__(
@@ -44,13 +45,11 @@ class CloudflareProvider(VMProvider):
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
-        if not setup_script:
-            raise ProviderCommandError("Cloudflare requires TAILSCALE_ENABLED=true")
         await self.api.create_sandbox(
             name,
             image=image,
             instance=instance_type or self.settings.instance_type,
-            script=environment.get_cloud_init(setup_script, env),
+            script=environment.get_cloud_init(setup_script or "", env),
             label=self.service_label,
         )
         return VMCreateResult(provider_id=name, name=name, ssh_username="root")
@@ -59,8 +58,6 @@ class CloudflareProvider(VMProvider):
         await self.api.delete_sandbox(name)
 
     async def diagnose(self) -> str:
-        if not get_settings().tailscale_enabled:
-            raise ProviderCommandError("Cloudflare requires TAILSCALE_ENABLED=true")
         return await self.api.diagnose()
 
     async def aclose(self) -> None:

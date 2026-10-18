@@ -5,31 +5,24 @@ other providers keep their provider's own coordinates, with or without
 a configured gateway.
 """
 
-from collections.abc import Generator
 from unittest.mock import AsyncMock
 
 import pytest
 
 from core.database import async_session_factory
-from core.settings import Settings, get_settings
 from hosts.exceptions import ProvisioningFailedError
 from hosts.models import HostStatus
 from hosts.service import HostService
 from providers.base import VMCreateResult
+from providers.registry import get_vm_provider
 
 MODULE_DOCKER_SBX = "providers.docker_sbx.provider.DockerSbxProvider"
 
 
 @pytest.fixture
-def gateway_configured_settings(
-    monkeypatch: pytest.MonkeyPatch,
-) -> Generator[Settings, None, None]:
-    monkeypatch.setenv("TAILSCALE_ENABLED", "false")
+def gateway_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GATEWAY_SSH_HOST", "gateway.example.com")
     monkeypatch.setenv("GATEWAY_SSH_PORT", "2222")
-    get_settings.cache_clear()
-    yield get_settings()
-    get_settings.cache_clear()
 
 
 def _sbx_create_result() -> VMCreateResult:
@@ -45,7 +38,7 @@ def _sbx_create_result() -> VMCreateResult:
 
 
 async def test_gateway_provider_hosts_advertise_the_gateway(
-    gateway_configured_settings: Settings, monkeypatch: pytest.MonkeyPatch
+    gateway_configured: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     create_vm = AsyncMock(return_value=_sbx_create_result())
     monkeypatch.setattr(f"{MODULE_DOCKER_SBX}.create_vm", create_vm)
@@ -53,7 +46,7 @@ async def test_gateway_provider_hosts_advertise_the_gateway(
     monkeypatch.setattr("hosts.service.HostService.scan_known_hosts", scan)
 
     async with async_session_factory() as session:
-        service = HostService(session, settings=gateway_configured_settings)
+        service = HostService(session)
         host = await service.create_host(env={}, image=None, provider="docker-sbx")
 
     assert host.status == HostStatus.ACTIVE.value
@@ -71,25 +64,23 @@ async def test_gateway_provider_hosts_fail_cleanly_without_an_address(
     # A gateway-provider host is reachable only through the gateway. Without
     # an address, provisioning must fail loudly, not hand out dead
     # coordinates.
-    monkeypatch.setenv("TAILSCALE_ENABLED", "false")
     monkeypatch.delenv("GATEWAY_SSH_HOST", raising=False)
-    get_settings.cache_clear()
 
     create_vm = AsyncMock(return_value=_sbx_create_result())
     monkeypatch.setattr(f"{MODULE_DOCKER_SBX}.create_vm", create_vm)
 
     async with async_session_factory() as session:
-        service = HostService(session, settings=get_settings())
+        service = HostService(session)
         with pytest.raises(ProvisioningFailedError, match="GATEWAY_SSH_HOST"):
             await service.create_host(env={}, image=None, provider="docker-sbx")
 
-    get_settings.cache_clear()
     create_vm.assert_not_awaited()
 
 
 async def test_direct_dial_provider_hosts_ignore_the_gateway(
-    gateway_configured_settings: Settings, monkeypatch: pytest.MonkeyPatch
+    gateway_configured: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(get_vm_provider("exe"), "tailnet", False)
     create_vm = AsyncMock(
         return_value=VMCreateResult(
             provider_id="vm-1",
@@ -104,7 +95,7 @@ async def test_direct_dial_provider_hosts_ignore_the_gateway(
     monkeypatch.setattr("hosts.service.HostService.scan_known_hosts", scan)
 
     async with async_session_factory() as session:
-        service = HostService(session, settings=gateway_configured_settings)
+        service = HostService(session)
         host = await service.create_host(env={}, image=None, provider="exe")
 
     assert host.external_ssh_host == "vm-1.public.example.com"

@@ -87,17 +87,7 @@ class HostService:
     ) -> None:
         self.session = session
         self.settings = settings or get_settings()
-        # Construct Tailscale only when explicitly enabled. Settings'
-        # model_validator guarantees the credentials are present whenever
-        # tailscale_enabled is true. Tests can inject a mock Tailscale via
-        # the kwarg regardless of the flag — useful for exercising the
-        # tailnet path without real credentials.
-        if tailscale:
-            self.tailscale: Tailscale | None = tailscale
-        elif self.settings.tailscale_enabled:
-            self.tailscale = Tailscale.from_settings()
-        else:
-            self.tailscale = None
+        self.tailscale = tailscale or Tailscale.from_settings()
 
     def _default_lease_expires_at(self) -> datetime:
         return utc_now() + timedelta(seconds=self.settings.lease_default_ttl)
@@ -514,9 +504,9 @@ class HostService:
             if host.tailscale_device_id and self.tailscale:
                 # Clear and commit the device_id before deleting the VM:
                 # a later delete_vm transport error must not retry the
-                # already-completed release. Hosts provisioned under
-                # Tailscale but reaped after the operator turned it off
-                # fall through and let the auth-key TTL expire the device.
+                # already-completed release. Hosts provisioned on the
+                # tailnet but reaped after the operator removed the Tailscale
+                # settings fall through and let the auth-key TTL expire the device.
                 await self.tailscale.release_device(host.tailscale_device_id)
                 host.tailscale_device_id = None
                 host.updated_at = utc_now()
@@ -553,15 +543,23 @@ class HostService:
         await self.session.commit()
 
         vm = get_vm_provider(host.provider)
-        tailscale: Tailscale | None = None
-        if vm.supports_tailnet:
-            tailscale = self.tailscale
+        if vm.tailnet and not self.tailscale:
+            await self.mark_failed(
+                host,
+                ProvisioningFailedError(
+                    f"provider {vm.name!r} joins the tailnet; set TAILSCALE_TAILNET, "
+                    "TAILSCALE_AUTH_TAGS, TAILSCALE_OAUTH_CLIENT_ID and "
+                    "TAILSCALE_OAUTH_CLIENT_SECRET"
+                ),
+            )
+            return
+        tailscale = self.tailscale if vm.tailnet else None
 
         environment = dict(host.env)
         setup_script: str | None = None
         if tailscale:
             # The bootstrap script hard-requires TAILSCALE_AUTHKEY; only
-            # deliver it (and mint a key) when Tailscale is in play.
+            # deliver it (and mint a key) when the host joins the tailnet.
             try:
                 join_credentials = await tailscale.issue_join_credentials(host_name=host.name)
             except NetworkError as exc:

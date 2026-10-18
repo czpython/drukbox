@@ -1,29 +1,25 @@
 # Networking and reachability
 
 This page explains how a caller reaches a sandbox and why each path is
-shaped the way it is. For turning these modes on, read
-[Deploy](deploy.md).
+shaped the way it is. For the settings, read
+[Deploy](deploy.md#choose-a-networking-mode).
 
-## Two modes
+## Two paths
 
-`TAILSCALE_ENABLED` selects between two networking models. A provider
-whose hosts cannot join a tailnet (docker — containers published on the
-daemon host,
-docker-sbx — local microVMs) always takes the external path,
-whatever the mode. The API response carries
-both addresses; which is populated depends on the mode and the
+Each provider decides whether its hosts join the tailnet. The API
+response carries both addresses; which is populated depends on the
 provider:
 
 - `external_ssh_host` / `external_ssh_port` — the provider-given
-  public path. Always present (empty for an AWS host with Tailscale
-  on, which has no public path at all).
-- `internal_ssh_host` — the tailnet MagicDNS name, populated only with
-  Tailscale on. The internal path is always port 22 by Tailscale
-  convention, so there is no internal port field.
+  public path. Always present (empty for a host with no public path,
+  such as an AWS host on the tailnet).
+- `internal_ssh_host` — the tailnet MagicDNS name, populated only for
+  a host on the tailnet. The internal path is always port 22 by
+  Tailscale convention, so there is no internal port field.
 
 Callers pick whichever path they can reach and dial it themselves.
 
-## Tailscale on: the overlay is the security model
+## On the tailnet: the overlay is the security model
 
 Per sandbox, drukbox mints an ephemeral, tag-scoped Tailscale auth key
 and injects it at boot. The sandbox joins the tailnet, drukbox
@@ -31,13 +27,13 @@ discovers the device by hostname (one shared poller serves all
 concurrent provisions), stores the device ID, and ssh-keyscans over
 the tailnet path.
 
-On AWS this mode has no public surface at all: no keypair is imported,
-no security group is managed, and no public IP is attached —
-authentication and reachability are tailnet ACLs plus tailscaled-SSH,
-and `external_ssh_host` comes back empty.
+On AWS a host on the tailnet has no public surface at all: no keypair
+is imported, no security group is managed, and no public IP is
+attached — authentication and reachability are tailnet ACLs plus
+tailscaled-SSH, and `external_ssh_host` comes back empty.
 
 Hetzner can't drop the public IP that cheaply (a server needs one to
-reach the tailnet), so a tailscale-on Hetzner box still has a public
+reach the tailnet), so a Hetzner box on the tailnet still has a public
 IPv4 — but it is key-locked with the per-VM key drukbox always mints,
 and `external_ssh_host` carries that public path alongside the tailnet
 one. The tailnet remains the intended path; the public port just isn't
@@ -47,9 +43,9 @@ Teardown releases the Tailscale device by its stored ID — never by
 hostname — and treats a 404 as success, because ephemeral devices
 self-delete and operator cleanup can race the API.
 
-## Tailscale off: public path, key-only auth
+## Off the tailnet: public path, key-only auth
 
-With Tailscale off the provider's public path is the only path.
+Off the tailnet the provider's public path is the only path.
 
 On exe.dev, SSH terminates at exe's edge (`ssh_dest`), and exe owns
 authentication; drukbox returns no key material.
@@ -95,7 +91,8 @@ key material, scanned against the preferred path (`internal_ssh_host`
 when present, else `external_ssh_host`) and keyed to whichever address
 was scanned.
 
-With Tailscale off, the first-time keyscan runs over the public
+Off the tailnet, the first-time keyscan runs over the public
 network and carries the same TCP-session MITM window any first-time
-keyscan has. Operators who need stronger guarantees should enable
-Tailscale and let the scan run over the authenticated overlay.
+keyscan has. Operators who need stronger guarantees should put the
+provider on the tailnet and let the scan run over the authenticated
+overlay.

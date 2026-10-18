@@ -1,48 +1,22 @@
-"""End-to-end-ish tests for provisioning without the tailnet.
+"""Hosts off the tailnet, and tailnet hosts without Tailscale settings."""
 
-These exercise HostService.provision() with Tailscale out of play — the
-service disabled entirely, or a provider whose hosts can't join (docker):
-no auth-key minting, no device discovery, no setup script delivered to
-the VM, no tailnet device released on teardown. The external_ssh_host
-comes from the VM provider; the keyscan runs against that address
-directly.
-"""
-
-from collections.abc import Generator
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
 
 from core.database import async_session_factory
-from core.settings import Settings, get_settings
+from hosts.exceptions import ProvisioningFailedError
 from hosts.models import Host, HostStatus
 from hosts.service import HostService
 from providers.base import VMCreateResult
+from providers.registry import get_vm_provider
 
 
-@pytest.fixture
-def tailscale_disabled_settings(
-    monkeypatch: pytest.MonkeyPatch,
-) -> Generator[Settings, None, None]:
-    monkeypatch.setenv("TAILSCALE_ENABLED", "false")
-    # Clear the four credential vars so this test fixture really exercises
-    # the "no Tailscale credentials at all" deployment shape.
-    for key in (
-        "TAILSCALE_TAILNET",
-        "TAILSCALE_AUTH_TAGS",
-        "TAILSCALE_OAUTH_CLIENT_ID",
-        "TAILSCALE_OAUTH_CLIENT_SECRET",
-    ):
-        monkeypatch.delenv(key, raising=False)
-    get_settings.cache_clear()
-    yield get_settings()
-    get_settings.cache_clear()
-
-
-async def test_provision_skips_tailscale_when_disabled(
-    tailscale_disabled_settings: Settings, monkeypatch: pytest.MonkeyPatch
+async def test_provision_skips_tailscale_off_the_tailnet(
+    no_tailscale_settings: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(get_vm_provider("exe"), "tailnet", False)
     # Mocks for the Tailscale module: we assert they were NOT called.
     issue_join = AsyncMock()
     wait_for_device = AsyncMock()
@@ -66,8 +40,7 @@ async def test_provision_skips_tailscale_when_disabled(
     monkeypatch.setattr("hosts.service.HostService.scan_known_hosts", scan)
 
     async with async_session_factory() as session:
-        service = HostService(session, settings=tailscale_disabled_settings)
-        host = await service.create_host(env={}, image=None)
+        host = await HostService(session).create_host(env={}, image=None)
 
     assert host.status == HostStatus.ACTIVE.value
     assert host.external_ssh_host == "vm-1.public.example.com"
@@ -82,18 +55,30 @@ async def test_provision_skips_tailscale_when_disabled(
 
     # Provider was called WITHOUT a setup script (the bootstrap script
     # hard-requires TAILSCALE_AUTHKEY and would error on a stock image).
-    assert create_vm.await_args is not None
+    assert create_vm.await_args
     call_kwargs = create_vm.await_args.kwargs
     assert call_kwargs["setup_script"] is None
     assert "TAILSCALE_AUTHKEY" not in (call_kwargs.get("env") or {})
 
 
-async def test_docker_host_stays_local_on_a_tailnet_mode_service(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_tailnet_provider_fails_without_tailscale_settings(
+    no_tailscale_settings: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # TAILSCALE_ENABLED=true serves remote VMs over the tailnet, but a local
-    # container has no path onto it — a docker host skips the join entirely
-    # and keeps its published port as the only path.
+    # The exe provider joins the tailnet in the test env.
+    create_vm = AsyncMock()
+    monkeypatch.setattr("providers.exe.provider.ExeProvider.create_vm", create_vm)
+
+    async with async_session_factory() as session:
+        with pytest.raises(ProvisioningFailedError, match="TAILSCALE_TAILNET"):
+            await HostService(session).create_host(env={}, image=None)
+
+    create_vm.assert_not_awaited()
+
+
+async def test_docker_host_stays_off_the_tailnet(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A local container has no path onto the tailnet: a docker host skips
+    # the join even when the service has a Tailscale client, and keeps its
+    # published port as the only path.
     tailscale = AsyncMock()
 
     create_vm = AsyncMock(
@@ -122,14 +107,14 @@ async def test_docker_host_stays_local_on_a_tailnet_mode_service(
     # The tailnet layer never came into play for this host.
     tailscale.issue_join_credentials.assert_not_awaited()
     tailscale.wait_for_device.assert_not_awaited()
-    assert create_vm.await_args is not None
+    assert create_vm.await_args
     call_kwargs = create_vm.await_args.kwargs
     assert call_kwargs["setup_script"] is None
     assert "TAILSCALE_AUTHKEY" not in (call_kwargs.get("env") or {})
 
 
-async def test_delete_skips_tailscale_release_when_disabled(
-    tailscale_disabled_settings: Settings, monkeypatch: pytest.MonkeyPatch
+async def test_delete_skips_tailscale_release_without_tailscale_settings(
+    no_tailscale_settings: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A host that was somehow created without Tailscale shouldn't have a
     # device_id, so release_device is never called. This locks that in.
@@ -159,7 +144,6 @@ async def test_delete_skips_tailscale_release_when_disabled(
         host_id = host.id
 
     async with async_session_factory() as session:
-        service = HostService(session, settings=tailscale_disabled_settings)
-        await service.delete_host(host_id)
+        await HostService(session).delete_host(host_id)
 
     release.assert_not_awaited()

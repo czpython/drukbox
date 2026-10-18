@@ -37,6 +37,7 @@ class ExeProvider(VMProvider, TemplateCapability):
     ) -> None:
         self.api = api
         self.settings = settings
+        self.tailnet = settings.tailnet
         self.docker = docker
         self._service_label = service_label
 

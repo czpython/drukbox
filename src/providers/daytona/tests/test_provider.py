@@ -86,13 +86,6 @@ async def test_create_uses_linux_snapshot_and_bootstraps_tailnet(
 
 
 @respx.mock
-async def test_requires_tailscale_before_api_calls(provider: DaytonaProvider):
-    with pytest.raises(ProviderCommandError, match="TAILSCALE_ENABLED"):
-        await provider.create_vm(name="sb-test", image="snapshot")
-    assert not respx.calls
-
-
-@respx.mock
 @pytest.mark.parametrize(
     "snapshot",
     [

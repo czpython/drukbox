@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import insert
 
 TEST_ENV_PATH = Path(__file__).resolve().parents[1] / "env" / "test.env"
 
@@ -39,8 +40,6 @@ load_test_env()
 
 @pytest.fixture(autouse=True)
 async def reset_database() -> AsyncGenerator[None]:
-    from sqlalchemy import insert
-
     from core.database import Base, engine
     from hosts import models  # noqa: F401
     from service_accounts.models import ServiceAccount
@@ -64,3 +63,14 @@ async def client() -> AsyncGenerator[AsyncClient]:
         base_url="https://drukbox.example",
     ) as client:
         yield client
+
+
+@pytest.fixture
+def no_tailscale_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in (
+        "TAILSCALE_TAILNET",
+        "TAILSCALE_AUTH_TAGS",
+        "TAILSCALE_OAUTH_CLIENT_ID",
+        "TAILSCALE_OAUTH_CLIENT_SECRET",
+    ):
+        monkeypatch.delenv(key)

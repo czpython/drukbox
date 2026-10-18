@@ -38,3 +38,7 @@ class ExeSettings(BaseSettings):
         default="exedev",
         description="In-VM user callers SSH as. Override if the image uses a non-default user.",
     )
+    tailnet: bool = Field(
+        default=False,
+        description="Join each host to the tailnet. The host keeps its exe.dev SSH address.",
+    )

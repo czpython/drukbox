@@ -77,12 +77,7 @@ class TailscaleAPI:
         self._access_token_expires_at = 0.0
 
     @classmethod
-    def from_settings(cls) -> Self:
-        # pydantic-settings resolves required fields from env at runtime;
-        # pyright can't see that statically. If TAILSCALE_ENABLED=true but
-        # any of the required envs are missing, this raises ValidationError
-        # at construction with a clear field-by-field message.
-        settings = TailscaleSettings()  # pyright: ignore[reportCallIssue]
+    def from_settings(cls, settings: TailscaleSettings) -> Self:
         return cls(
             oauth_client_id=settings.oauth_client_id,
             oauth_client_secret=settings.oauth_client_secret,
@@ -210,11 +205,9 @@ class TailscaleAPI:
             raise NetworkTransportError(detail)
 
     async def aclose(self) -> None:
-        if not self._client:
-            return
-
-        await self._client.aclose()
-        self._client = None
+        if self._client:
+            await self._client.aclose()
+            self._client = None
 
     async def _request(
         self,
@@ -284,7 +277,7 @@ class _DeviceWaiter:
         self._task: asyncio.Task[None] | None = None
 
     async def wait_for(self, host_name: str, timeout: float) -> str:
-        if self._task is None or self._task.done():
+        if not self._task or self._task.done():
             self._task = asyncio.create_task(self._poll())
         fut: asyncio.Future[str] = asyncio.get_running_loop().create_future()
         # Hostnames are uuid7-derived and unique per provision; concurrent
@@ -321,7 +314,7 @@ class _DeviceWaiter:
                 # can't race the resolution.
                 for device in devices:
                     fut = self._waiters.get(device.hostname)
-                    if fut is not None and not fut.done():
+                    if fut and not fut.done():
                         fut.set_result(device.id)
             await asyncio.sleep(self._poll_interval)
 
@@ -331,7 +324,7 @@ class _DeviceWaiter:
                 fut.set_exception(exc)
 
     async def aclose(self) -> None:
-        if self._task is not None:
+        if self._task:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
@@ -342,9 +335,7 @@ class Tailscale:
     """High-level Tailscale operations consumed by HostService.
 
     Wraps :class:`TailscaleAPI` so callers think in terms of
-    "issue join credentials" / "release device" rather than raw HTTP. There's
-    only one network backend right now; if/when Modal-style direct SSH lands,
-    re-introduce a NetworkProvider ABC.
+    "issue join credentials" / "release device" rather than raw HTTP.
     """
 
     diagnose_hint = "check_tailscale_oauth_and_api_reachability"
@@ -354,8 +345,11 @@ class Tailscale:
         self._waiter = _DeviceWaiter(api, poll_interval=poll_interval)
 
     @classmethod
-    def from_settings(cls) -> Self:
-        return cls(TailscaleAPI.from_settings())
+    def from_settings(cls) -> Self | None:
+        """None when the deployment has no tailnet."""
+        settings = TailscaleSettings()
+        if settings.tailnet:
+            return cls(TailscaleAPI.from_settings(settings))
 
     @property
     def tailnet(self) -> str:

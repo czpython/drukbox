@@ -31,12 +31,11 @@ class AWSProvider(VMProvider):
         api: AwsAPI,
         settings: AwsSettings,
         *,
-        tailscale_enabled: bool,
         service_label: str = "drukbox",
     ) -> None:
         self.api = api
         self.settings = settings
-        self._tailscale_enabled = tailscale_enabled
+        self.tailnet = settings.tailnet
         self._service_label = service_label
         self._cached_sg_id: str | None = settings.security_group_id
 
@@ -47,7 +46,6 @@ class AWSProvider(VMProvider):
         return cls(
             AwsAPI.from_settings(aws_settings),
             aws_settings,
-            tailscale_enabled=core.tailscale_enabled,
             service_label=core.service_label,
         )
 
@@ -83,10 +81,10 @@ class AWSProvider(VMProvider):
             "drukbox-host-name": name,
         }
 
-        # With Tailscale on, SSH access is via tailscaled-SSH using tailnet
+        # On the tailnet, SSH access is via tailscaled-SSH using tailnet
         # ACLs; we don't need an EC2 KeyName at all, and no public path
         # means no SG ingress to manage.
-        if self._tailscale_enabled:
+        if self.tailnet:
             key_name: str | None = None
             private_key: str | None = None
             associate_public_ip = False
@@ -123,11 +121,11 @@ class AWSProvider(VMProvider):
                 instance_profile=self.settings.instance_profile,
             )
         except AwsProviderError as exc:
-            if key_name is not None:
+            if key_name:
                 await self.api.delete_key_pair(key_name)
             raise ProviderTransportError(str(exc)) from exc
 
-        if self._tailscale_enabled:
+        if self.tailnet:
             ssh_host = ""
         else:
             try:
@@ -159,7 +157,7 @@ class AWSProvider(VMProvider):
             instance_id = await self.api.find_instance_id_by_tag_name(
                 name, managed_by=self._service_label
             )
-            if instance_id is None:
+            if not instance_id:
                 raise ProviderNotFoundError(f"aws VM '{name}' was not found")
             await self.api.terminate_instance(instance_id)
             await self.api.delete_key_pair(f"drukbox-{name}")
@@ -169,7 +167,7 @@ class AWSProvider(VMProvider):
             raise ProviderTransportError(str(exc)) from exc
 
     async def aclose(self) -> None:
-        return None
+        """Each AWS call opens and closes its own client."""
 
     async def diagnose(self) -> str:
         identity = await self.api.get_caller_identity()
@@ -220,11 +218,10 @@ async def _detect_outbound_ipv4(timeout: float = 5.0) -> str | None:
             response = await client.get("https://checkip.amazonaws.com")
             response.raise_for_status()
     except httpx.HTTPError:
-        return None
+        return
     try:
         addr = ipaddress.ip_address(response.text.strip())
     except ValueError:
-        return None
-    if not isinstance(addr, ipaddress.IPv4Address):
-        return None
-    return str(addr)
+        return
+    if isinstance(addr, ipaddress.IPv4Address):
+        return str(addr)

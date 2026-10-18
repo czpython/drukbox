@@ -1,17 +1,17 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from uuid6 import uuid7
 
 from core.database import async_session_factory
 from core.settings import get_settings
-from hosts.models import Host, HostStatus
+from hosts.models import Host, HostStatus, IdempotencyKey
 from hosts.service import HostService, utc_now
 from networking.tailscale import NetworkTransportError
-from networking.tailscale_settings import TailscaleSettings
-from providers.exceptions import ProviderTransportError
+from providers.exceptions import ProviderNotFoundError, ProviderTransportError
 from providers.exe.settings import ExeSettings
 
 
@@ -161,8 +161,6 @@ async def test_create_host_stores_and_returns_custom_image(client, monkeypatch):
 
 
 async def test_create_host_stores_and_returns_expires_at(client, monkeypatch):
-    from datetime import UTC, datetime, timedelta
-
     mocked_provision = AsyncMock()
     monkeypatch.setattr("hosts.service.HostService.provision", mocked_provision)
     expires_at = datetime.now(UTC) + timedelta(hours=1)
@@ -422,8 +420,6 @@ async def test_idempotency_loser_in_provisioning_is_marked_for_janitor(monkeypat
     # Race-loser that's fresh-created (in PROVISIONING) cannot be delete_host'd
     # (it's in DELETE_BLOCKED_STATUSES). The cleanup path must mark it with
     # expires_at=now so the janitor reaps it on the next cycle.
-    from datetime import UTC, datetime
-
     monkeypatch.setattr("hosts.service.HostService.provision", AsyncMock())
 
     async with async_session_factory() as session:
@@ -443,8 +439,6 @@ async def test_idempotency_loser_in_provisioning_is_marked_for_janitor(monkeypat
 async def test_idempotency_loser_that_claimed_pool_host_is_returned_to_pool(monkeypatch):
     # Race-loser that had claimed a pool host should be UN-claimed (returned
     # to the pool with a fresh max-age TTL), NOT deleted.
-    from datetime import UTC, datetime, timedelta
-
     monkeypatch.setenv("POOL_SIZE", "1")
     monkeypatch.setenv("POOL_HOST_MAX_AGE_HOURS", "4")
     get_settings.cache_clear()
@@ -510,10 +504,6 @@ async def test_record_idempotency_key_returns_false_on_duplicate(monkeypatch):
 async def test_create_host_idempotency_key_expired_creates_new_host(client, monkeypatch):
     # Manually insert an idempotency-key row pointing at a deleted host with
     # an expired timestamp; a fresh POST with the same key should NOT reuse it.
-    from datetime import UTC, datetime, timedelta
-
-    from hosts.models import IdempotencyKey
-
     mocked_provision = AsyncMock()
     monkeypatch.setattr("hosts.service.HostService.provision", mocked_provision)
 
@@ -951,8 +941,6 @@ async def test_delete_host_clears_tailscale_device_id_when_vm_teardown_fails(cli
 async def test_delete_host_succeeds_when_vm_already_absent_at_provider(client, monkeypatch):
     # If exe.dev evicted the VM out from under us (or a previous delete
     # partially completed), the next delete should still clean up the DB row.
-    from providers.exceptions import ProviderNotFoundError
-
     mocked_delete_device = AsyncMock()
     mocked_delete_vm = AsyncMock(
         side_effect=ProviderNotFoundError("vm 'lb-sandbox-test' not found")
@@ -1009,7 +997,6 @@ async def create_host_record(
     name: str,
     status: str,
     external_ssh_host: str = "",
-    internal_ssh_host: str | None = None,
     known_hosts: str = "",
     env: dict[str, str] | None = None,
     image: str | None = None,
@@ -1019,19 +1006,13 @@ async def create_host_record(
     pool_member: bool = False,
 ) -> Host:
     now = utc_now()
-    settings = get_settings()
-    # Default the internal hostname to the tailnet form so existing test
-    # call sites (which were written for the Tailscale-on world) keep their
-    # original semantics without explicitly passing it.
-    if internal_ssh_host is None and settings.tailscale_enabled:
-        internal_ssh_host = f"{name}.{TailscaleSettings().tailnet}"  # pyright: ignore[reportCallIssue]
     host = Host(
         id=id or uuid7(),
         name=name,
         status=status,
         image=image or ExeSettings().default_image,  # pyright: ignore[reportCallIssue]
         external_ssh_host=external_ssh_host,
-        internal_ssh_host=internal_ssh_host,
+        internal_ssh_host=f"{name}.example.ts.net",
         known_hosts=known_hosts,
         tailscale_device_id=tailscale_device_id,
         env=env or {},
@@ -1226,8 +1207,6 @@ async def test_renew_host_rejects_missing_or_bad_service_auth(client):
 async def test_delete_host_maps_database_failure_to_503(client, monkeypatch):
     # A SQLAlchemyError during teardown must surface as a controlled 503, like
     # create_host's DB-failure path, not an unhandled 500.
-    from sqlalchemy.exc import SQLAlchemyError
-
     monkeypatch.setattr(
         "hosts.service.HostService.delete_host",
         AsyncMock(side_effect=SQLAlchemyError("db down")),

@@ -221,9 +221,9 @@ customizes its host — `image`, `env`, `template`, `instance_type`, or
 ## Diagnostics
 
 `GET /doctor` runs one cheap, non-mutating probe per dependency —
-database, active provider, secrets exchange, Tailscale when enabled — in
-parallel with a
-per-probe timeout. Providers own their probe (`diagnose()`) and their
+database, active provider, secrets exchange, and Tailscale when the
+active provider joins the tailnet — in parallel with a per-probe
+timeout. Providers own their probe (`diagnose()`) and their
 remediation slug (`diagnose_hint`); the endpoint stays a thin
 orchestrator. It always returns 200; health is the `ok` field in the
 body.

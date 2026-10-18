@@ -56,7 +56,6 @@ class RecordingInjection(SecretInjectionCapability):
 
 @pytest.fixture
 def settings(monkeypatch: pytest.MonkeyPatch) -> Generator[Settings, None, None]:
-    monkeypatch.setenv("TAILSCALE_ENABLED", "false")
     monkeypatch.setenv("SECRETS_PROXY_URL", "http://proxy.test:8880")
     monkeypatch.setenv("SECRETS_PROXY_CA_FILE", "env/test-proxy-ca.pem")
     get_settings.cache_clear()

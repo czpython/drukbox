@@ -78,8 +78,8 @@ class VMProvider(abc.ABC):
     # HostService rejects a sized request before any row or VM exists.
     supports_instance_type: ClassVar[bool] = False
     supports_disk_gb: ClassVar[bool] = False
-    # A local provider's hosts keep the external path only.
-    supports_tailnet: ClassVar[bool] = True
+    # Hosts join the tailnet at boot and callers reach them over it.
+    tailnet: bool = False
     # Set when the provider stops every VM this long after create.
     max_lifetime: timedelta | None = None
 

@@ -105,16 +105,6 @@ async def test_create_vm_installs_the_key_for_the_configured_ssh_user(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_create_vm_rejects_setup_script_because_tailscale_is_unsupported(tmp_path):
-    api = _api_mock()
-    provider = _provider(api, _settings(tmp_path))
-
-    with pytest.raises(ProviderCommandError, match="Tailscale"):
-        await provider.create_vm(name="sb-test", image="img", env={}, setup_script="#!/bin/sh\n")
-    api.create_sandbox.assert_not_called()
-
-
-@pytest.mark.asyncio
 async def test_create_vm_rejects_env_values_that_would_forge_environment_entries(tmp_path):
     api = _api_mock()
     provider = _provider(api, _settings(tmp_path))

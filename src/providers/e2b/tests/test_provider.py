@@ -68,13 +68,6 @@ async def test_create_bootstraps_sandbox_on_the_tailnet(provider: E2BProvider):
 
 
 @respx.mock
-async def test_requires_tailscale_before_api_calls(provider: E2BProvider):
-    with pytest.raises(ProviderCommandError, match="TAILSCALE_ENABLED"):
-        await provider.create_vm(name="sb-test", image="drukbox:v1")
-    assert not respx.calls
-
-
-@respx.mock
 async def test_rejected_create_names_e2b_reason(provider: E2BProvider):
     respx.post(BASE + "/v2/sandboxes").respond(
         400, json={"code": 400, "message": "template 'missing' not found"}

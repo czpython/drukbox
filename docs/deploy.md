@@ -116,9 +116,8 @@ all provider extras.
 
 The `docker` provider runs each sandbox as a local container with sshd,
 so you can try drukbox with no cloud account or API token.
-Set `DEFAULT_HOST_PROVIDER=docker`,
-`TAILSCALE_ENABLED=false`, and `UVICORN_HOST=127.0.0.1` in `drukbox.env`,
-then run:
+Set `DEFAULT_HOST_PROVIDER=docker` and `UVICORN_HOST=127.0.0.1` in
+`drukbox.env`, then run:
 
 ```bash
 # Linux: match the host socket's group. macOS: use group 0 (see below).
@@ -346,16 +345,22 @@ reads the same `drukbox.env` and connects to the same database.
 
 ## Choose a networking mode
 
-`TAILSCALE_ENABLED=false` (default): callers reach sandboxes over the
-provider's public path. On AWS this means per-VM keypairs and the
-managed security group — see
-[Networking](networking.md#tailscale-off-public-path-key-only-auth).
+Each provider decides whether its hosts join your tailnet. Cloudflare,
+Daytona, E2B, and Vercel always join it. Docker, docker-sbx, and Boat
+never do. AWS, Hetzner, Exoscale, and exe.dev join it when
+`AWS_TAILNET`, `HETZNER_TAILNET`, `EXOSCALE_TAILNET`, or `EXE_TAILNET`
+is `true` (default `false`).
 
-`TAILSCALE_ENABLED=true`: sandboxes join your tailnet at boot and
-callers connect over the overlay. Requires a Tailscale OAuth client
-with auth-key write scope, and tailnet ACLs that (a) own the tags in
-`TAILSCALE_AUTH_TAGS` and (b) permit tailscaled-SSH to the tagged
-nodes.
+Off the tailnet, callers reach sandboxes over the provider's public
+path. On AWS this means per-VM keypairs and the managed security
+group — see
+[Networking](networking.md#off-the-tailnet-public-path-key-only-auth).
+
+On the tailnet, sandboxes join at boot and callers connect over the
+overlay. This requires the `TAILSCALE_` settings, a Tailscale OAuth
+client with auth-key write scope, and tailnet ACLs that (a) own the
+tags in `TAILSCALE_AUTH_TAGS` and (b) permit tailscaled-SSH to the
+tagged nodes.
 
 ## Private image registry
 
@@ -393,7 +398,7 @@ AWS credentials come from the SDK's default chain (instance profile,
 `~/.aws`, or env) — drukbox never plumbs them through its own
 settings. The policy needs `ec2:RunInstances`,
 `ec2:TerminateInstances`, `ec2:DescribeInstances`, `ec2:CreateTags`,
-`sts:GetCallerIdentity`, plus — with Tailscale off —
+`sts:GetCallerIdentity`, plus — off the tailnet —
 `ec2:ImportKeyPair`, `ec2:DeleteKeyPair`, `ec2:CreateSecurityGroup`,
 `ec2:DescribeSecurityGroups`, `ec2:AuthorizeSecurityGroupIngress`,
 `ec2:DescribeSubnets` (when `AWS_SUBNET_ID` is set), and
@@ -547,10 +552,10 @@ curl -fsS -H "Authorization: Bearer $TOKEN" http://localhost:8780/doctor
 ```
 
 `/doctor` runs one read-only probe per dependency: database, active
-provider, secrets exchange, and Tailscale when enabled. It reports per-check
-status, latency, and a remediation hint on failures. It always returns 200 —
-health is the `ok` field. `GET /healthz` is the unauthenticated
-liveness probe.
+provider, secrets exchange, and Tailscale when the active provider joins
+the tailnet. It reports per-check status, latency, and a remediation hint
+on failures. It always returns 200 — health is the `ok` field.
+`GET /healthz` is the unauthenticated liveness probe.
 
 For a full end-to-end check, run the black-box suite against the
 deployment (it provisions and destroys a real host — disposable
@@ -605,11 +610,11 @@ Secrets exchange:
 | `SECRETS_EXCHANGE_BIND_HOST` | `127.0.0.1` | Loopback listener for the exchange. The API reads it to reach the exchange. |
 | `SECRETS_EXCHANGE_PORT` | `8781` | Port the exchange process listens on. The API reads it to reach the exchange. |
 
-Tailscale (required when `TAILSCALE_ENABLED=true`):
+Tailscale (required when a provider joins the tailnet; set the first four
+together):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `TAILSCALE_ENABLED` | `false` | Provision hosts onto a tailnet. |
 | `TAILSCALE_TAILNET` | — | Tailnet DNS suffix for sandbox MagicDNS hostnames. |
 | `TAILSCALE_AUTH_TAGS` | — | Comma-separated tags applied to minted auth keys. |
 | `TAILSCALE_OAUTH_CLIENT_ID` | — | OAuth client ID. |
@@ -632,6 +637,7 @@ exe.dev provider:
 | `EXE_API_TIMEOUT` | `30.0` | Timeout for exe.dev API calls. |
 | `EXE_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `30.0` | ssh-keyscan retry budget for a fresh exe.dev sandbox. |
 | `EXE_SSH_USERNAME` | `exedev` | In-VM user callers SSH as. |
+| `EXE_TAILNET` | `false` | Join each host to the tailnet. The host keeps its exe.dev SSH address. |
 
 AWS provider:
 
@@ -647,6 +653,7 @@ AWS provider:
 | `AWS_INSTANCE_PROFILE` | — | Optional IAM instance profile attached to sandboxes. |
 | `AWS_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `120.0` | ssh-keyscan retry budget for a fresh EC2 instance. |
 | `AWS_SSH_USERNAME` | `ubuntu` | In-VM user callers SSH as. |
+| `AWS_TAILNET` | `false` | Join each host to the tailnet. The host then has no key pair, security group, or public IP. |
 
 Hetzner provider:
 
@@ -659,9 +666,10 @@ Hetzner provider:
 | `HETZNER_API_TIMEOUT` | `30.0` | Timeout for Hetzner API calls. |
 | `HETZNER_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `120.0` | ssh-keyscan retry budget for a fresh server. |
 | `HETZNER_SSH_USERNAME` | `root` | In-VM user callers SSH as. |
+| `HETZNER_TAILNET` | `false` | Join each host to the tailnet. The host keeps its key-locked public IP. |
 
 A fresh Hetzner server has no firewall — port 22 is open and SSH is
-key-only. Drukbox mints a per-VM ed25519 key in both networking modes;
+key-only. Drukbox mints a per-VM ed25519 key on or off the tailnet;
 there is no security-group or ingress-CIDR configuration to manage.
 
 Exoscale provider:
@@ -677,6 +685,7 @@ Exoscale provider:
 | `EXOSCALE_API_TIMEOUT` | `30.0` | Timeout for Exoscale API calls. |
 | `EXOSCALE_BOOTSTRAP_SSH_TIMEOUT_SECONDS` | `120.0` | ssh-keyscan retry budget for a fresh instance. |
 | `EXOSCALE_SSH_USERNAME` | `ubuntu` | In-VM user callers SSH as. Exoscale Ubuntu templates default to `ubuntu`. |
+| `EXOSCALE_TAILNET` | `false` | Join each host to the tailnet. The host keeps its key-locked public IP. |
 
 The API key's IAM role must allow the compute operations `list-templates` and
 `list-instance-types` in addition to the instance and SSH-key operations:

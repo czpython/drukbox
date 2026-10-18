@@ -10,7 +10,7 @@ from core.database import get_session
 from core.settings import get_settings
 from diagnostics.checks import DEFAULT_CHECK_TIMEOUT_SECONDS, Check, CheckStatus, run_check
 from hosts.auth import require_auth
-from networking.tailscale import Tailscale
+from networking.tailscale import NetworkError, Tailscale
 from providers.registry import get_default_vm_provider
 from secrets_exchange.client import SecretsExchange
 
@@ -30,7 +30,7 @@ class CheckOut(BaseModel):
 class DoctorOut(BaseModel):
     ok: bool
     active_provider: str
-    tailscale_enabled: bool
+    tailnet: bool
     checks: list[CheckOut]
 
 
@@ -44,6 +44,7 @@ async def doctor(
         provider = get_default_vm_provider()
         provider_hint = provider.diagnose_hint
         provider_timeout = provider.diagnose_timeout_seconds
+        tailnet = provider.tailnet
     except Exception:
         # The provider can't even be constructed (bad config / missing dep). Use a
         # generic hint; the probe below re-resolves it so the construction error
@@ -51,6 +52,7 @@ async def doctor(
         # the point of /doctor.
         provider_hint = "check_provider_configuration"
         provider_timeout = DEFAULT_CHECK_TIMEOUT_SECONDS
+        tailnet = False
 
     async def _provider_probe() -> str:
         return await get_default_vm_provider().diagnose()
@@ -59,10 +61,13 @@ async def doctor(
         # Resolve lazily inside the probe (reusing the lifespan-installed client
         # when present) so a Tailscale construction failure becomes a failed
         # check rather than a 500 — same reasoning as the provider probe above.
-        tailscale: Tailscale | None = getattr(request.app.state, "tailscale", None)
+        tailscale = getattr(request.app.state, "tailscale", None) or Tailscale.from_settings()
         if not tailscale:
-            tailscale = Tailscale.from_settings()
-            request.app.state.tailscale = tailscale
+            raise NetworkError(
+                f"provider {settings.default_host_provider!r} joins the tailnet; set "
+                "TAILSCALE_TAILNET, TAILSCALE_AUTH_TAGS, TAILSCALE_OAUTH_CLIENT_ID and "
+                "TAILSCALE_OAUTH_CLIENT_SECRET"
+            )
         return await tailscale.diagnose()
 
     tasks: list[asyncio.Future[Check]] = [
@@ -80,7 +85,7 @@ async def doctor(
             ),
         ),
     ]
-    if settings.tailscale_enabled:
+    if tailnet:
         tasks.append(
             asyncio.ensure_future(
                 run_check("tailscale", _tailscale_probe, hint=Tailscale.diagnose_hint),
@@ -91,7 +96,7 @@ async def doctor(
     return DoctorOut(
         ok=ok,
         active_provider=settings.default_host_provider,
-        tailscale_enabled=settings.tailscale_enabled,
+        tailnet=tailnet,
         checks=[CheckOut.model_validate(check) for check in checks],
     )
 

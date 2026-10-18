@@ -26,6 +26,7 @@ class ExoscaleProvider(VMProvider):
     ) -> None:
         self.api = api
         self.settings = settings
+        self.tailnet = settings.tailnet
         self._service_label = service_label
 
     @classmethod
@@ -103,7 +104,7 @@ class ExoscaleProvider(VMProvider):
         try:
             await self.api.delete_ssh_key(f"drukbox-{name}")
             instance_id = await self.api.find_instance_id_by_name(name)
-            if instance_id is None:
+            if not instance_id:
                 raise ProviderNotFoundError(f"exoscale VM '{name}' was not found")
             await self.api.delete_instance(instance_id)
         except ExoscaleProviderError as exc:

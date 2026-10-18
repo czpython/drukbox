@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from providers.aws.exceptions import AwsTransportError
 from providers.aws.provider import AWSProvider
 from providers.aws.settings import AwsSettings
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
@@ -32,9 +33,9 @@ def _api_mock() -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_create_vm_with_tailscale_on_skips_keypair_sg_and_public_ip():
+async def test_create_vm_on_the_tailnet_skips_keypair_sg_and_public_ip():
     api = _api_mock()
-    provider = AWSProvider(api, _settings(), tailscale_enabled=True)
+    provider = AWSProvider(api, _settings(tailnet=True))
 
     result = await provider.create_vm(
         name="sb-test",
@@ -59,9 +60,9 @@ async def test_create_vm_with_tailscale_on_skips_keypair_sg_and_public_ip():
 
 
 @pytest.mark.asyncio
-async def test_create_vm_with_tailscale_off_provisions_keypair_and_security_group(monkeypatch):
+async def test_create_vm_off_the_tailnet_provisions_keypair_and_security_group(monkeypatch):
     api = _api_mock()
-    provider = AWSProvider(api, _settings(), tailscale_enabled=False)
+    provider = AWSProvider(api, _settings())
 
     async def _detect() -> str | None:
         return "198.51.100.7"
@@ -94,9 +95,7 @@ async def test_managed_sg_is_created_in_the_subnets_vpc(monkeypatch):
     # rejects the launch. Resolve the subnet's VPC and pass it through.
     api = _api_mock()
     api.resolve_subnet_vpc = AsyncMock(return_value="vpc-abc")
-    provider = AWSProvider(
-        api, _settings(subnet_id="subnet-xyz", ssh_cidrs="10.0.0.0/8"), tailscale_enabled=False
-    )
+    provider = AWSProvider(api, _settings(subnet_id="subnet-xyz", ssh_cidrs="10.0.0.0/8"))
 
     await provider.create_vm(name="sb-test", image="ami-deadbeef", env={}, setup_script="echo hi")
 
@@ -107,10 +106,10 @@ async def test_managed_sg_is_created_in_the_subnets_vpc(monkeypatch):
 @pytest.mark.asyncio
 async def test_create_vm_falls_back_to_world_open_when_detection_fails(monkeypatch):
     api = _api_mock()
-    provider = AWSProvider(api, _settings(), tailscale_enabled=False)
+    provider = AWSProvider(api, _settings())
 
     async def _no_detect() -> str | None:
-        return None
+        return
 
     monkeypatch.setattr("providers.aws.provider._detect_outbound_ipv4", _no_detect)
 
@@ -125,7 +124,7 @@ async def test_world_open_fallback_is_not_cached_and_self_heals(monkeypatch):
     # A transient detection failure must not pin the shared SG to 0.0.0.0/0 for
     # the provider's lifetime: the next create re-detects and narrows it.
     api = _api_mock()
-    provider = AWSProvider(api, _settings(), tailscale_enabled=False)
+    provider = AWSProvider(api, _settings())
     detected: list[str | None] = [None, "198.51.100.7"]
 
     async def _detect() -> str | None:
@@ -146,7 +145,7 @@ async def test_world_open_fallback_is_not_cached_and_self_heals(monkeypatch):
 async def test_create_vm_resolves_ssm_path_to_ami_id():
     api = _api_mock()
     api.resolve_ssm_parameter.return_value = "ami-resolved"
-    provider = AWSProvider(api, _settings(), tailscale_enabled=True)
+    provider = AWSProvider(api, _settings(tailnet=True))
 
     await provider.create_vm(
         name="sb-test",
@@ -163,14 +162,12 @@ async def test_create_vm_resolves_ssm_path_to_ami_id():
 
 @pytest.mark.asyncio
 async def test_create_vm_cleans_up_keypair_when_run_instance_fails(monkeypatch):
-    from providers.aws.exceptions import AwsTransportError
-
     api = _api_mock()
     api.run_instance.side_effect = AwsTransportError("boom")
-    provider = AWSProvider(api, _settings(), tailscale_enabled=False)
+    provider = AWSProvider(api, _settings())
 
     async def _no_detect() -> str | None:
-        return None
+        return
 
     monkeypatch.setattr("providers.aws.provider._detect_outbound_ipv4", _no_detect)
 
@@ -185,7 +182,7 @@ async def test_create_vm_cleans_up_keypair_when_run_instance_fails(monkeypatch):
 async def test_delete_vm_terminates_instance_and_deletes_keypair():
     api = _api_mock()
     api.find_instance_id_by_tag_name.return_value = "i-real"
-    provider = AWSProvider(api, _settings(), tailscale_enabled=True)
+    provider = AWSProvider(api, _settings())
 
     await provider.delete_vm("sb-test")
 
@@ -200,7 +197,7 @@ async def test_delete_vm_scopes_lookup_to_custom_service_label():
     # custom SERVICE_LABEL deployment can't find (and silently orphans) its VMs.
     api = _api_mock()
     api.find_instance_id_by_tag_name.return_value = "i-real"
-    provider = AWSProvider(api, _settings(), tailscale_enabled=True, service_label="staging")
+    provider = AWSProvider(api, _settings(), service_label="staging")
 
     await provider.delete_vm("sb-test")
 
@@ -212,7 +209,7 @@ async def test_delete_vm_scopes_lookup_to_custom_service_label():
 async def test_delete_vm_raises_provider_not_found_when_instance_missing():
     api = _api_mock()
     api.find_instance_id_by_tag_name.return_value = None
-    provider = AWSProvider(api, _settings(), tailscale_enabled=True)
+    provider = AWSProvider(api, _settings())
 
     with pytest.raises(ProviderNotFoundError):
         await provider.delete_vm("sb-missing")
@@ -223,11 +220,7 @@ async def test_delete_vm_raises_provider_not_found_when_instance_missing():
 @pytest.mark.asyncio
 async def test_create_vm_with_ssh_cidrs_set_does_not_auto_detect(monkeypatch):
     api = _api_mock()
-    provider = AWSProvider(
-        api,
-        _settings(ssh_cidrs="10.0.0.0/8, 192.168.1.0/24"),
-        tailscale_enabled=False,
-    )
+    provider = AWSProvider(api, _settings(ssh_cidrs="10.0.0.0/8, 192.168.1.0/24"))
 
     detect_calls = 0
 
@@ -248,7 +241,7 @@ async def test_create_vm_with_ssh_cidrs_set_does_not_auto_detect(monkeypatch):
 @pytest.mark.asyncio
 async def test_create_vm_passes_custom_root_gb_to_run_instance():
     api = _api_mock()
-    provider = AWSProvider(api, _settings(root_gb=250), tailscale_enabled=True)
+    provider = AWSProvider(api, _settings(root_gb=250, tailnet=True))
 
     await provider.create_vm(name="sb-test", image="ami-deadbeef", env={}, setup_script="echo hi")
     assert api.run_instance.await_args.kwargs["root_gb"] == 250
@@ -257,7 +250,7 @@ async def test_create_vm_passes_custom_root_gb_to_run_instance():
 @pytest.mark.asyncio
 async def test_create_vm_honors_per_request_sizing_over_settings():
     api = _api_mock()
-    provider = AWSProvider(api, _settings(), tailscale_enabled=True)
+    provider = AWSProvider(api, _settings(tailnet=True))
 
     await provider.create_vm(
         name="sb-test",
@@ -276,7 +269,7 @@ async def test_create_vm_honors_per_request_sizing_over_settings():
 @pytest.mark.asyncio
 async def test_create_vm_populates_ssh_username_from_settings():
     api = _api_mock()
-    provider = AWSProvider(api, _settings(ssh_username="ec2-user"), tailscale_enabled=True)
+    provider = AWSProvider(api, _settings(ssh_username="ec2-user", tailnet=True))
 
     result = await provider.create_vm(
         name="sb-test", image="ami-deadbeef", env={}, setup_script="echo hi"
@@ -286,9 +279,5 @@ async def test_create_vm_populates_ssh_username_from_settings():
 
 def test_default_image_reads_from_aws_settings():
     api = _api_mock()
-    provider = AWSProvider(
-        api,
-        _settings(default_image="ami-fallback"),
-        tailscale_enabled=True,
-    )
+    provider = AWSProvider(api, _settings(default_image="ami-fallback"))
     assert provider.default_image == "ami-fallback"

@@ -9,7 +9,6 @@ from fastapi.responses import JSONResponse
 
 from core.database import close_database
 from core.exceptions import AppException
-from core.settings import get_settings
 from diagnostics.api import router as diagnostics_router
 from hosts.api import router as hosts_router
 from http_proxies.api import router as http_proxies_router
@@ -39,13 +38,10 @@ logging.getLogger("uvicorn.access").addFilter(_HealthzAccessFilter())
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # Process-wide Tailscale client when enabled: reusing one
-    # httpx.AsyncClient amortises the TLS handshake and OAuth token cache
-    # across every provision instead of paying both per request. When
-    # Tailscale is disabled the slot stays None and request handlers skip
-    # the network layer entirely.
-    settings = get_settings()
-    tailscale: Tailscale | None = Tailscale.from_settings() if settings.tailscale_enabled else None
+    # Process-wide Tailscale client: reusing one httpx.AsyncClient amortises
+    # the TLS handshake and OAuth token cache across every provision instead
+    # of paying both per request. Without a tailnet the slot stays None.
+    tailscale = Tailscale.from_settings()
     app.state.tailscale = tailscale
     try:
         yield

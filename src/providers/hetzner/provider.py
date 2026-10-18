@@ -27,6 +27,7 @@ class HetznerProvider(VMProvider):
     ) -> None:
         self.api = api
         self.settings = settings
+        self.tailnet = settings.tailnet
         self._service_label = service_label
 
     @classmethod
@@ -57,11 +58,11 @@ class HetznerProvider(VMProvider):
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> VMCreateResult:
-        # Always mint a per-VM key, in both networking modes: Hetzner servers
+        # Always mint a per-VM key, on or off the tailnet: Hetzner servers
         # have a public IP and no firewall by default, and attaching a key both
         # locks port 22 and stops Hetzner emailing a root password (which it
-        # does when no key is attached). Tailscale, when on, is layered on by
-        # the caller's bootstrap script, so the provider needs no branch.
+        # does when no key is attached). The caller's bootstrap script does the
+        # tailnet join, so the provider needs no branch.
         key_name = f"drukbox-{name}"
         private_key, public_key = generate_ed25519_keypair()
         labels = {"managed-by": self._service_label, "drukbox-host-name": name}
@@ -108,7 +109,7 @@ class HetznerProvider(VMProvider):
         try:
             await self.api.delete_ssh_key(f"drukbox-{name}")
             server_id = await self.api.find_server_id_by_name(name)
-            if server_id is None:
+            if not server_id:
                 raise ProviderNotFoundError(f"hetzner VM '{name}' was not found")
             await self.api.delete_server(server_id)
         except HetznerProviderError as exc:

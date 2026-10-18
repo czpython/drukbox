@@ -49,3 +49,7 @@ class ExoscaleSettings(BaseSettings):
         default="ubuntu",
         description="In-VM user callers SSH as. Exoscale Ubuntu templates default to ubuntu.",
     )
+    tailnet: bool = Field(
+        default=False,
+        description="Join each host to the tailnet. The host keeps its key-locked public IP.",
+    )

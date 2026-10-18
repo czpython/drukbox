@@ -47,3 +47,10 @@ class AwsSettings(BaseSettings):
         default="ubuntu",
         description="In-VM user callers SSH as. Override if the AMI uses a non-default user.",
     )
+    tailnet: bool = Field(
+        default=False,
+        description=(
+            "Join each host to the tailnet. The host then has no key pair, "
+            "security group, or public IP."
+        ),
+    )

@@ -16,7 +16,6 @@ from .settings import BoatSettings
 class BoatProvider(VMProvider):
     name: ClassVar[str] = "boat"
     diagnose_hint: ClassVar[str] = "check_boat_api_token_and_sandbox_permissions"
-    supports_tailnet = False
     supports_instance_type = True
 
     def __init__(self, api: BoatAPI, settings: BoatSettings, *, service_label: str) -> None:
