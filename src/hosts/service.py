@@ -186,19 +186,22 @@ class HostService:
         # lock + WHERE filter). Losers return None and the caller falls
         # through to fresh provisioning.
         now = utc_now()
-        candidate_id = (
-            await self.session.execute(
-                select(Host.id)
-                .where(Host.provider == provider)
-                .where(Host.pool_member.is_(True))
-                .where(Host.claimed_at.is_(None))
-                .where(Host.status == HostStatus.ACTIVE.value)
-                .where(or_(Host.expires_at.is_(None), Host.expires_at > now))
-                .order_by(Host.created_at.asc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if not candidate_id:
+        vm = get_vm_provider(provider)
+        candidates = (
+            select(Host)
+            .where(Host.provider == provider)
+            .where(Host.pool_member.is_(True))
+            .where(Host.claimed_at.is_(None))
+            .where(Host.status == HostStatus.ACTIVE.value)
+            .where(or_(Host.expires_at.is_(None), Host.expires_at > now))
+            .order_by(Host.created_at.asc())
+            .limit(1)
+        )
+        if vm.max_lifetime and isinstance(expires_at, datetime):
+            # A warm host that the provider stops before the requested end is no match.
+            candidates = candidates.where(Host.created_at >= expires_at - vm.max_lifetime)
+        candidate = (await self.session.execute(candidates)).scalar_one_or_none()
+        if not candidate:
             return
 
         if expires_at is ...:
@@ -208,22 +211,20 @@ class HostService:
         # who deliberately opted into a permanent host.
         result = await self.session.execute(
             update(Host)
-            .where(Host.id == candidate_id)
+            .where(Host.id == candidate.id)
             .where(Host.claimed_at.is_(None))
             .values(
                 service_account=service_account,
                 claimed_at=now,
                 updated_at=now,
-                expires_at=expires_at,
+                expires_at=vm.lease_end(candidate.created_at, expires_at),
             )
             .returning(Host)
         )
         host = result.scalar_one_or_none()
         await self.session.commit()
-        if not host:
-            # Lost the race to another claimant; let the caller fall through.
-            return
-        logger.info("pool: claimed host_id=%s name=%s", host.id, host.name)
+        if host:
+            logger.info("pool: claimed host_id=%s name=%s", host.id, host.name)
         return host
 
     async def create_host(
@@ -333,7 +334,7 @@ class HostService:
                 update(Host)
                 .where(Host.id == host.id)
                 .where(Host.expires_at == initial_expires_at)
-                .values(expires_at=expires_at, updated_at=utc_now())
+                .values(expires_at=vm.lease_end(host.created_at, expires_at), updated_at=utc_now())
             )
             await ttl_session.commit()
         await self.session.refresh(host)
@@ -411,27 +412,28 @@ class HostService:
         # fresh max-age TTL; freshly-created host → mark expired so the
         # janitor reaps it (delete_host refuses PROVISIONING).
         async with async_session_factory() as fix_session:
-            fresh = await fix_session.get(Host, host.id)
-            if not fresh:
-                return
-            now = utc_now()
-            if fresh.claimed_at:
-                fresh.claimed_at = None
-                fresh.service_account = None
-                fresh.expires_at = now + timedelta(hours=self.settings.pool_host_max_age_hours)
-                fresh.updated_at = now
-                logger.info(
-                    "idempotency: returned pool host_id=%s to pool after lost race",
-                    fresh.id,
-                )
-            else:
-                fresh.expires_at = now
-                fresh.updated_at = now
-                logger.info(
-                    "idempotency: marked host_id=%s for janitor reaping after lost race",
-                    fresh.id,
-                )
-            await fix_session.commit()
+            if fresh := await fix_session.get(Host, host.id):
+                now = utc_now()
+                if fresh.claimed_at:
+                    fresh.claimed_at = None
+                    fresh.service_account = None
+                    fresh.expires_at = get_vm_provider(fresh.provider).lease_end(
+                        fresh.created_at,
+                        now + timedelta(hours=self.settings.pool_host_max_age_hours),
+                    )
+                    fresh.updated_at = now
+                    logger.info(
+                        "idempotency: returned pool host_id=%s to pool after lost race",
+                        fresh.id,
+                    )
+                else:
+                    fresh.expires_at = now
+                    fresh.updated_at = now
+                    logger.info(
+                        "idempotency: marked host_id=%s for janitor reaping after lost race",
+                        fresh.id,
+                    )
+                await fix_session.commit()
 
     async def get_host(self, host_id: uuid.UUID) -> Host | None:
         return await self.session.get(Host, host_id)
@@ -458,7 +460,9 @@ class HostService:
         if host.status not in RENEWABLE_STATUSES:
             raise HostStateError(f"cannot renew a host in status {host.status}")
 
-        host.expires_at = expires_at or self._default_lease_expires_at()
+        host.expires_at = get_vm_provider(host.provider).lease_end(
+            host.created_at, expires_at or self._default_lease_expires_at()
+        )
         host.updated_at = utc_now()
         await self.session.commit()
         await self.session.refresh(host)
