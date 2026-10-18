@@ -3,7 +3,7 @@ from typing import ClassVar, Self
 from core.settings import get_settings
 from providers import environment
 from providers.base import VMCreateResult, VMProvider
-from providers.exceptions import ProviderAuthError, ProviderCommandError
+from providers.exceptions import ProviderCommandError
 
 from .api import CloudflareAPI
 from .settings import CloudflareSettings
@@ -46,16 +46,13 @@ class CloudflareProvider(VMProvider):
     ) -> VMCreateResult:
         if not setup_script:
             raise ProviderCommandError("Cloudflare requires TAILSCALE_ENABLED=true")
-        try:
-            await self.api.create_sandbox(
-                name,
-                image=image,
-                instance=instance_type or self.settings.instance_type,
-                script=environment.get_cloud_init(setup_script, env),
-                label=self.service_label,
-            )
-        except ProviderAuthError as exc:
-            raise ProviderCommandError(str(exc)) from exc
+        await self.api.create_sandbox(
+            name,
+            image=image,
+            instance=instance_type or self.settings.instance_type,
+            script=environment.get_cloud_init(setup_script, env),
+            label=self.service_label,
+        )
         return VMCreateResult(provider_id=name, name=name, ssh_username="root")
 
     async def delete_vm(self, name: str) -> None:

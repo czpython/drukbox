@@ -1,18 +1,22 @@
 import uuid
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import select
 from uuid6 import uuid7
 
 from core.database import async_session_factory
-from hosts.models import Host
+from hosts.exceptions import ProvisioningFailedError
+from hosts.models import Host, HostStatus
 from hosts.service import HostService, utc_now
 from networking.tailscale import (
     DeviceDiscoveryTimeoutError,
     JoinCredentials,
 )
 from providers.base import VMCreateResult
+from providers.exceptions import ProviderAuthError
 from providers.exe.settings import ExeSettings
 
 
@@ -195,8 +199,6 @@ async def test_create_host_clears_safety_ttl_when_caller_omits_one(monkeypatch):
 
 
 async def test_create_host_lands_on_caller_ttl_on_success(monkeypatch):
-    from datetime import timedelta
-
     await _patch_provision_happy_path(monkeypatch)
     caller_ttl = utc_now() + timedelta(hours=2)
 
@@ -211,8 +213,6 @@ async def test_create_host_expires_errored_host_for_janitor(monkeypatch):
     # Strand protection on the unhappy path: if provisioning errors out,
     # expire the row immediately so the janitor reaps it (and its VM) on the
     # next cycle, without operators having to chase ERROR hosts manually.
-    from hosts.exceptions import ProvisioningFailedError
-
     mocks = await _patch_provision_happy_path(monkeypatch)
     mocks["wait_for_device"].side_effect = DeviceDiscoveryTimeoutError(
         "Tailscale never surfaced device"
@@ -229,8 +229,6 @@ async def test_create_host_expires_errored_host_for_janitor(monkeypatch):
 
     # Row should still exist, expired so the janitor reaps it next cycle.
     async with async_session_factory() as session:
-        from sqlalchemy import select
-
         result = await session.execute(select(Host).where(Host.status == "error"))
         errored = result.scalar_one()
         assert errored.expires_at is not None
@@ -253,6 +251,21 @@ async def test_provision_generated_authkey_overrides_caller_env(monkeypatch):
 
     assert mocks["create_vm"].await_args is not None
     assert mocks["create_vm"].await_args.kwargs["env"]["TAILSCALE_AUTHKEY"] == "tskey-secret"
+
+
+async def test_provision_marks_error_when_provider_rejects_credentials(monkeypatch):
+    host = await create_host_record(name="lb-sandbox-test", status="provisioning")
+    mocks = await _patch_provision_happy_path(monkeypatch)
+    mocks["create_vm"].side_effect = ProviderAuthError("exe.dev authentication failed")
+
+    async with async_session_factory() as session:
+        await HostService(session).provision(str(host.id))
+
+    async with async_session_factory() as session:
+        refreshed = await session.get(Host, host.id)
+        assert refreshed is not None
+        assert refreshed.status == "error"
+        assert refreshed.last_error == "ProviderAuthError: exe.dev authentication failed"
 
 
 async def test_provision_marks_error_when_device_discovery_times_out(monkeypatch):
@@ -541,10 +554,6 @@ async def create_host_record(
 async def test_expires_at_with_non_utc_offset_round_trips_as_utc():
     # SQLite drops tz offsets, so the bind-time UTC normalization must preserve
     # the instant: 2099-01-01T00:00-08:00 must read back as 08:00Z, not 00:00Z.
-    from datetime import UTC, datetime, timedelta, timezone
-
-    from hosts.models import HostStatus
-
     offset_expires = datetime(2099, 1, 1, 0, 0, tzinfo=timezone(timedelta(hours=-8)))
     host = Host(
         id=uuid7(),

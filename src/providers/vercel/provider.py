@@ -4,11 +4,7 @@ from typing import ClassVar, Self
 from core.settings import get_settings
 from providers import environment
 from providers.base import VMCreateResult, VMProvider
-from providers.exceptions import (
-    ProviderAuthError,
-    ProviderCommandError,
-    ProviderNotFoundError,
-)
+from providers.exceptions import ProviderCommandError
 
 from .api import VercelAPI
 from .settings import VercelSettings
@@ -54,13 +50,10 @@ class VercelProvider(VMProvider):
             vcpus = int(instance_type or self.settings.vcpus)
         except ValueError:
             raise ProviderCommandError("Vercel instance_type must be a vCPU count") from None
-        try:
-            session_id = await self.api.create_sandbox(
-                name, image=image, vcpus=vcpus, label=self.service_label
-            )
-            await self.api.bootstrap(session_id, environment.get_cloud_init(setup_script, env))
-        except (ProviderAuthError, ProviderNotFoundError) as exc:
-            raise ProviderCommandError(str(exc)) from exc
+        session_id = await self.api.create_sandbox(
+            name, image=image, vcpus=vcpus, label=self.service_label
+        )
+        await self.api.bootstrap(session_id, environment.get_cloud_init(setup_script, env))
         return VMCreateResult(provider_id=session_id, name=name, ssh_username="root")
 
     async def delete_vm(self, name: str) -> None:

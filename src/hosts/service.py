@@ -35,10 +35,8 @@ from networking.tailscale import (
 from providers.base import VMProvider
 from providers.environment import get_persist
 from providers.exceptions import (
-    ProviderCommandError,
     ProviderError,
     ProviderNotFoundError,
-    ProviderTransportError,
     UnknownProviderError,
     UnsupportedSizingError,
 )
@@ -604,7 +602,7 @@ class HostService:
                 instance_type=host.instance_type,
                 disk_gb=host.disk_gb,
             )
-        except (ProviderCommandError, ProviderTransportError) as exc:
+        except ProviderError as exc:
             await self.mark_failed(host, exc)
             return
 
