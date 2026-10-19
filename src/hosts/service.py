@@ -4,7 +4,6 @@ import pathlib
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
-from types import EllipsisType
 from typing import Any
 
 import httpx
@@ -101,17 +100,13 @@ class HostService:
         secrets: dict[str, dict[str, Any]] | None = None,
         image: str | None,
         template: uuid.UUID | None = None,
-        expires_at: datetime | None | EllipsisType = ...,
+        expires_at: datetime | None = None,
+        permanent: bool = False,
         idempotency_key: str | None = None,
         provider: str | None = None,
         instance_type: str | None = None,
         disk_gb: int | None = None,
     ) -> Host:
-        # ``...`` (omitted) means "default lease"; an explicit None is the
-        # caller's deliberate opt-in to a permanent, never-reaped host. The
-        # sentinel travels to the point where a lease is actually stamped
-        # (pool claim, or the post-provision rewrite) so the in-flight row
-        # keeps the short provisioning safety TTL.
         if provider:
             registered = get_provider_names()
             if provider not in registered:
@@ -130,7 +125,10 @@ class HostService:
         customized = env or secrets or image or template or instance_type or disk_gb
         if not customized and self.settings.get_pool_targets().get(requested_provider):
             host = await self._try_claim_pool_host(
-                service_account=service_account, provider=requested_provider, expires_at=expires_at
+                service_account=service_account,
+                provider=requested_provider,
+                expires_at=expires_at,
+                permanent=permanent,
             )
         if not host:
             host = await self.create_host(
@@ -140,6 +138,7 @@ class HostService:
                 image=image,
                 template=template,
                 expires_at=expires_at,
+                permanent=permanent,
                 provider=provider,
                 instance_type=instance_type,
                 disk_gb=disk_gb,
@@ -164,7 +163,8 @@ class HostService:
         *,
         service_account: str | None = None,
         provider: str,
-        expires_at: datetime | None | EllipsisType,
+        expires_at: datetime | None = None,
+        permanent: bool = False,
     ) -> Host | None:
         # The claim's WHERE on claimed_at is the race guard: concurrent
         # claimants resolve to one winner per row on both dialects.
@@ -180,15 +180,12 @@ class HostService:
             .order_by(Host.created_at.asc())
             .limit(1)
         )
-        if vm.max_lifetime and isinstance(expires_at, datetime):
+        if vm.max_lifetime and expires_at:
             # A warm host that the provider stops before the requested end is no match.
             candidates = candidates.where(Host.created_at >= expires_at - vm.max_lifetime)
         if candidate := (await self.session.execute(candidates)).scalar_one_or_none():
-            if expires_at is ...:
-                expires_at = self._default_lease_expires_at()
-            # The claim replaces the warm-pool max-age TTL with the caller's lease:
-            # a concrete window (explicit or the default), or None for a caller
-            # who deliberately opted into a permanent host.
+            # The claim replaces the warm-pool max-age TTL with the caller's lease.
+            expires_at = None if permanent else expires_at or self._default_lease_expires_at()
             result = await self.session.execute(
                 update(Host)
                 .where(Host.id == candidate.id)
@@ -215,7 +212,8 @@ class HostService:
         secrets: dict[str, dict[str, Any]] | None = None,
         image: str | None,
         template: uuid.UUID | None = None,
-        expires_at: datetime | None | EllipsisType = ...,
+        expires_at: datetime | None = None,
+        permanent: bool = False,
         provider: str | None = None,
         instance_type: str | None = None,
         disk_gb: int | None = None,
@@ -253,17 +251,10 @@ class HostService:
             image = found.image
         uid = uuid7()
         now = utc_now()
-        # Safety TTL covers the strand window: if the client disconnects
-        # mid-provision, this is what makes the janitor reap the row + VM.
-        # Replaced with the caller's value after provisioning succeeds. A
-        # default-lease create keeps just the safety TTL in flight — the
-        # lease is stamped only once the host is usable.
+        # The safety TTL makes the janitor reap the row and VM if the client
+        # disconnects mid-provision; the lease is stamped once the host is usable.
         safety_expires_at = now + timedelta(seconds=self.settings.provisioning_grace_seconds)
-        initial_expires_at = (
-            max(expires_at, safety_expires_at)
-            if isinstance(expires_at, datetime)
-            else safety_expires_at
-        )
+        initial_expires_at = max(expires_at, safety_expires_at) if expires_at else safety_expires_at
         host = Host(
             id=uid,
             service_account=service_account,
@@ -309,14 +300,10 @@ class HostService:
         if host.status == HostStatus.ERROR.value:
             raise ProvisioningFailedError(host.last_error)
 
-        # Provisioning won: replace the safety TTL with the caller's intent
-        # in a dedicated session so we don't extend ``self.session``'s
-        # transaction (which can perturb advisory-lock-bearing callers like
-        # the pool maintainer). Guarded on the in-flight value: a renewal
-        # that landed while the host was bootstrapping is newer intent and
-        # must not be clobbered.
-        if expires_at is ...:
-            expires_at = self._default_lease_expires_at()
+        # A dedicated session, so self.session's transaction stays short for
+        # callers that hold an advisory lock. The match on the in-flight value
+        # spares a renewal that landed while the host was bootstrapping.
+        expires_at = None if permanent else expires_at or self._default_lease_expires_at()
         async with async_session_factory() as ttl_session:
             await ttl_session.execute(
                 update(Host)

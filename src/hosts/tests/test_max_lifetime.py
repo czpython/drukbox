@@ -79,7 +79,7 @@ async def test_pool_leases_end_when_the_provider_stops_the_vm(limited_provider):
 
         late = stop + timedelta(minutes=1)
         assert not await service._try_claim_pool_host(provider="stub", expires_at=late)
-        claimed = await service._try_claim_pool_host(provider="stub", expires_at=...)
+        claimed = await service._try_claim_pool_host(provider="stub")
         assert claimed
         assert claimed.expires_at == stop
 
