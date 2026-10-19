@@ -652,6 +652,14 @@ def test_responses_stream(swap: ModuleType) -> None:
     assert flow.response.stream is True
 
 
+def test_a_websocket_keeps_only_the_current_message(swap: ModuleType) -> None:
+    flow = SimpleNamespace(websocket=SimpleNamespace(messages=["earlier", "current"]))
+
+    swap.Swap().websocket_message(flow)
+
+    assert flow.websocket.messages == ["current"]
+
+
 async def test_the_exchange_client_reads_the_answers(swap: ModuleType) -> None:
     exchange = swap.Exchange("http://exchange.test/")
     fetched: list[Any] = []

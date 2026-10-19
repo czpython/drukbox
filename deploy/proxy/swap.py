@@ -216,5 +216,10 @@ class Swap:
     def responseheaders(self, flow: http.HTTPFlow) -> None:
         flow.response.stream = True
 
+    def websocket_message(self, flow: http.HTTPFlow) -> None:
+        """mitmproxy keeps every message of a connection for its life. Only the
+        current one is kept: the dumper reads it after this hook."""
+        del flow.websocket.messages[:-1]
+
 
 addons = [Swap()]
