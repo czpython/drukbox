@@ -1,5 +1,7 @@
 # Drukbox
 
+[![All Contributors](https://img.shields.io/github/all-contributors/czpython/drukbox?color=ee8449&style=flat-square)](#contributors)
+
 <!-- markdownlint-disable-next-line MD033 -->
 <p align="center">
   <img src="docs/assets/logo-blue.png" alt="Drukbox thunder dragon logo wrapped around a server box" width="260">
@@ -72,3 +74,18 @@ uv run pytest
 `api-tests/` is a Playwright black-box suite for an already-running
 deployment — it provisions a real host, so point it at disposable
 infrastructure only (see [Deploy](docs/deploy.md#verify)).
+
+## Contributors
+
+Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!
