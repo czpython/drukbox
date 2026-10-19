@@ -18,6 +18,7 @@ from hosts.tests.conftest import StubVMProvider
 from providers.base import VMCreateResult
 from providers.capabilities import SecretInjectionCapability
 from providers.exceptions import ProviderTransportError
+from secrets_exchange.secrets import MissingSecretError
 
 ISSUER = {"url": "https://mint.test/box/github", "headers": {"X-Key": "k"}, "refresh": "1h"}
 SECRETS = {
@@ -219,6 +220,25 @@ async def test_an_issuer_that_gives_no_value_at_boot_fails_provisioning(
                 env={}, secrets=SECRETS, image=None, provider="stub"
             )
 
+    create_vm.assert_not_awaited()
+
+
+@respx.mock
+async def test_a_missing_secret_at_boot_fails_provisioning_with_the_issuers_reason(
+    settings: Settings, create_vm: AsyncMock, stub_provider: StubVMProvider
+) -> None:
+    stub_provider.secrets = RecordingInjection()
+    respx.get(ISSUER["url"]).respond(
+        status_code=422, json={"detail": "the GitHub App is not installed on acme/api"}
+    )
+
+    async with async_session_factory() as session:
+        with pytest.raises(MissingSecretError) as failure:
+            await HostService(session, settings=settings).create_host(
+                env={}, secrets=SECRETS, image=None, provider="stub"
+            )
+
+    assert str(failure.value) == "the GitHub App is not installed on acme/api"
     create_vm.assert_not_awaited()
 
 

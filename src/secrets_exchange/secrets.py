@@ -10,6 +10,7 @@ from typing import Any, Self
 import httpx
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
+from core.exceptions import AppException
 from hosts.models import Host
 from providers.exceptions import ProviderError
 from providers.registry import get_vm_provider
@@ -28,6 +29,14 @@ class IssuerError(Exception):
     """The message is safe to log."""
 
 
+class MissingSecretError(IssuerError, AppException):
+    """The secret is missing, and the message is the issuer's reason. A retry gets
+    the same answer."""
+
+    status_code = 422
+    error_code = "SECRET_MISSING"
+
+
 class IssuerUnavailableError(Exception):
     """No valid secret exists for the entry."""
 
@@ -44,6 +53,8 @@ class Secret(BaseModel):
     async def fetch(cls, issuer: dict[str, Any], client: httpx.AsyncClient) -> Self:
         try:
             response = await client.get(issuer["url"], headers=issuer["headers"])
+            if response.is_client_error:
+                raise MissingSecretError(response.json()["detail"])
             response.raise_for_status()
             secret = cls.model_validate(response.json())
         except httpx.LocalProtocolError:
@@ -55,7 +66,7 @@ class Secret(BaseModel):
             raise IssuerError(type(exc).__name__) from exc
         except json.JSONDecodeError:
             raise IssuerError("answer is not JSON") from None
-        except ValidationError:
+        except (KeyError, ValidationError):
             # The chain would carry the answer, and a token with it.
             raise IssuerError("answer has the wrong shape") from None
         if not secret.expires_at:
