@@ -25,7 +25,11 @@ class Service(NamedTuple):
 
 
 CATALOG: dict[str, Service] = {
-    "anthropic": Service("ANTHROPIC_AUTH_TOKEN", (Upstream("api.anthropic.com"),)),
+    # Claude Code calls claude.ai connectors at mcp-proxy with the same bearer.
+    "anthropic": Service(
+        "ANTHROPIC_AUTH_TOKEN",
+        (Upstream("api.anthropic.com"), Upstream("mcp-proxy.anthropic.com")),
+    ),
     # git's smart HTTP refuses a bearer. It takes Basic with x-access-token as the user.
     "github": Service(
         "GH_TOKEN",

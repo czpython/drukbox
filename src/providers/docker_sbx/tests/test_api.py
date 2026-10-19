@@ -133,9 +133,9 @@ sb-test  service  github  (stored)
 
 CUSTOM SECRETS
 SCOPE  TARGETS  ENV  PLACEHOLDER  SECRET
-sb-test  api.anthropic.com  ANTHROPIC_AUTH_TOKEN  drk.0123.anthropic.abc  cmd (on-demand)
+sb-test  api.anthropic.com, mcp-proxy.anthropic.com  ANTHROPIC_AUTH_TOKEN  drk.0123.anthropic.abc  cmd (on-demand)
 sb-test  api.acme.test, acme.example  ACME_TOKEN  drk.0123.acme.def  cmd (on-demand)
-"""
+"""  # noqa: E501
 
 
 @pytest.mark.asyncio

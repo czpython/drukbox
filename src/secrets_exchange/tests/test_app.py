@@ -228,6 +228,7 @@ async def test_the_upstreams_are_the_hosts_with_a_registered_secret(edge) -> Non
         "api.anthropic.com",
         "api.github.com",
         "github.com",
+        "mcp-proxy.anthropic.com",
         "uploads.github.com",
     ]
 
