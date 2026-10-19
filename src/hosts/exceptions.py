@@ -27,3 +27,7 @@ class HostCapacityError(AppException):
 class ProvisioningFailedError(AppException):
     status_code = 502
     error_code = "PROVISIONING_FAILED"
+
+
+class HostKeyScanError(Exception):
+    pass

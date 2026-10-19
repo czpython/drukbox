@@ -8,7 +8,7 @@ from sqlalchemy import select
 from uuid6 import uuid7
 
 from core.database import async_session_factory
-from hosts.exceptions import ProvisioningFailedError
+from hosts.exceptions import HostKeyScanError, ProvisioningFailedError
 from hosts.models import Host, HostStatus
 from hosts.service import HostService, utc_now
 from networking.tailscale import (
@@ -88,7 +88,8 @@ async def test_provision_walks_host_to_active(monkeypatch):
     mocks = await _patch_provision_happy_path(monkeypatch)
 
     async with async_session_factory() as session:
-        await HostService(session).provision(str(host.id))
+        session.add(host)
+        await HostService(session).provision(host)
 
     async with async_session_factory() as session:
         refreshed = await session.get(Host, host.id)
@@ -139,7 +140,8 @@ async def test_provision_forwards_sizing_from_the_row_to_create_vm(monkeypatch):
     mocks = await _patch_provision_happy_path(monkeypatch)
 
     async with async_session_factory() as session:
-        await HostService(session).provision(str(host.id))
+        session.add(host)
+        await HostService(session).provision(host)
 
     assert mocks["create_vm"].await_args is not None
     create_vm_kwargs = mocks["create_vm"].await_args.kwargs
@@ -247,7 +249,8 @@ async def test_provision_generated_authkey_overrides_caller_env(monkeypatch):
     mocks = await _patch_provision_happy_path(monkeypatch)
 
     async with async_session_factory() as session:
-        await HostService(session).provision(str(host.id))
+        session.add(host)
+        await HostService(session).provision(host)
 
     assert mocks["create_vm"].await_args is not None
     assert mocks["create_vm"].await_args.kwargs["env"]["TAILSCALE_AUTHKEY"] == "tskey-secret"
@@ -259,7 +262,8 @@ async def test_provision_marks_error_when_provider_rejects_credentials(monkeypat
     mocks["create_vm"].side_effect = ProviderAuthError("exe.dev authentication failed")
 
     async with async_session_factory() as session:
-        await HostService(session).provision(str(host.id))
+        session.add(host)
+        await HostService(session).provision(host)
 
     async with async_session_factory() as session:
         refreshed = await session.get(Host, host.id)
@@ -276,7 +280,8 @@ async def test_provision_marks_error_when_device_discovery_times_out(monkeypatch
     )
 
     async with async_session_factory() as session:
-        await HostService(session).provision(str(host.id))
+        session.add(host)
+        await HostService(session).provision(host)
 
     async with async_session_factory() as session:
         refreshed = await session.get(Host, host.id)
@@ -290,10 +295,11 @@ async def test_provision_marks_error_when_device_discovery_times_out(monkeypatch
 async def test_provision_marks_error_when_keyscan_fails(monkeypatch):
     host = await create_host_record(name="lb-sandbox-test", status="provisioning")
     mocks = await _patch_provision_happy_path(monkeypatch)
-    mocks["scan_known_hosts"].side_effect = RuntimeError("keyscan failed")
+    mocks["scan_known_hosts"].side_effect = HostKeyScanError("keyscan failed")
 
     async with async_session_factory() as session:
-        await HostService(session).provision(str(host.id))
+        session.add(host)
+        await HostService(session).provision(host)
 
     async with async_session_factory() as session:
         refreshed = await session.get(Host, host.id)
@@ -343,10 +349,7 @@ async def test_scan_known_hosts_retries_until_banner_is_returned(monkeypatch):
     assert create_subprocess_exec.await_count == 2
 
 
-async def test_scan_known_hosts_translates_spawn_failure_to_runtime_error(monkeypatch):
-    # ssh-keyscan missing from the runtime image raises FileNotFoundError at spawn;
-    # it must surface as RuntimeError (which provision routes through mark_failed),
-    # not escape as a generic server error.
+async def test_scan_known_hosts_fails_when_ssh_keyscan_cannot_run(monkeypatch):
     host = Host(
         name="sb-test",
         image=ExeSettings().default_image,  # pyright: ignore[reportCallIssue]
@@ -363,7 +366,7 @@ async def test_scan_known_hosts_translates_spawn_failure_to_runtime_error(monkey
 
     async with async_session_factory() as session:
         service = HostService(session)
-        with pytest.raises(RuntimeError, match="could not run ssh-keyscan"):
+        with pytest.raises(HostKeyScanError, match="could not run ssh-keyscan"):
             await service.scan_known_hosts(host)
 
 
