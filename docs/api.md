@@ -44,6 +44,10 @@ service account that first used it. Another one reusing it gets `409`.
 provider has `HOST_LIMITS` live hosts. A live host is not in `error` and
 has not expired.
 
+`POST /hosts` returns `422` with `SECRET_MISSING` when a secret is missing.
+The detail is the issuer's reason, for example that the GitHub App is not
+on the repository. A retry gets the same answer.
+
 ## Refresh a host secret
 
 `POST /hosts/{host_id}/secrets/{service}/refresh` makes the exchange drop

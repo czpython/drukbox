@@ -42,7 +42,7 @@ from providers.exceptions import (
 )
 from providers.registry import get_provider_names, get_vm_provider
 from secrets_exchange.client import SecretsExchange
-from secrets_exchange.secrets import IssuerError, Secret
+from secrets_exchange.secrets import IssuerError, MissingSecretError, Secret
 from templates.exceptions import TemplateNotAvailableError, UnknownTemplateError
 from templates.models import Template, TemplateStatus
 
@@ -167,12 +167,8 @@ class HostService:
         provider: str,
         expires_at: datetime | None | EllipsisType,
     ) -> Host | None:
-        # Pick a candidate, then atomically claim it with UPDATE ... WHERE
-        # claimed_at IS NULL ... RETURNING. The WHERE predicate is the actual
-        # race guard — concurrent claimants resolve to a single winner per
-        # row regardless of dialect (PG: MVCC + WHERE filter; SQLite: write
-        # lock + WHERE filter). Losers return None and the caller falls
-        # through to fresh provisioning.
+        # The claim's WHERE on claimed_at is the race guard: concurrent
+        # claimants resolve to one winner per row on both dialects.
         now = utc_now()
         vm = get_vm_provider(provider)
         candidates = (
@@ -188,32 +184,29 @@ class HostService:
         if vm.max_lifetime and isinstance(expires_at, datetime):
             # A warm host that the provider stops before the requested end is no match.
             candidates = candidates.where(Host.created_at >= expires_at - vm.max_lifetime)
-        candidate = (await self.session.execute(candidates)).scalar_one_or_none()
-        if not candidate:
-            return
-
-        if expires_at is ...:
-            expires_at = self._default_lease_expires_at()
-        # The claim replaces the warm-pool max-age TTL with the caller's lease:
-        # a concrete window (explicit or the default), or None for a caller
-        # who deliberately opted into a permanent host.
-        result = await self.session.execute(
-            update(Host)
-            .where(Host.id == candidate.id)
-            .where(Host.claimed_at.is_(None))
-            .values(
-                service_account=service_account,
-                claimed_at=now,
-                updated_at=now,
-                expires_at=vm.lease_end(candidate.created_at, expires_at),
+        if candidate := (await self.session.execute(candidates)).scalar_one_or_none():
+            if expires_at is ...:
+                expires_at = self._default_lease_expires_at()
+            # The claim replaces the warm-pool max-age TTL with the caller's lease:
+            # a concrete window (explicit or the default), or None for a caller
+            # who deliberately opted into a permanent host.
+            result = await self.session.execute(
+                update(Host)
+                .where(Host.id == candidate.id)
+                .where(Host.claimed_at.is_(None))
+                .values(
+                    service_account=service_account,
+                    claimed_at=now,
+                    updated_at=now,
+                    expires_at=vm.lease_end(candidate.created_at, expires_at),
+                )
+                .returning(Host)
             )
-            .returning(Host)
-        )
-        host = result.scalar_one_or_none()
-        await self.session.commit()
-        if host:
-            logger.info("pool: claimed host_id=%s name=%s", host.id, host.name)
-        return host
+            host = result.scalar_one_or_none()
+            await self.session.commit()
+            if host:
+                logger.info("pool: claimed host_id=%s name=%s", host.id, host.name)
+            return host
 
     async def create_host(
         self,
@@ -571,6 +564,9 @@ class HostService:
         try:
             environment.update(await self.put_secrets(host, vm))
             get_persist(environment)
+        except MissingSecretError as exc:
+            await self.mark_failed(host, exc)
+            raise
         except (IssuerError, ProviderError, ValueError) as exc:
             await self.mark_failed(host, exc)
             return
@@ -689,8 +685,7 @@ class HostService:
         host.last_error = f"{type(exc).__name__}: {exc}"
         now = utc_now()
         # An errored host is dead weight (its VM may be half-created). Expire it
-        # now so the janitor is the single owner of teardown; the POST caller
-        # already got last_error in the 502.
+        # now so the janitor is the single owner of teardown.
         host.expires_at = now
         host.updated_at = now
         await self.session.commit()
