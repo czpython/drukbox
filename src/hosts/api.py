@@ -43,9 +43,7 @@ async def create_host(
     ] = None,
 ) -> Host:
     host_create = payload or HostCreate()
-    # An omitted expires_at gets the default lease; an explicit null is the
-    # caller's deliberate opt-in to a permanent host.
-    expires_at = host_create.expires_at if "expires_at" in host_create.model_fields_set else ...
+    permanent = "expires_at" in host_create.model_fields_set and not host_create.expires_at
 
     try:
         return await service.get_or_create_host(
@@ -54,7 +52,8 @@ async def create_host(
             secrets={name: entry.to_storage() for name, entry in host_create.secrets.items()},
             image=host_create.image,
             template=host_create.template,
-            expires_at=expires_at,
+            expires_at=host_create.expires_at,
+            permanent=permanent,
             idempotency_key=idempotency_key,
             provider=host_create.provider,
             instance_type=host_create.instance_type,

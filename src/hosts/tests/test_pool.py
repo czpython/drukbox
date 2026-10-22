@@ -21,9 +21,7 @@ def pooled_settings(monkeypatch):
     monkeypatch.setenv("POOL_SIZE", "2")
     monkeypatch.delenv("POOL_SIZES", raising=False)
     monkeypatch.setenv("POOL_HOST_MAX_AGE_HOURS", "4")
-    # Raise the per-tick cap so tests can observe full deficit refills in a
-    # single maintain_pool() call. Production defaults to a small cap so that
-    # overlapping ticks bound the over-provision blast radius.
+    # A high per-tick cap lets one maintain_pool() call refill a whole deficit.
     monkeypatch.setenv("POOL_MAX_CREATES_PER_TICK", "100")
     get_settings.cache_clear()
     yield get_settings()
@@ -99,15 +97,13 @@ async def test_create_host_claims_pool_member_when_eligible(pooled_settings, mon
         result = await service.get_or_create_host(env={}, image=None)
 
     assert result.id == pool_host.id
-    assert result.claimed_at is not None
+    assert result.claimed_at
     mocked_provision.assert_not_awaited()
 
 
 async def test_pool_never_claims_or_sheds_demand_hosts(pooled_settings, monkeypatch):
-    # A demand-provisioned host keeps claimed_at NULL just like a warm pool
-    # host, but pool_member=False must keep pool claim/count/shed away from it —
-    # otherwise caller A's env-bearing sandbox could be handed to caller B, or
-    # deleted as pool excess.
+    # A demand host has claimed_at NULL like a warm member; only pool_member keeps
+    # the claim, count and shed away from it.
     demand = await _seed_pool_host(
         name="lb-demand-1", pool_member=False, env={"SECRET": "caller-a"}
     )
@@ -115,17 +111,15 @@ async def test_pool_never_claims_or_sheds_demand_hosts(pooled_settings, monkeypa
     monkeypatch.setattr("networking.tailscale.Tailscale.release_device", AsyncMock())
     monkeypatch.setattr("providers.exe.provider.ExeProvider.delete_vm", AsyncMock())
 
-    # A later default request must fall back to fresh, not claim the demand host.
     async with async_session_factory() as session:
         service = HostService(session, settings=pooled_settings)
         result = await service.get_or_create_host(env={}, image=None)
     assert result.id != demand.id
-    assert result.claimed_at is None
+    assert not result.claimed_at
 
-    # Pool maintenance must not count or shed it; the demand host survives.
     await maintain_pool()
     async with async_session_factory() as session:
-        assert await session.get(Host, demand.id) is not None
+        assert await session.get(Host, demand.id)
 
 
 async def test_create_host_falls_back_to_fresh_when_pool_empty(pooled_settings, monkeypatch):
@@ -136,7 +130,7 @@ async def test_create_host_falls_back_to_fresh_when_pool_empty(pooled_settings, 
         service = HostService(session, settings=pooled_settings)
         result = await service.get_or_create_host(env={}, image=None)
 
-    assert result.claimed_at is None
+    assert not result.claimed_at
     assert result.status == HostStatus.PROVISIONING.value
     mocked_provision.assert_awaited_once()
 
@@ -150,7 +144,7 @@ async def test_create_host_skips_pool_when_env_present(pooled_settings, monkeypa
         service = HostService(session, settings=pooled_settings)
         result = await service.get_or_create_host(env={"SANDBOX_X": "value"}, image=None)
 
-    assert result.claimed_at is None
+    assert not result.claimed_at
     mocked_provision.assert_awaited_once()
 
 
@@ -168,7 +162,7 @@ async def test_create_host_skips_pool_when_provider_has_no_target(
         service = HostService(session, settings=pooled_settings)
         result = await service.get_or_create_host(env={}, image=None, provider="stub")
 
-    assert result.claimed_at is None
+    assert not result.claimed_at
     assert result.provider == "stub"
     mocked_provision.assert_awaited_once()
 
@@ -186,7 +180,7 @@ async def test_create_host_claims_pool_member_of_the_pinned_provider(
         result = await service.get_or_create_host(env={}, image=None, provider="stub")
 
     assert result.id == stub_host.id
-    assert result.claimed_at is not None
+    assert result.claimed_at
     mocked_provision.assert_not_awaited()
 
 
@@ -205,7 +199,7 @@ async def test_create_host_never_claims_another_providers_pool_member(
 
     assert result.id != exe_host.id
     assert result.provider == "stub"
-    assert result.claimed_at is None
+    assert not result.claimed_at
     mocked_provision.assert_awaited_once()
 
 
@@ -249,7 +243,7 @@ async def test_create_host_skips_pool_when_sized(multi_pool_settings, monkeypatc
             )
 
         assert result.id != pool_host.id
-        assert result.claimed_at is None
+        assert not result.claimed_at
         assert result.instance_type == instance_type
         assert result.disk_gb == disk_gb
 
@@ -265,7 +259,7 @@ async def test_create_host_skips_pool_when_image_override(pooled_settings, monke
         service = HostService(session, settings=pooled_settings)
         result = await service.get_or_create_host(env={}, image="custom-image:tag")
 
-    assert result.claimed_at is None
+    assert not result.claimed_at
     assert result.image == "custom-image:tag"
     mocked_provision.assert_awaited_once()
 
@@ -282,7 +276,7 @@ async def test_pool_claim_overrides_pool_max_age_with_caller_expires_at(
         service = HostService(session, settings=pooled_settings)
         claimed = await service.get_or_create_host(env={}, image=None, expires_at=caller_expires_at)
 
-    assert claimed.expires_at is not None
+    assert claimed.expires_at
     assert abs((claimed.expires_at - caller_expires_at).total_seconds()) < 1
 
 
@@ -298,24 +292,22 @@ async def test_pool_claim_stamps_default_lease_when_caller_omits_expires_at(
 
     async with async_session_factory() as session:
         service = HostService(session, settings=pooled_settings)
-        claimed = await service.get_or_create_host(env={}, image=None)  # no expires_at
+        claimed = await service.get_or_create_host(env={}, image=None)
 
     lease_end = utc_now() + timedelta(seconds=pooled_settings.lease_default_ttl)
-    assert claimed.expires_at is not None
+    assert claimed.expires_at
     assert abs((claimed.expires_at - lease_end).total_seconds()) < 5
 
 
 async def test_pool_claim_honors_explicit_permanent_lease(pooled_settings, monkeypatch):
-    # An explicit expires_at=None is the caller's deliberate opt-in to a
-    # permanent host; the claim must clear the warm-pool max-age TTL.
     await _seed_pool_host(name="lb-pool-1", expires_at=datetime.now(UTC) + timedelta(hours=4))
     monkeypatch.setattr("hosts.service.HostService.provision", AsyncMock())
 
     async with async_session_factory() as session:
         service = HostService(session, settings=pooled_settings)
-        claimed = await service.get_or_create_host(env={}, image=None, expires_at=None)
+        claimed = await service.get_or_create_host(env={}, image=None, permanent=True)
 
-    assert claimed.expires_at is None
+    assert not claimed.expires_at
 
 
 async def test_concurrent_claims_dont_grab_the_same_pool_host(pooled_settings, monkeypatch):
@@ -330,8 +322,8 @@ async def test_concurrent_claims_dont_grab_the_same_pool_host(pooled_settings, m
 
     first, second = await asyncio.gather(attempt_claim(), attempt_claim())
 
-    claim_ids = {h.id for h in (first, second) if h.claimed_at is not None}
-    fresh_ids = {h.id for h in (first, second) if h.claimed_at is None}
+    claim_ids = {host.id for host in (first, second) if host.claimed_at}
+    fresh_ids = {host.id for host in (first, second) if not host.claimed_at}
     assert claim_ids == {pool_host.id}
     assert len(fresh_ids) == 1
     mocked_provision.assert_awaited_once()
@@ -358,7 +350,6 @@ async def test_maintain_pool_tops_up_only_the_deficit(pooled_settings, monkeypat
 
 
 async def test_maintain_pool_sheds_excess_when_pool_size_shrinks(pooled_settings, monkeypatch):
-    # POOL_SIZE=2; seed 5 unclaimed hosts. Maintainer should shed the 3 oldest.
     monkeypatch.setattr("networking.tailscale.Tailscale.release_device", AsyncMock())
     monkeypatch.setattr("providers.exe.provider.ExeProvider.delete_vm", AsyncMock())
     for i in range(5):
@@ -484,8 +475,8 @@ async def test_maintain_pool_reaches_other_providers_when_one_keeps_failing(
 
 
 async def test_maintain_pool_excludes_expired_hosts_from_count(pooled_settings, monkeypatch):
-    # An unclaimed host past its expires_at is queued for janitor reaping and
-    # must not count toward the pool target. Maintainer should top up to N.
+    # An unclaimed host past its expires_at is left to the janitor and does not
+    # count toward the target.
     monkeypatch.setattr("hosts.service.HostService.provision", AsyncMock())
     await _seed_pool_host(
         name="lb-pool-expiring",
@@ -494,7 +485,6 @@ async def test_maintain_pool_excludes_expired_hosts_from_count(pooled_settings, 
 
     summary = await maintain_pool()
 
-    # The expiring host doesn't count, so the maintainer creates pool_size more.
     assert summary.created == pooled_settings.pool_size
 
 
@@ -520,7 +510,6 @@ async def test_maintain_pool_breaks_after_consecutive_create_failures(pooled_set
     provision = AsyncMock(side_effect=RuntimeError("provider down"))
     monkeypatch.setattr("hosts.service.HostService.provision", provision)
 
-    # Force pool_size large enough that the cap matters.
     monkeypatch.setenv("POOL_SIZE", "10")
     get_settings.cache_clear()
     try:
@@ -534,7 +523,6 @@ async def test_maintain_pool_breaks_after_consecutive_create_failures(pooled_set
 
 
 async def test_create_host_ignores_pool_when_pool_size_is_zero(monkeypatch):
-    # Default settings: pool_size = 0.
     get_settings.cache_clear()
     await _seed_pool_host(name="ch-orphan-pool-host")
     mocked_provision = AsyncMock()
@@ -544,7 +532,7 @@ async def test_create_host_ignores_pool_when_pool_size_is_zero(monkeypatch):
         service = HostService(session)
         result = await service.get_or_create_host(env={}, image=None)
 
-    assert result.claimed_at is None
+    assert not result.claimed_at
     mocked_provision.assert_awaited_once()
 
 
@@ -562,4 +550,4 @@ async def test_pool_shed_skips_a_host_claimed_in_the_race(pooled_settings, monke
     assert not deleted
     delete_vm.assert_not_awaited()
     async with async_session_factory() as session:
-        assert await session.get(Host, claimed.id) is not None
+        assert await session.get(Host, claimed.id)

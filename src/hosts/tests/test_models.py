@@ -60,15 +60,11 @@ async def _patch_provision_happy_path(monkeypatch, *, ssh_port: int = 22) -> dic
 
 
 def test_build_name_is_distinct_for_uuids_sharing_a_timestamp_prefix():
-    # Regression: UUIDv7's first 48 bits are the millisecond timestamp,
-    # so two concurrent creates produce host_ids whose leading hex is
-    # identical. build_name() must derive from the random tail, not the
-    # timestamp prefix, or it collides on the unique name index.
+    # UUIDv7 leads with a millisecond timestamp, so two concurrent creates share
+    # their leading hex; the name must come from the random tail.
     a = uuid.UUID("019e8307-79af-7000-8000-000000000001")
     b = uuid.UUID("019e8307-79af-7000-8000-000000000002")
-    # Sanity: the offending prefix really is identical.
     assert a.hex[:12] == b.hex[:12]
-    # And the names build_name produces must not be.
     assert Host.build_name(a) != Host.build_name(b)
 
 
@@ -93,37 +89,36 @@ async def test_provision_walks_host_to_active(monkeypatch):
 
     async with async_session_factory() as session:
         refreshed = await session.get(Host, host.id)
-        assert refreshed is not None
+        assert refreshed
         assert refreshed.name == "exe-runtime-1"
         assert refreshed.internal_ssh_host == "exe-runtime-1.example.ts.net"
         assert refreshed.external_ssh_host == ""
         assert refreshed.status == "active"
         assert refreshed.tailscale_device_id == "n123CNTRL"
         assert refreshed.known_hosts == "exe-runtime-1.example.ts.net ssh-ed25519 AAAATEST\n"
-        assert refreshed.activated_at is not None
+        assert refreshed.activated_at
 
     mocks["issue_join_credentials"].assert_awaited_once_with(host_name="lb-sandbox-test")
-    assert mocks["create_vm"].await_args is not None
+    assert mocks["create_vm"].await_args
     create_vm_kwargs = mocks["create_vm"].await_args.kwargs
     assert create_vm_kwargs["name"] == "lb-sandbox-test"
     assert create_vm_kwargs["image"] == "ghcr.io/drukbox/custom-sandbox:provision-test"
     # No per-request sizing on the row → the provider falls back to its
     # configured default size.
-    assert create_vm_kwargs["instance_type"] is None
-    assert create_vm_kwargs["disk_gb"] is None
+    assert not create_vm_kwargs["instance_type"]
+    assert not create_vm_kwargs["disk_gb"]
     assert create_vm_kwargs["env"]["TAILSCALE_AUTHKEY"] == "tskey-secret"
     assert create_vm_kwargs["env"]["TAILSCALE_ADVERTISE_TAGS"] == "tag:sandbox"
     assert create_vm_kwargs["env"]["SANDBOX_GATEWAY_URL"] == "wss://gateway.example.ts.net/daemon"
     # No drukbox-side callbacks injected — the box never phones home.
     assert "REMOTE_HOST_ANNOUNCE_URL" not in create_vm_kwargs["env"]
     assert "REMOTE_HOST_ANNOUNCE_TOKEN" not in create_vm_kwargs["env"]
-    # Bootstrap script ships to the VM only knows about Tailscale.
     assert "TAILSCALE_AUTHKEY" in create_vm_kwargs["setup_script"]
     assert "REMOTE_HOST_ANNOUNCE" not in create_vm_kwargs["setup_script"]
-    # wait_for_device is called against the post-create VM name (mirrors how
-    # ExeProvider can rename hosts during creation).
+    # A provider may rename the VM during creation; discovery uses the name it
+    # returned.
     mocks["wait_for_device"].assert_awaited_once()
-    assert mocks["wait_for_device"].await_args is not None
+    assert mocks["wait_for_device"].await_args
     wait_kwargs = mocks["wait_for_device"].await_args.kwargs
     assert wait_kwargs["host_name"] == "exe-runtime-1"
 
@@ -143,17 +138,14 @@ async def test_provision_forwards_sizing_from_the_row_to_create_vm(monkeypatch):
         session.add(host)
         await HostService(session).provision(host)
 
-    assert mocks["create_vm"].await_args is not None
+    assert mocks["create_vm"].await_args
     create_vm_kwargs = mocks["create_vm"].await_args.kwargs
     assert create_vm_kwargs["instance_type"] == "t3.xlarge"
     assert create_vm_kwargs["disk_gb"] == 250
 
 
 async def test_provision_threads_ssh_username_from_vm_result_onto_host(monkeypatch):
-    # The provider knows which in-VM user the image runs as; provision()
-    # must propagate it so the HostOut response (and subsequent GETs)
-    # carry the right value without callers having to maintain their own
-    # per-provider mapping.
+    # The provider knows which user the image runs as.
     mocks = await _patch_provision_happy_path(monkeypatch)
     mocks["create_vm"].return_value = VMCreateResult(
         provider_id="exe-runtime-1",
@@ -163,15 +155,14 @@ async def test_provision_threads_ssh_username_from_vm_result_onto_host(monkeypat
     )
 
     async with async_session_factory() as session:
-        host = await HostService(session).create_host(env={}, image=None, expires_at=None)
+        host = await HostService(session).create_host(env={}, image=None)
 
     assert host.ssh_username == "exedev"
 
 
 async def test_provision_threads_private_key_from_vm_result_onto_host(monkeypatch):
-    # Providers that mint a per-VM keypair (AWS) return private key material
-    # in VMCreateResult; provision() must propagate it onto the host instance
-    # so the create-time HostOut response carries it.
+    # A provider that issues a per-VM keypair returns the private key; the POST
+    # response carries it.
     mocks = await _patch_provision_happy_path(monkeypatch)
     mocks["create_vm"].return_value = VMCreateResult(
         provider_id="exe-runtime-1",
@@ -182,22 +173,21 @@ async def test_provision_threads_private_key_from_vm_result_onto_host(monkeypatc
     )
 
     async with async_session_factory() as session:
-        host = await HostService(session).create_host(env={}, image=None, expires_at=None)
+        host = await HostService(session).create_host(env={}, image=None)
 
-    assert host.private_key is not None
+    assert host.private_key
     assert host.private_key.startswith("-----BEGIN OPENSSH PRIVATE KEY-----")
 
 
 async def test_create_host_clears_safety_ttl_when_caller_omits_one(monkeypatch):
-    # The row is born with a safety TTL so the janitor reaps it if the
-    # client disconnects mid-provision. On success, that safety TTL is
-    # replaced with the caller's intent — here, NULL.
+    # The safety TTL the row is born with gives way to the caller's lease, here
+    # none.
     await _patch_provision_happy_path(monkeypatch)
 
     async with async_session_factory() as session:
-        created = await HostService(session).create_host(env={}, image=None, expires_at=None)
+        created = await HostService(session).create_host(env={}, image=None, permanent=True)
 
-    assert created.expires_at is None
+    assert not created.expires_at
 
 
 async def test_create_host_lands_on_caller_ttl_on_success(monkeypatch):
@@ -207,14 +197,13 @@ async def test_create_host_lands_on_caller_ttl_on_success(monkeypatch):
     async with async_session_factory() as session:
         created = await HostService(session).create_host(env={}, image=None, expires_at=caller_ttl)
 
-    assert created.expires_at is not None
+    assert created.expires_at
     assert abs((created.expires_at - caller_ttl).total_seconds()) < 1
 
 
 async def test_create_host_expires_errored_host_for_janitor(monkeypatch):
-    # Strand protection on the unhappy path: if provisioning errors out,
-    # expire the row immediately so the janitor reaps it (and its VM) on the
-    # next cycle, without operators having to chase ERROR hosts manually.
+    # A failed provision expires the row at once so the janitor reaps it and its
+    # VM.
     mocks = await _patch_provision_happy_path(monkeypatch)
     mocks["wait_for_device"].side_effect = DeviceDiscoveryTimeoutError(
         "Tailscale never surfaced device"
@@ -222,18 +211,13 @@ async def test_create_host_expires_errored_host_for_janitor(monkeypatch):
 
     async with async_session_factory() as session:
         service = HostService(session)
-        try:
-            await service.create_host(env={}, image=None, expires_at=None)
-        except ProvisioningFailedError:
-            pass
-        else:
-            raise AssertionError("expected ProvisioningFailedError")
+        with pytest.raises(ProvisioningFailedError):
+            await service.create_host(env={}, image=None)
 
-    # Row should still exist, expired so the janitor reaps it next cycle.
     async with async_session_factory() as session:
         result = await session.execute(select(Host).where(Host.status == "error"))
         errored = result.scalar_one()
-        assert errored.expires_at is not None
+        assert errored.expires_at
         assert errored.expires_at <= utc_now()
 
 
@@ -252,7 +236,7 @@ async def test_provision_generated_authkey_overrides_caller_env(monkeypatch):
         session.add(host)
         await HostService(session).provision(host)
 
-    assert mocks["create_vm"].await_args is not None
+    assert mocks["create_vm"].await_args
     assert mocks["create_vm"].await_args.kwargs["env"]["TAILSCALE_AUTHKEY"] == "tskey-secret"
 
 
@@ -267,7 +251,7 @@ async def test_provision_marks_error_when_provider_rejects_credentials(monkeypat
 
     async with async_session_factory() as session:
         refreshed = await session.get(Host, host.id)
-        assert refreshed is not None
+        assert refreshed
         assert refreshed.status == "error"
         assert refreshed.last_error == "ProviderAuthError: exe.dev authentication failed"
 
@@ -285,10 +269,9 @@ async def test_provision_marks_error_when_device_discovery_times_out(monkeypatch
 
     async with async_session_factory() as session:
         refreshed = await session.get(Host, host.id)
-        assert refreshed is not None
+        assert refreshed
         assert refreshed.status == "error"
         assert "Tailscale did not surface device" in refreshed.last_error
-        # ssh-keyscan must not have been attempted if Tailscale never saw the device.
         mocks["scan_known_hosts"].assert_not_awaited()
 
 
@@ -303,7 +286,7 @@ async def test_provision_marks_error_when_keyscan_fails(monkeypatch):
 
     async with async_session_factory() as session:
         refreshed = await session.get(Host, host.id)
-        assert refreshed is not None
+        assert refreshed
         assert refreshed.status == "error"
         assert "keyscan failed" in refreshed.last_error
         # Device id was already stored when Tailscale surfaced it; teardown
@@ -312,9 +295,7 @@ async def test_provision_marks_error_when_keyscan_fails(monkeypatch):
 
 
 async def test_scan_known_hosts_retries_until_banner_is_returned(monkeypatch):
-    # Mirrors the production race: tailscaled-SSH is not ready immediately
-    # when the device shows up in Tailscale's API. First keyscan attempt
-    # gets nothing back; a subsequent attempt succeeds.
+    # tailscaled-SSH is not ready the moment the device shows up in the API.
     host = Host(
         name="lb-sandbox-test",
         image=ExeSettings().default_image,  # pyright: ignore[reportCallIssue]
@@ -435,7 +416,6 @@ async def test_scan_known_hosts_retries_when_only_one_target_surfaces(monkeypatc
         returncode=0,
         communicate=AsyncMock(return_value=(b"sb-test.exe.xyz ssh-rsa AAAEXE\n", b"")),
     )
-    # Attempt 1: internal answers, external sshd still warming. Attempt 2: both.
     create_subprocess_exec = AsyncMock(
         side_effect=[internal_key, external_warming, internal_key, external_key]
     )
@@ -481,7 +461,7 @@ async def test_scan_known_hosts_uses_async_subprocess(monkeypatch):
 
     assert known_hosts == b"lb-sandbox-test.example.ts.net ssh-ed25519 AAAATEST\n"
     create_subprocess_exec.assert_awaited_once()
-    assert create_subprocess_exec.await_args is not None
+    assert create_subprocess_exec.await_args
     assert create_subprocess_exec.await_args.args == (
         "ssh-keyscan",
         "-p",
@@ -491,7 +471,6 @@ async def test_scan_known_hosts_uses_async_subprocess(monkeypatch):
 
 
 async def test_scan_known_hosts_honors_external_ssh_port(monkeypatch):
-    """Scans the external address on its published port, not a hardcoded 22."""
     host = Host(
         name="sb-test",
         image=ExeSettings().default_image,  # pyright: ignore[reportCallIssue]
@@ -517,7 +496,7 @@ async def test_scan_known_hosts_honors_external_ssh_port(monkeypatch):
 
     assert b"127.0.0.1" in known_hosts
     create_subprocess_exec.assert_awaited_once()
-    assert create_subprocess_exec.await_args is not None
+    assert create_subprocess_exec.await_args
     assert create_subprocess_exec.await_args.args == ("ssh-keyscan", "-p", "49160", "127.0.0.1")
 
 
@@ -579,5 +558,5 @@ async def test_expires_at_with_non_utc_offset_round_trips_as_utc():
 
     async with async_session_factory() as session:
         reloaded = await session.get(Host, host.id)
-        assert reloaded is not None
+        assert reloaded
         assert reloaded.expires_at == datetime(2099, 1, 1, 8, 0, tzinfo=UTC)

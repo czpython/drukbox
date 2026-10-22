@@ -88,23 +88,23 @@ async def test_create_host_creates_record_and_enqueues_provisioning(client, monk
     payload = response.json()
     assert uuid.UUID(payload["id"]).version == 7
     assert payload["name"].startswith("sb-")
-    assert payload["status"] == "provisioning"  # provision mock is a no-op
+    assert payload["status"] == "provisioning"
     assert payload["provider"] == "exe"
     assert payload["image"] == ExeSettings().default_image  # pyright: ignore[reportCallIssue]
     # internal_ssh_host is populated by provision() (mocked out here), so
     # the response shows the row's pre-provision state.
-    assert payload["internal_ssh_host"] is None
-    assert payload["tailscale_device_id"] is None
+    assert not payload["internal_ssh_host"]
+    assert not payload["tailscale_device_id"]
     assert "env" not in payload
 
     async with async_session_factory() as session:
         host = await session.get(Host, uuid.UUID(payload["id"]))
-        assert host is not None
+        assert host
         assert host.image == ExeSettings().default_image  # pyright: ignore[reportCallIssue]
         assert host.env == {}
 
     mocked_provision.assert_awaited_once()
-    assert mocked_provision.await_args is not None
+    assert mocked_provision.await_args
     assert mocked_provision.await_args.args[0].id == host.id
 
 
@@ -131,11 +131,11 @@ async def test_create_host_persists_env_without_returning_it(client, monkeypatch
 
     async with async_session_factory() as session:
         host = await session.get(Host, uuid.UUID(payload["id"]))
-        assert host is not None
+        assert host
         assert host.env == env
 
     mocked_provision.assert_awaited_once()
-    assert mocked_provision.await_args is not None
+    assert mocked_provision.await_args
     assert mocked_provision.await_args.args[0].id == host.id
 
 
@@ -156,7 +156,7 @@ async def test_create_host_stores_and_returns_custom_image(client, monkeypatch):
 
     async with async_session_factory() as session:
         host = await session.get(Host, uuid.UUID(payload["id"]))
-        assert host is not None
+        assert host
         assert host.image == image
 
 
@@ -173,16 +173,15 @@ async def test_create_host_stores_and_returns_expires_at(client, monkeypatch):
 
     assert response.status_code == 201
     payload = response.json()
-    assert payload["expires_at"] is not None
+    assert payload["expires_at"]
 
     async with async_session_factory() as session:
         host = await session.get(Host, uuid.UUID(payload["id"]))
-        assert host is not None
-        assert host.expires_at is not None
+        assert host
+        assert host.expires_at
 
 
 async def test_create_host_rejects_naive_expires_at(client):
-    # ISO 8601 without a tz offset is a naive datetime; the validator must reject.
     response = await client.post(
         "/hosts",
         headers={"Authorization": "Bearer service-token"},
@@ -241,7 +240,7 @@ async def test_create_host_keeps_safety_ttl_while_provisioning(monkeypatch):
         after = utc_now()
 
     assert before + grace <= inflight["expires_at"] <= after + grace
-    assert host.expires_at is not None
+    assert host.expires_at
     assert before + ttl <= host.expires_at <= after + ttl
 
 
@@ -280,12 +279,12 @@ async def test_create_host_explicit_null_expires_at_creates_permanent_host(clien
     )
 
     assert response.status_code == 201
-    assert response.json()["expires_at"] is None
+    assert not response.json()["expires_at"]
 
     async with async_session_factory() as session:
         host = await session.get(Host, uuid.UUID(response.json()["id"]))
-        assert host is not None
-        assert host.expires_at is None
+        assert host
+        assert not host.expires_at
 
 
 async def test_create_host_rejects_oversized_idempotency_key(client):
@@ -325,14 +324,11 @@ async def test_get_host_exposes_null_expires_at_by_default(client):
     )
 
     assert response.status_code == 200
-    assert response.json()["expires_at"] is None
+    assert not response.json()["expires_at"]
 
 
 async def test_get_host_never_returns_private_key(client):
-    # Regression guard: the per-VM private key is returned exactly once at
-    # POST time. GET must always return None — there's no column behind it,
-    # and any future change that accidentally persists private_key would
-    # break this assertion.
+    # The per-VM private key is returned once, at POST time; nothing persists it.
     host = await create_host_record(name="lb-sandbox-test", status="active")
 
     response = await client.get(
@@ -341,7 +337,7 @@ async def test_get_host_never_returns_private_key(client):
     )
 
     assert response.status_code == 200
-    assert response.json()["private_key"] is None
+    assert not response.json()["private_key"]
 
 
 async def test_create_host_idempotency_key_returns_same_host_on_retry(client, monkeypatch):
@@ -368,7 +364,6 @@ async def test_create_host_idempotency_key_returns_same_host_on_retry(client, mo
     assert second.status_code == 201
     assert second.json()["id"] == first_id
 
-    # Only one host actually got created (kiq fires once per real create).
     assert mocked_provision.await_count == 1
 
 
@@ -411,28 +406,24 @@ async def test_create_host_without_idempotency_key_creates_fresh_each_time(clien
 
 
 async def test_idempotency_loser_in_provisioning_is_marked_for_janitor(monkeypatch):
-    # Race-loser that's fresh-created (in PROVISIONING) cannot be delete_host'd
-    # (it's in DELETE_BLOCKED_STATUSES). The cleanup path must mark it with
-    # expires_at=now so the janitor reaps it on the next cycle.
+    # delete_host refuses a provisioning host, so the loser is expired for the janitor.
     monkeypatch.setattr("hosts.service.HostService.provision", AsyncMock())
 
     async with async_session_factory() as session:
         service = HostService(session)
-        loser = await service.create_host(env={}, image=None, expires_at=None)
+        loser = await service.create_host(env={}, image=None, permanent=True)
         assert loser.status == HostStatus.PROVISIONING.value
-        assert loser.expires_at is None
+        assert not loser.expires_at
         await service._release_idempotency_loser(loser)
 
     async with async_session_factory() as session:
         reloaded = await session.get(Host, loser.id)
-        assert reloaded is not None
-        assert reloaded.expires_at is not None
+        assert reloaded
+        assert reloaded.expires_at
         assert reloaded.expires_at <= datetime.now(UTC)
 
 
 async def test_idempotency_loser_that_claimed_pool_host_is_returned_to_pool(monkeypatch):
-    # Race-loser that had claimed a pool host should be UN-claimed (returned
-    # to the pool with a fresh max-age TTL), NOT deleted.
     monkeypatch.setenv("POOL_SIZE", "1")
     monkeypatch.setenv("POOL_HOST_MAX_AGE_HOURS", "4")
     get_settings.cache_clear()
@@ -462,42 +453,37 @@ async def test_idempotency_loser_that_claimed_pool_host_is_returned_to_pool(monk
 
     async with async_session_factory() as session:
         service = HostService(session)
-        claimed = await service._try_claim_pool_host(provider="exe", expires_at=None)
-        assert claimed is not None
-        assert claimed.claimed_at is not None
+        claimed = await service._try_claim_pool_host(provider="exe")
+        assert claimed
+        assert claimed.claimed_at
         await service._release_idempotency_loser(claimed)
 
     async with async_session_factory() as session:
         reloaded = await session.get(Host, pool_host.id)
-        assert reloaded is not None
-        assert reloaded.claimed_at is None
-        assert reloaded.expires_at is not None
+        assert reloaded
+        assert not reloaded.claimed_at
+        assert reloaded.expires_at
         assert reloaded.expires_at > datetime.now(UTC) + timedelta(hours=3)
 
     get_settings.cache_clear()
 
 
 async def test_record_idempotency_key_returns_false_on_duplicate(monkeypatch):
-    # Regression: a losing-race duplicate insert must return False without
-    # raising, and must leave host loaded for serialization. Recording on
-    # self.session expired host mid-response and tripped MissingGreenlet.
     monkeypatch.setattr("hosts.service.HostService.provision", AsyncMock())
 
     async with async_session_factory() as session:
         service = HostService(session)
-        host = await service.create_host(env={}, image=None, expires_at=None)
+        host = await service.create_host(env={}, image=None)
 
-        assert await service._record_idempotency_key("dup-key", host) is True
-        assert await service._record_idempotency_key("dup-key", host) is False
+        assert await service._record_idempotency_key("dup-key", host)
+        assert not await service._record_idempotency_key("dup-key", host)
 
-        # host stays usable — no MissingGreenlet on attribute access.
-        assert host.id is not None
+        # Recorded in self.session, host would expire before the response is built.
+        assert host.id
         assert host.status == HostStatus.PROVISIONING.value
 
 
 async def test_create_host_idempotency_key_expired_creates_new_host(client, monkeypatch):
-    # Manually insert an idempotency-key row pointing at a deleted host with
-    # an expired timestamp; a fresh POST with the same key should NOT reuse it.
     mocked_provision = AsyncMock()
     monkeypatch.setattr("hosts.service.HostService.provision", mocked_provision)
 
@@ -522,7 +508,6 @@ async def test_create_host_idempotency_key_expired_creates_new_host(client, monk
     )
 
     assert response.status_code == 201
-    # New host was created, not the stale one.
     assert response.json()["id"] != str(seed_host.id)
 
 
@@ -559,8 +544,8 @@ async def test_create_host_without_sizing_reflects_null(client, monkeypatch):
 
     assert response.status_code == 201
     payload = response.json()
-    assert payload["instance_type"] is None
-    assert payload["disk_gb"] is None
+    assert not payload["instance_type"]
+    assert not payload["disk_gb"]
 
 
 async def test_create_host_rejects_sizing_the_provider_does_not_support(client):
@@ -774,7 +759,7 @@ async def test_delete_host_deletes_vm_and_record_with_service_auth(client, monke
     assert calls == [("tailscale", "n123CNTRL"), ("exe", "lb-sandbox-test")]
 
     async with async_session_factory() as session:
-        assert await session.get(Host, host.id) is None
+        assert not await session.get(Host, host.id)
 
 
 async def test_delete_host_rejects_missing_or_bad_service_auth(client):
@@ -859,14 +844,12 @@ async def test_delete_host_preserves_record_when_vm_teardown_fails(client, monke
     mocked_delete_vm.assert_awaited_once_with("lb-sandbox-test")
 
     async with async_session_factory() as session:
-        assert await session.get(Host, host.id) is not None
+        assert await session.get(Host, host.id)
 
 
 async def test_delete_host_skips_tailscale_release_when_device_id_missing(client, monkeypatch):
-    # A VM-backed host without a tailscale_device_id is treated as already
-    # released — delete proceeds to VM teardown and completes. This covers the
-    # retry path after a previous teardown that succeeded on Tailscale but
-    # failed before deleting the VM.
+    # A host without a tailscale_device_id was released already: the retry after
+    # a teardown that failed at the VM step.
     mocked_delete_device = AsyncMock()
     mocked_delete_vm = AsyncMock()
     monkeypatch.setattr("networking.tailscale.Tailscale.release_device", mocked_delete_device)
@@ -886,13 +869,11 @@ async def test_delete_host_skips_tailscale_release_when_device_id_missing(client
     mocked_delete_vm.assert_awaited_once_with("lb-sandbox-test")
 
     async with async_session_factory() as session:
-        assert await session.get(Host, host.id) is None
+        assert not await session.get(Host, host.id)
 
 
 async def test_delete_host_clears_tailscale_device_id_when_vm_teardown_fails(client, monkeypatch):
-    # First call: release_device succeeds, delete_vm fails. The host row must
-    # be preserved AND have its tailscale_device_id cleared, so a retry does
-    # not try to delete the already-released device.
+    # A retry must not release the device again.
     mocked_delete_device = AsyncMock()
     mocked_delete_vm = AsyncMock(side_effect=ProviderTransportError("exe.dev API failed"))
     monkeypatch.setattr("networking.tailscale.Tailscale.release_device", mocked_delete_device)
@@ -913,10 +894,9 @@ async def test_delete_host_clears_tailscale_device_id_when_vm_teardown_fails(cli
 
     async with async_session_factory() as session:
         persisted = await session.get(Host, host.id)
-        assert persisted is not None
-        assert persisted.tailscale_device_id is None
+        assert persisted
+        assert not persisted.tailscale_device_id
 
-    # Retry: delete_vm now succeeds. release_device must NOT be called again.
     mocked_delete_vm.side_effect = None
     mocked_delete_device.reset_mock()
 
@@ -929,12 +909,10 @@ async def test_delete_host_clears_tailscale_device_id_when_vm_teardown_fails(cli
     mocked_delete_device.assert_not_awaited()
 
     async with async_session_factory() as session:
-        assert await session.get(Host, host.id) is None
+        assert not await session.get(Host, host.id)
 
 
 async def test_delete_host_succeeds_when_vm_already_absent_at_provider(client, monkeypatch):
-    # If exe.dev evicted the VM out from under us (or a previous delete
-    # partially completed), the next delete should still clean up the DB row.
     mocked_delete_device = AsyncMock()
     mocked_delete_vm = AsyncMock(
         side_effect=ProviderNotFoundError("vm 'lb-sandbox-test' not found")
@@ -957,7 +935,7 @@ async def test_delete_host_succeeds_when_vm_already_absent_at_provider(client, m
     mocked_delete_vm.assert_awaited_once_with("lb-sandbox-test")
 
     async with async_session_factory() as session:
-        assert await session.get(Host, host.id) is None
+        assert not await session.get(Host, host.id)
 
 
 async def test_delete_host_preserves_record_when_tailscale_teardown_fails(client, monkeypatch):
@@ -982,7 +960,7 @@ async def test_delete_host_preserves_record_when_tailscale_teardown_fails(client
     mocked_delete_vm.assert_not_awaited()
 
     async with async_session_factory() as session:
-        assert await session.get(Host, host.id) is not None
+        assert await session.get(Host, host.id)
 
 
 async def create_host_record(
@@ -1024,9 +1002,8 @@ async def create_host_record(
 
 
 async def test_renew_host_with_empty_body_extends_by_default_ttl(client):
-    # Keepalive: an empty renew body bumps the lease to now + LEASE_DEFAULT_TTL.
-    # The host here is demand-provisioned (pool_member=False, claimed_at NULL),
-    # pinning that unclaimed non-pool hosts stay renewable by their caller.
+    # A demand-provisioned host has claimed_at NULL like a warm member and must
+    # still renew.
     host = await create_host_record(
         name="lb-renew-default",
         status=HostStatus.ACTIVE.value,
@@ -1125,7 +1102,7 @@ async def test_renew_host_rejects_unclaimed_pool_host(client):
 
     async with async_session_factory() as session:
         persisted = await session.get(Host, host.id)
-        assert persisted is not None
+        assert persisted
         assert persisted.expires_at == host.expires_at
 
 
@@ -1199,8 +1176,6 @@ async def test_renew_host_rejects_missing_or_bad_service_auth(client):
 
 
 async def test_delete_host_maps_database_failure_to_503(client, monkeypatch):
-    # A SQLAlchemyError during teardown must surface as a controlled 503, like
-    # create_host's DB-failure path, not an unhandled 500.
     monkeypatch.setattr(
         "hosts.service.HostService.delete_host",
         AsyncMock(side_effect=SQLAlchemyError("db down")),
