@@ -105,7 +105,7 @@ async def test_create_host_creates_record_and_enqueues_provisioning(client, monk
 
     mocked_provision.assert_awaited_once()
     assert mocked_provision.await_args is not None
-    assert mocked_provision.await_args.args == (str(host.id),)
+    assert mocked_provision.await_args.args[0].id == host.id
 
 
 async def test_create_host_persists_env_without_returning_it(client, monkeypatch):
@@ -136,7 +136,7 @@ async def test_create_host_persists_env_without_returning_it(client, monkeypatch
 
     mocked_provision.assert_awaited_once()
     assert mocked_provision.await_args is not None
-    assert mocked_provision.await_args.args == (payload["id"],)
+    assert mocked_provision.await_args.args[0].id == host.id
 
 
 async def test_create_host_stores_and_returns_custom_image(client, monkeypatch):
@@ -228,11 +228,8 @@ async def test_create_host_keeps_safety_ttl_while_provisioning(monkeypatch):
     # the lease itself is stamped once the host is usable.
     inflight = {}
 
-    async def capture_inflight_expiry(self, host_id):
-        async with async_session_factory() as session:
-            row = await session.get(Host, uuid.UUID(host_id))
-            assert row is not None
-            inflight["expires_at"] = row.expires_at
+    async def capture_inflight_expiry(self, host):
+        inflight["expires_at"] = host.expires_at
 
     monkeypatch.setattr("hosts.service.HostService.provision", capture_inflight_expiry)
     grace = timedelta(seconds=get_settings().provisioning_grace_seconds)
@@ -254,15 +251,12 @@ async def test_create_host_preserves_renewal_made_during_provisioning(monkeypatc
     # lease when provisioning finishes.
     renewal = {}
 
-    async def renew_mid_provision(self, host_id):
-        async with async_session_factory() as session:
-            row = await session.get(Host, uuid.UUID(host_id))
-            assert row is not None
-            row.status = HostStatus.BOOTSTRAPPING.value
-            await session.commit()
+    async def renew_mid_provision(self, host):
+        host.status = HostStatus.BOOTSTRAPPING.value
+        await self.session.commit()
         async with async_session_factory() as session:
             renewed = await HostService(session).renew_host(
-                uuid.UUID(host_id), expires_at=utc_now() + timedelta(days=7)
+                host.id, expires_at=utc_now() + timedelta(days=7)
             )
             renewal["expires_at"] = renewed.expires_at
 
