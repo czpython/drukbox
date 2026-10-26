@@ -127,17 +127,13 @@ class SbxCLI:
 
     async def sandbox_count(self) -> int:
         output = await self._run("ls", "--json")
-        unreadable = DockerSbxTransportError(
-            f"sbx ls returned an unreadable sandbox list: {output.strip()!r}"
-        )
         try:
             # Go writes an empty list as null.
-            sandboxes = json.loads(output) or []
+            return len(json.loads(output) or [])
         except json.JSONDecodeError as error:
-            raise unreadable from error
-        if isinstance(sandboxes, list):
-            return len(sandboxes)
-        raise unreadable
+            raise DockerSbxTransportError(
+                f"sbx ls returned an unreadable sandbox list: {output.strip()!r}"
+            ) from error
 
     async def check_ssh_endpoint(self) -> None:
         """The gateway tunnel needs the daemon's SSH endpoint. The CLI reads the

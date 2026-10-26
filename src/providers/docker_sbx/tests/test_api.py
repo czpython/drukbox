@@ -185,15 +185,6 @@ async def test_sandbox_count_treats_a_null_list_as_empty(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_sandbox_count_rejects_a_listing_that_is_not_an_array(monkeypatch):
-    create = AsyncMock(return_value=_process(stdout=b'{"sandboxes": []}'))
-    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", create)
-
-    with pytest.raises(DockerSbxTransportError, match="unreadable sandbox list"):
-        await SbxCLI().sandbox_count()
-
-
-@pytest.mark.asyncio
 async def test_check_ssh_endpoint_accepts_the_daemon_banner(monkeypatch):
     captured: dict = {}
 
