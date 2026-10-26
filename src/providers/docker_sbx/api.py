@@ -37,7 +37,6 @@ class SbxCLI:
             str(cpus),
             "--memory",
             memory,
-            "--quiet",
             "shell",
             workspace,
         )
@@ -129,10 +128,9 @@ class SbxCLI:
     async def sandbox_count(self) -> int:
         output = await self._run("ls", "--json")
         try:
-            payload = json.loads(output)
             # Go writes an empty list as null.
-            return len(payload["sandboxes"] or [])
-        except (json.JSONDecodeError, KeyError, TypeError) as error:
+            return len(json.loads(output) or [])
+        except json.JSONDecodeError as error:
             raise DockerSbxTransportError(
                 f"sbx ls returned an unreadable sandbox list: {output.strip()!r}"
             ) from error

@@ -177,9 +177,9 @@ runs on the drukbox machine. It does not support Tailscale.
 Prepare the host fully before drukbox starts. drukbox only connects to
 the host:
 
-1. Install Docker Engine and `docker-sbx`. Ubuntu 24.04+ with KVM is
-   necessary: `/dev/kvm` must exist, and the service user must be in the
-   `kvm` group.
+1. Install Docker Engine and `docker-sbx` 0.48.0 or later. Ubuntu 24.04+
+   with KVM is necessary: `/dev/kvm` must exist, and the service user
+   must be in the `kvm` group.
 2. Sign in one time with `sbx login`. Headless hosts use a device-code
    flow.
 3. Start the daemon: `sbx daemon start -d --policy balanced`.
