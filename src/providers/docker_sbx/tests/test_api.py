@@ -168,7 +168,7 @@ async def test_custom_placeholders_of_an_empty_scope(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sandbox_count_reads_the_listing(monkeypatch):
-    listing = b'{"sandboxes": [{"name": "sb-a"}, {"name": "sb-b"}]}'
+    listing = b'[{"name": "sb-a"}, {"name": "sb-b"}]'
     create = AsyncMock(return_value=_process(stdout=listing))
     monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", create)
 
@@ -178,10 +178,19 @@ async def test_sandbox_count_reads_the_listing(monkeypatch):
 @pytest.mark.asyncio
 async def test_sandbox_count_treats_a_null_list_as_empty(monkeypatch):
     # Go writes an empty list as null. An unused daemon shows null.
-    create = AsyncMock(return_value=_process(stdout=b'{"sandboxes": null}'))
+    create = AsyncMock(return_value=_process(stdout=b"null"))
     monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", create)
 
     assert await SbxCLI().sandbox_count() == 0
+
+
+@pytest.mark.asyncio
+async def test_sandbox_count_rejects_a_listing_that_is_not_an_array(monkeypatch):
+    create = AsyncMock(return_value=_process(stdout=b'{"sandboxes": []}'))
+    monkeypatch.setattr("providers.docker_sbx.api.asyncio.create_subprocess_exec", create)
+
+    with pytest.raises(DockerSbxTransportError, match="unreadable sandbox list"):
+        await SbxCLI().sandbox_count()
 
 
 @pytest.mark.asyncio
