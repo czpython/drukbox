@@ -12,7 +12,7 @@ from sqlalchemy import select
 from core.database import async_session_factory
 from gateway.backend import SandboxSftpBackend
 from gateway.settings import GatewaySettings
-from gateway.sftp import GatewaySFTPServer
+from gateway.sftp import GatewaySFTPServer, relay_limits
 from hosts.models import Host, HostStatus
 from providers.base import SandboxProcess, TerminalSize
 from providers.exceptions import ProviderError
@@ -203,6 +203,7 @@ def _open_sftp(channel: asyncssh.SSHServerChannel) -> GatewaySFTPServer:
         for extension in asyncssh.sftp.SFTPServerHandler._extensions
         if extension[0] not in _UNSUPPORTED_SFTP_EXTENSIONS
     ]
+    asyncssh.sftp.SFTPServerHandler._packet_handlers[b"limits@openssh.com"] = relay_limits
     server = cast(GatewayConnection, channel.get_connection().get_owner())
     return GatewaySFTPServer(channel, server.get_sftp_backend())
 

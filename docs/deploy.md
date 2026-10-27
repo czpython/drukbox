@@ -297,7 +297,9 @@ legacy protocol) and remote port forwarding. SFTP runs the
 sandbox's own SFTP server over one persistent session for each SSH
 connection, thus repeated file operations on one connection start no new
 session. The session closes after a short idle period, so an inactive
-sandbox still sleeps.
+sandbox still sleeps. The gateway answers a client's `limits@openssh.com`
+request with the sandbox server's own limits, so the client sizes its
+packets to what that server accepts.
 
 Forward a local port to a service that listens on the sandbox loopback:
 
