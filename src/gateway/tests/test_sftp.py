@@ -169,3 +169,25 @@ async def test_a_caller_writes_dotfiles_by_home_and_a_command_reads_them(connect
 
     result = await connected.run("sh -c 'cat $HOME/.gitconfig'")
     assert "name = Sandbox" in result.stdout
+
+
+async def test_the_advertised_limits_are_the_sandbox_servers(connected):
+    # asyncssh's own server advertises 4 MiB writes. The sandbox's OpenSSH
+    # server ends the session on a packet of 256 KiB or more, so the caller
+    # must hear the sandbox server's numbers, not asyncssh's.
+    async with connected.start_sftp_client() as sftp:
+        assert 0 < sftp.limits.max_write_len < 256 * 1024
+
+
+async def test_a_file_larger_than_the_sandbox_servers_packet_round_trips(connected, tmp_path):
+    # A put at the client's default block size trusts the advertised write
+    # length. With the sandbox server's limits, a 300 KiB file goes in
+    # packets the sandbox server accepts.
+    source = tmp_path / "source.bin"
+    source.write_bytes(os.urandom(300 * 1024))
+    remote = tmp_path / "sb-sftp" / "upload.bin"
+
+    async with connected.start_sftp_client() as sftp:
+        await sftp.put(str(source), str(remote))
+
+    assert remote.read_bytes() == source.read_bytes()

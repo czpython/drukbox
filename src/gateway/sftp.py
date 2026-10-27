@@ -3,7 +3,10 @@
 # each server handle straight to the client, so the handle-argument and
 # override checks do not apply here.
 # pyright: reportArgumentType=false, reportIncompatibleMethodOverride=false
+from typing import cast
+
 import asyncssh
+from asyncssh.packet import SSHPacket
 
 from gateway.backend import SandboxSftpBackend
 
@@ -72,6 +75,10 @@ class GatewaySFTPServer(asyncssh.SFTPServer):
             names, _ = await handler.realpath(path)
             return names[0].filename
 
+    async def limits(self) -> asyncssh.SFTPLimits:
+        async with self._backend.session() as handler:
+            return handler.limits
+
     def _unsupported(self, *args, **kwargs):
         raise asyncssh.SFTPOpUnsupported("not served by this gateway")
 
@@ -85,3 +92,17 @@ class GatewaySFTPServer(asyncssh.SFTPServer):
     link = _unsupported
     lock = _unsupported
     unlock = _unsupported
+
+
+async def relay_limits(
+    handler: asyncssh.sftp.SFTPServerHandler, packet: SSHPacket
+) -> asyncssh.SFTPLimits:
+    """Answer a caller's limits request with the sandbox server's limits.
+
+    asyncssh's server answers it from its own constants, a 4 MiB write, and
+    never asks the ``SFTPServer``. The sandbox's OpenSSH server ends the
+    session on a packet of 256 KiB or more, so the caller must size its
+    packets by that server's answer.
+    """
+    packet.check_end()
+    return await cast(GatewaySFTPServer, handler._server).limits()

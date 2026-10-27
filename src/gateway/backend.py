@@ -113,9 +113,9 @@ class SandboxSftpBackend:
             if self._idle_closer:
                 self._idle_closer.cancel()
                 self._idle_closer = None
-            if self._handler is None:
+            if not self._handler:
                 await self._open()
-            assert self._handler is not None
+            assert self._handler
             self._in_flight += 1
             return self._handler
 
@@ -152,11 +152,12 @@ class SandboxSftpBackend:
         )
         try:
             await handler.start()
+            self._recv_task = asyncio.create_task(handler.recv_packets())
+            await handler.request_limits()
         except Exception:
             await self._teardown()
             raise
         self._handler = handler
-        self._recv_task = asyncio.create_task(handler.recv_packets())
         logger.info("gateway: sftp backend open host=%s", self._host_name)
 
     async def _close_after_idle(self) -> None:

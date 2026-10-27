@@ -3,7 +3,16 @@ import os
 
 from providers.base import SandboxProcess, TerminalSize
 
-SFTP_SERVER = "/usr/libexec/sftp-server"
+# OpenSSH installs its SFTP server at the Debian path on Linux and under
+# libexec on macOS.
+SFTP_SERVER = next(
+    (
+        path
+        for path in ("/usr/lib/openssh/sftp-server", "/usr/libexec/sftp-server")
+        if os.path.exists(path)
+    ),
+    "/usr/lib/openssh/sftp-server",
+)
 SFTP_SERVER_COMMAND = f"exec {SFTP_SERVER}"
 
 
@@ -34,19 +43,19 @@ class LocalProcess(SandboxProcess):
         return cls(process)
 
     async def receive(self, max_bytes: int) -> bytes:
-        assert self._process.stdout is not None
+        assert self._process.stdout
         return await self._process.stdout.read(max_bytes)
 
     async def receive_stderr(self, max_bytes: int) -> bytes:
-        assert self._process.stderr is not None
+        assert self._process.stderr
         return await self._process.stderr.read(max_bytes)
 
     def send(self, data: bytes) -> None:
-        assert self._process.stdin is not None
+        assert self._process.stdin
         self._process.stdin.write(data)
 
     def send_eof(self) -> None:
-        assert self._process.stdin is not None
+        assert self._process.stdin
         self._process.stdin.write_eof()
 
     def resize(self, size: TerminalSize) -> None:
