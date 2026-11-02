@@ -9,7 +9,12 @@ from host_secrets.catalog import CATALOG
 from host_secrets.placeholder import Placeholder
 from providers.aws.provider import AWSProvider
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import ProxyInjection, TemplateCapability, resolve_capability
+from providers.capabilities import (
+    ProxyInjection,
+    RecordStep,
+    TemplateCapability,
+    resolve_capability,
+)
 from providers.docker.provider import DockerProvider
 from providers.docker_sbx.provider import DockerSbxProvider
 from providers.environment import get_persist
@@ -66,7 +71,9 @@ class StubTemplateProvider(StubProvider, TemplateCapability):
     async def refresh_base_image(self, image: str) -> str:
         return "stub@sha256:" + "a" * 64
 
-    async def build_template_image(self, *, base_image: str, setup_script: str, label: str) -> str:
+    async def build_template_image(
+        self, *, base_image: str, setup_script: str, label: str, record_step: RecordStep
+    ) -> str:
         return f"{base_image}:{label}"
 
     async def delete_template_image(self, image: str) -> None:

@@ -2,7 +2,7 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import TemplateCapability
+from providers.capabilities import RecordStep, TemplateCapability
 from providers.docker.api import DockerAPI
 from providers.docker.exceptions import DockerProviderError
 from providers.docker.images import build_derived_image, remove_derived_image
@@ -115,6 +115,7 @@ class ExeProvider(VMProvider, TemplateCapability):
         base_image: str,
         setup_script: str,
         label: str,
+        record_step: RecordStep,
     ) -> str:
         # exe.dev pulls every image from a registry, so a local template cannot boot.
         if not get_settings().template_repository:
@@ -127,6 +128,7 @@ class ExeProvider(VMProvider, TemplateCapability):
             base_image=base_image,
             setup_script=setup_script,
             label=label,
+            record_step=record_step,
         )
 
     async def delete_template_image(self, image: str) -> None:

@@ -42,6 +42,7 @@ class TemplateOut(BaseModel):
     image: str
     status: str
     last_error: str
+    build_step: str
     created_at: datetime
     updated_at: datetime
     last_used_at: datetime | None
