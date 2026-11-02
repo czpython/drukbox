@@ -36,7 +36,7 @@ def _api_mock() -> MagicMock:
 
 def _docker_mock() -> MagicMock:
     docker = MagicMock()
-    docker.build_image = AsyncMock()
+    docker.build_image = MagicMock()
     docker.remove_image = AsyncMock()
     docker.save_image = AsyncMock()
     return docker
@@ -172,6 +172,7 @@ def test_the_value_files_live_beside_the_workspaces(tmp_path):
     provider = _provider(_api_mock(), _settings(tmp_path))
 
     injection = provider.secrets
+    # ast-grep-ignore: rule-3
     assert isinstance(injection, SbxInjection)
     assert injection.secrets_root == provider.secrets_root == tmp_path / "secrets"
 
@@ -222,19 +223,26 @@ async def test_build_template_image_moves_the_built_image_into_sbx(tmp_path):
     docker = _docker_mock()
     provider = _provider(api, _settings(tmp_path), docker=docker)
 
+    record_step = AsyncMock()
     image = await provider.build_template_image(
         base_image="sandbox:base",
         setup_script="apt-get update",
         label="Node tools",
+        record_step=record_step,
     )
 
     assert image.startswith("drukbox-template:")
-    assert docker.build_image.await_args.args[0] == image
+    assert docker.build_image.call_args.args[0] == image
     saved, archive = docker.save_image.await_args.args
     assert saved == image
     api.load_template.assert_awaited_once_with(archive)
     assert not archive.exists()
     docker.remove_image.assert_awaited_once_with(image)
+    assert [call.args[0] for call in record_step.await_args_list] == [
+        "running setup script",
+        "saving image",
+        "loading into sbx",
+    ]
 
 
 @pytest.mark.asyncio
@@ -248,6 +256,7 @@ async def test_build_template_image_translates_a_failed_load(tmp_path):
             base_image="sandbox:base",
             setup_script="apt-get update",
             label="Node tools",
+            record_step=AsyncMock(),
         )
 
 

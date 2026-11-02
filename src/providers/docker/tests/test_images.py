@@ -6,6 +6,7 @@ import pytest
 from pydantic import SecretStr
 
 from core.settings import get_settings
+from providers.docker import images
 from providers.docker.images import (
     build_derived_image,
     create_build_context,
@@ -68,12 +69,24 @@ async def test_build_derived_image_publishes_to_the_template_repository(
     monkeypatch.setattr(get_settings(), "registry_username", "bot")
     monkeypatch.setattr(get_settings(), "registry_password", SecretStr("secret"))
     monkeypatch.setattr(get_settings(), "template_repository", "acme/templates")
-    docker = MagicMock(build_image=AsyncMock(), push_image=AsyncMock())
+    monkeypatch.setattr(images, "SETUP_OUTPUT_INTERVAL_SECONDS", 0)
+    docker = MagicMock(push_image=AsyncMock())
+    docker.build_image.return_value.__aiter__.return_value = ["Installing nodejs"]
+    record_step = AsyncMock()
 
     image = await build_derived_image(
-        docker, base_image="sandbox:base", setup_script="apt-get update", label="node-tools"
+        docker,
+        base_image="sandbox:base",
+        setup_script="apt-get update",
+        label="node-tools",
+        record_step=record_step,
     )
 
     assert image.startswith("ghcr.io/acme/templates:node-tools-")
-    assert docker.build_image.await_args.args[0] == image
+    assert docker.build_image.call_args.args[0] == image
     docker.push_image.assert_awaited_once_with(image, username="bot", password="secret")
+    assert [call.args[0] for call in record_step.await_args_list] == [
+        "running setup script",
+        "running setup script: Installing nodejs",
+        "pushing image",
+    ]
