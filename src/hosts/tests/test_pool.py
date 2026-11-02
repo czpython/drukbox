@@ -224,6 +224,19 @@ async def test_create_host_refuses_a_provider_at_its_host_limit(monkeypatch, stu
     assert {provider: count for provider, count in counted.all()} == {"exe": 1, "stub": 1}
 
 
+async def test_create_host_gives_the_slot_of_a_stopped_vm(monkeypatch, stub_provider):
+    monkeypatch.setenv("HOST_LIMITS", '{"stub": 1}')
+    settings = Settings()  # pyright: ignore[reportCallIssue]
+    await _seed_pool_host(name="lb-stopped", provider="stub", pool_member=False)
+    monkeypatch.setattr(stub_provider, "stopped_vms", AsyncMock(return_value={"lb-stopped"}))
+    monkeypatch.setattr("hosts.service.HostService.provision", AsyncMock())
+
+    async with async_session_factory() as session:
+        await HostService(session, settings=settings).create_host(
+            env={}, image=None, provider="stub"
+        )
+
+
 async def test_create_host_skips_pool_when_sized(multi_pool_settings, monkeypatch, stub_provider):
     # Pool members are warmed at the provider's default size, so a sized
     # request must provision fresh even when its provider has a warm host.

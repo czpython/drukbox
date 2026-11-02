@@ -28,7 +28,7 @@ def _api_mock() -> MagicMock:
     api.create_sandbox = AsyncMock()
     api.run_bootstrap = AsyncMock()
     api.remove_sandbox = AsyncMock()
-    api.sandbox_count = AsyncMock(return_value=2)
+    api.sandboxes = AsyncMock(return_value=[{}, {}])
     api.load_template = AsyncMock()
     api.remove_template = AsyncMock()
     return api
@@ -214,6 +214,17 @@ async def test_delete_vm_keeps_the_files_when_teardown_fails(tmp_path):
         await provider.delete_vm("sb-test")
     assert workspace.is_dir()
     assert value.is_file()
+
+
+@pytest.mark.asyncio
+async def test_stopped_vms_names_the_stopped_sandboxes(tmp_path):
+    api = _api_mock()
+    api.sandboxes.return_value = [
+        {"name": "sb-idle", "status": "stopped"},
+        {"name": "sb-busy", "status": "running"},
+    ]
+
+    assert await _provider(api, _settings(tmp_path)).stopped_vms() == {"sb-idle"}
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 from .exceptions import DockerSbxNotFoundError, DockerSbxTransportError
 
@@ -125,11 +126,11 @@ class SbxCLI:
     async def remove_template(self, template: str) -> None:
         await self._run("template", "rm", "--force", template)
 
-    async def sandbox_count(self) -> int:
+    async def sandboxes(self) -> list[dict[str, Any]]:
         output = await self._run("ls", "--json")
         try:
             # Go writes an empty list as null.
-            return len(json.loads(output) or [])
+            return json.loads(output) or []
         except json.JSONDecodeError as error:
             raise DockerSbxTransportError(
                 f"sbx ls returned an unreadable sandbox list: {output.strip()!r}"

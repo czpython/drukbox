@@ -272,6 +272,10 @@ class HostService:
             pool_member=pool_member,
         )
         if vm.name in self.settings.host_limits:
+            try:
+                stopped = await vm.stopped_vms()
+            except ProviderError as exc:
+                raise ProvisioningFailedError(str(exc)) from exc
             # The lock serializes this provider's creates until the insert
             # commits, so two requests cannot both pass the count. SQLite has
             # no advisory locks; it serves single-process quickstarts.
@@ -285,6 +289,7 @@ class HostService:
                     .select_from(Host)
                     .where(Host.provider == vm.name)
                     .where(Host.status != HostStatus.ERROR.value)
+                    .where(Host.name.not_in(stopped))
                     .where(or_(Host.expires_at.is_(None), Host.expires_at > now))
                 )
             ).scalar_one()

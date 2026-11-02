@@ -116,6 +116,11 @@ class VMProvider(abc.ABC):
             return min(expires_at, stop) if expires_at else stop
         return expires_at
 
+    async def stopped_vms(self) -> set[str]:
+        """Names of the VMs the provider stopped while idle. A stopped VM
+        holds no memory, so it takes no HOST_LIMITS slot."""
+        return set()
+
     async def open_gateway_tunnel(self, name: str) -> asyncssh.SSHClientConnection:
         """Open an SSH tunnel into a gateway host's sandbox. The gateway
         forwards TCP channels through it."""
