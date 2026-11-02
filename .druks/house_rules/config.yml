@@ -1,0 +1,10 @@
+rules: [R14, R28, R27, rule-3, rule-2, rule-1, R21, R23, R5, R25, R39]
+
+exclude: [uv.lock, api-tests/package-lock.json, alembic/versions/**]
+
+R21:
+  modules: [fastapi, sqlalchemy, pydantic]
+
+exceptions:
+  rule-3: [src/providers/*/api.py, src/core/settings.py]
+  R5: [src/diagnostics/*.py]
