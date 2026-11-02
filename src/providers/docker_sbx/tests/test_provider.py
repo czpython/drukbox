@@ -172,6 +172,7 @@ def test_the_value_files_live_beside_the_workspaces(tmp_path):
     provider = _provider(_api_mock(), _settings(tmp_path))
 
     injection = provider.secrets
+    # ast-grep-ignore: rule-3
     assert isinstance(injection, SbxInjection)
     assert injection.secrets_root == provider.secrets_root == tmp_path / "secrets"
 
