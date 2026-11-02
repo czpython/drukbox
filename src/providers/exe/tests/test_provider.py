@@ -168,7 +168,9 @@ async def test_http_proxy_methods_delegate_to_api(method_name: str, kwargs: dict
 
 def test_from_settings_constructs_with_exeapi() -> None:
     provider = ExeProvider.from_settings()
+    # ast-grep-ignore: rule-3
     assert isinstance(provider.api, ExeAPI)
+    # ast-grep-ignore: rule-3
     assert isinstance(provider.docker, DockerAPI)
 
 

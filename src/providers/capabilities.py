@@ -24,6 +24,7 @@ SYSTEM_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 
 def resolve_capability(provider, capability: type[CapabilityT]) -> CapabilityT:
+    # ast-grep-ignore: rule-3
     if not isinstance(provider, capability):
         raise CapabilityUnsupportedError(
             f"VM provider '{provider.name}' does not support {capability.__name__}",

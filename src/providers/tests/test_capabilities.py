@@ -7,14 +7,9 @@ import pytest
 from core.settings import get_settings
 from host_secrets.catalog import CATALOG
 from host_secrets.placeholder import Placeholder
+from providers import capabilities
 from providers.aws.provider import AWSProvider
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import (
-    ProxyInjection,
-    RecordStep,
-    TemplateCapability,
-    resolve_capability,
-)
 from providers.docker.provider import DockerProvider
 from providers.docker_sbx.provider import DockerSbxProvider
 from providers.environment import get_persist
@@ -31,7 +26,7 @@ class StubProvider(VMProvider):
 
     name = "stub"
     diagnose_hint = "check_stub"
-    secrets = ProxyInjection()
+    secrets = capabilities.ProxyInjection()
 
     @classmethod
     def from_settings(cls) -> "StubProvider":
@@ -67,12 +62,17 @@ class StubProvider(VMProvider):
         return
 
 
-class StubTemplateProvider(StubProvider, TemplateCapability):
+class StubTemplateProvider(StubProvider, capabilities.TemplateCapability):
     async def refresh_base_image(self, image: str) -> str:
         return "stub@sha256:" + "a" * 64
 
     async def build_template_image(
-        self, *, base_image: str, setup_script: str, label: str, record_step: RecordStep
+        self,
+        *,
+        base_image: str,
+        setup_script: str,
+        label: str,
+        record_step: capabilities.RecordStep,
     ) -> str:
         return f"{base_image}:{label}"
 
@@ -82,12 +82,12 @@ class StubTemplateProvider(StubProvider, TemplateCapability):
 
 def test_resolve_capability_returns_implementing_provider() -> None:
     provider = StubTemplateProvider()
-    assert resolve_capability(provider, TemplateCapability) is provider
+    assert capabilities.resolve_capability(provider, capabilities.TemplateCapability) is provider
 
 
 def test_resolve_capability_refuses_provider_without_capability() -> None:
     with pytest.raises(CapabilityUnsupportedError, match="'stub' does not support"):
-        resolve_capability(StubProvider(), TemplateCapability)
+        capabilities.resolve_capability(StubProvider(), capabilities.TemplateCapability)
 
 
 async def test_the_proxy_injection_hands_the_box_its_placeholder_the_proxy_and_the_ca(
@@ -99,7 +99,7 @@ async def test_the_proxy_injection_hands_the_box_its_placeholder_the_proxy_and_t
     monkeypatch.setattr(get_settings(), "secrets_proxy_ca_file", str(certificate))
     placeholder = Placeholder.mint(uuid.uuid4(), "anthropic")
 
-    environment = await ProxyInjection().put_secret(
+    environment = await capabilities.ProxyInjection().put_secret(
         vm="sb-one", service=CATALOG["anthropic"], placeholder=placeholder, value=""
     )
 
@@ -142,7 +142,7 @@ async def test_the_proxy_injection_hands_out_a_public_certificate_and_nothing_el
     monkeypatch.setattr(get_settings(), "secrets_proxy_ca_file", str(path))
 
     with pytest.raises(ProviderCommandError, match=reason):
-        await ProxyInjection().put_secret(
+        await capabilities.ProxyInjection().put_secret(
             vm="sb-one",
             service=CATALOG["anthropic"],
             placeholder=Placeholder.mint(uuid.uuid4(), "anthropic"),
@@ -151,9 +151,9 @@ async def test_the_proxy_injection_hands_out_a_public_certificate_and_nothing_el
 
 
 async def test_the_proxy_injection_holds_no_value_and_has_nothing_to_delete() -> None:
-    assert ProxyInjection.needs_value is False
+    assert capabilities.ProxyInjection.needs_value is False
 
-    await ProxyInjection().delete_secrets(vm="sb-one")
+    await capabilities.ProxyInjection().delete_secrets(vm="sb-one")
 
 
 @pytest.mark.parametrize(
@@ -163,7 +163,7 @@ async def test_the_proxy_injection_holds_no_value_and_has_nothing_to_delete() ->
 def test_every_provider_but_docker_sbx_injects_through_the_proxy(
     provider: type[VMProvider],
 ) -> None:
-    assert type(provider.secrets) is ProxyInjection
+    assert type(provider.secrets) is capabilities.ProxyInjection
 
 
 def test_docker_sbx_declares_its_own_injection_per_instance() -> None:
