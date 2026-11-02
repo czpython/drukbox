@@ -12,6 +12,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
+import hosts.exceptions
+import providers.exceptions
 from core.database import async_session_factory
 from core.exceptions import ResourceNotFoundError
 from core.settings import Settings, get_settings
@@ -19,13 +21,6 @@ from gateway.settings import GatewaySettings
 from host_secrets import catalog
 from host_secrets.exceptions import SecretsProxyNotConfiguredError, SecretStaticError
 from host_secrets.placeholder import Placeholder
-from hosts.exceptions import (
-    HostCapacityError,
-    HostKeyScanError,
-    HostStateError,
-    IdempotencyKeyConflictError,
-    ProvisioningFailedError,
-)
 from hosts.models import Host, HostStatus, IdempotencyKey
 from networking.tailscale import (
     DeviceDiscoveryTimeoutError,
@@ -34,12 +29,6 @@ from networking.tailscale import (
 )
 from providers.base import VMProvider
 from providers.environment import get_persist
-from providers.exceptions import (
-    ProviderError,
-    ProviderNotFoundError,
-    UnknownProviderError,
-    UnsupportedSizingError,
-)
 from providers.registry import get_provider_names, get_vm_provider
 from secrets_exchange.client import SecretsExchange
 from secrets_exchange.secrets import IssuerError, MissingSecretError, Secret
@@ -111,7 +100,9 @@ class HostService:
             registered = get_provider_names()
             if provider not in registered:
                 available = ", ".join(sorted(registered))
-                raise UnknownProviderError(f"unknown provider {provider!r}; available: {available}")
+                raise providers.exceptions.UnknownProviderError(
+                    f"unknown provider {provider!r}; available: {available}"
+                )
 
         if idempotency_key and (
             existing := await self._lookup_idempotency_key(idempotency_key, service_account)
@@ -154,7 +145,7 @@ class HostService:
             await self._release_idempotency_loser(host)
             winner = await self._lookup_idempotency_key(idempotency_key, service_account)
             if not winner:
-                raise HostStateError("idempotency race could not be resolved")
+                raise hosts.exceptions.HostStateError("idempotency race could not be resolved")
             return winner
         return host
 
@@ -223,11 +214,11 @@ class HostService:
         # never claims its own members.
         vm = get_vm_provider(provider)
         if instance_type and not vm.supports_instance_type:
-            raise UnsupportedSizingError(
+            raise providers.exceptions.UnsupportedSizingError(
                 f"provider {vm.name!r} does not support a per-request instance_type"
             )
         if disk_gb and not vm.supports_disk_gb:
-            raise UnsupportedSizingError(
+            raise providers.exceptions.UnsupportedSizingError(
                 f"provider {vm.name!r} does not support a per-request disk_gb"
             )
         proxy = self.settings.secrets_proxy_url and self.settings.secrets_proxy_ca_file
@@ -272,6 +263,10 @@ class HostService:
             pool_member=pool_member,
         )
         if vm.name in self.settings.host_limits:
+            try:
+                stopped = await vm.stopped_vms()
+            except providers.exceptions.ProviderError as exc:
+                raise hosts.exceptions.ProvisioningFailedError(str(exc)) from exc
             # The lock serializes this provider's creates until the insert
             # commits, so two requests cannot both pass the count. SQLite has
             # no advisory locks; it serves single-process quickstarts.
@@ -285,11 +280,14 @@ class HostService:
                     .select_from(Host)
                     .where(Host.provider == vm.name)
                     .where(Host.status != HostStatus.ERROR.value)
+                    .where(Host.name.not_in(stopped))
                     .where(or_(Host.expires_at.is_(None), Host.expires_at > now))
                 )
             ).scalar_one()
             if live >= self.settings.host_limits[vm.name]:
-                raise HostCapacityError(f"provider {vm.name!r} is at its host limit")
+                raise hosts.exceptions.HostCapacityError(
+                    f"provider {vm.name!r} is at its host limit"
+                )
         self.session.add(host)
         await self.session.commit()
         await self.session.refresh(host)
@@ -298,7 +296,7 @@ class HostService:
         await self.session.refresh(host)
 
         if host.status == HostStatus.ERROR.value:
-            raise ProvisioningFailedError(host.last_error)
+            raise hosts.exceptions.ProvisioningFailedError(host.last_error)
 
         # A dedicated session, so self.session's transaction stays short for
         # callers that hold an advisory lock. The match on the in-flight value
@@ -326,7 +324,7 @@ class HostService:
             )
             if host:
                 if host.service_account != service_account:
-                    raise IdempotencyKeyConflictError(
+                    raise hosts.exceptions.IdempotencyKeyConflictError(
                         f"idempotency key {key} belongs to another service account"
                     )
                 return host
@@ -402,10 +400,12 @@ class HostService:
             raise ResourceNotFoundError("host not found")
 
         if host.pool_member and not host.claimed_at:
-            raise HostStateError("unclaimed pool host is managed by pool maintenance")
+            raise hosts.exceptions.HostStateError(
+                "unclaimed pool host is managed by pool maintenance"
+            )
 
         if host.status not in RENEWABLE_STATUSES:
-            raise HostStateError(f"cannot renew a host in status {host.status}")
+            raise hosts.exceptions.HostStateError(f"cannot renew a host in status {host.status}")
 
         host.expires_at = get_vm_provider(host.provider).lease_end(
             host.created_at, expires_at or self._default_lease_expires_at()
@@ -452,7 +452,7 @@ class HostService:
             return False
 
         if not force and host.status in DELETE_BLOCKED_STATUSES:
-            raise HostStateError("host is still provisioning")
+            raise hosts.exceptions.HostStateError("host is still provisioning")
 
         if force or host.status in VM_BACKED_STATUSES:
             # An abandoned provision stranded in CREATING_VM may already have a
@@ -470,7 +470,7 @@ class HostService:
             await vm.secrets.delete_secrets(vm=host.name)
             try:
                 await vm.delete_vm(host.name)
-            except ProviderNotFoundError:
+            except providers.exceptions.ProviderNotFoundError:
                 # Evicted by the provider, or a previous delete got this far.
                 logger.warning(
                     "host VM already absent at provider during teardown: "
@@ -492,7 +492,7 @@ class HostService:
         if vm.tailnet and not self.tailscale:
             await self.mark_failed(
                 host,
-                ProvisioningFailedError(
+                hosts.exceptions.ProvisioningFailedError(
                     f"provider {vm.name!r} joins the tailnet; set TAILSCALE_TAILNET, "
                     "TAILSCALE_AUTH_TAGS, TAILSCALE_OAUTH_CLIENT_ID and "
                     "TAILSCALE_OAUTH_CLIENT_SECRET"
@@ -520,7 +520,7 @@ class HostService:
         except MissingSecretError as exc:
             await self.mark_failed(host, exc)
             raise
-        except (IssuerError, ProviderError, ValueError) as exc:
+        except (IssuerError, providers.exceptions.ProviderError, ValueError) as exc:
             await self.mark_failed(host, exc)
             return
 
@@ -533,7 +533,7 @@ class HostService:
             # Without a gateway address the host's SSH coordinates would be dead.
             await self.mark_failed(
                 host,
-                ProvisioningFailedError(
+                hosts.exceptions.ProvisioningFailedError(
                     f"provider {vm.name!r} requires the SSH gateway; set GATEWAY_SSH_HOST"
                 ),
             )
@@ -547,7 +547,7 @@ class HostService:
                 instance_type=host.instance_type,
                 disk_gb=host.disk_gb,
             )
-        except ProviderError as exc:
+        except providers.exceptions.ProviderError as exc:
             await self.mark_failed(host, exc)
             return
 
@@ -587,7 +587,7 @@ class HostService:
 
         try:
             known_hosts_data = await self.scan_known_hosts(host)
-        except HostKeyScanError as exc:
+        except hosts.exceptions.HostKeyScanError as exc:
             await self.mark_failed(host, exc)
             return
 
@@ -661,7 +661,9 @@ class HostService:
                         stderr=asyncio.subprocess.PIPE,
                     )
                 except OSError as error:
-                    raise HostKeyScanError(f"could not run ssh-keyscan: {error}") from error
+                    raise hosts.exceptions.HostKeyScanError(
+                        f"could not run ssh-keyscan: {error}"
+                    ) from error
                 stdout, stderr = await process.communicate()
                 collected += stdout
                 errors.append(stderr.decode().strip())
@@ -671,5 +673,7 @@ class HostService:
             # read nothing during the gap.
             if time.monotonic() >= deadline:
                 detail = "; ".join(filter(None, errors)) or "empty output"
-                raise HostKeyScanError(f"ssh-keyscan never returned host keys: {detail}")
+                raise hosts.exceptions.HostKeyScanError(
+                    f"ssh-keyscan never returned host keys: {detail}"
+                )
             await asyncio.sleep(0.5)

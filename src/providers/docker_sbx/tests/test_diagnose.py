@@ -14,7 +14,7 @@ def _provider(api: MagicMock) -> DockerSbxProvider:
 @pytest.mark.asyncio
 async def test_diagnose_reports_daemon_reachability():
     api = MagicMock()
-    api.sandbox_count = AsyncMock(return_value=2)
+    api.sandboxes = AsyncMock(return_value=[{}, {}])
     api.check_ssh_endpoint = AsyncMock()
 
     assert (
@@ -25,7 +25,7 @@ async def test_diagnose_reports_daemon_reachability():
 @pytest.mark.asyncio
 async def test_diagnose_raises_when_the_ssh_endpoint_is_unreachable():
     api = MagicMock()
-    api.sandbox_count = AsyncMock(return_value=2)
+    api.sandboxes = AsyncMock(return_value=[{}, {}])
     api.check_ssh_endpoint = AsyncMock(
         side_effect=DockerSbxTransportError("the sandboxd SSH endpoint is disabled")
     )
@@ -37,9 +37,7 @@ async def test_diagnose_raises_when_the_ssh_endpoint_is_unreachable():
 @pytest.mark.asyncio
 async def test_diagnose_raises_so_doctor_can_classify_the_failure():
     api = MagicMock()
-    api.sandbox_count = AsyncMock(
-        side_effect=DockerSbxTransportError("Not authenticated to Docker")
-    )
+    api.sandboxes = AsyncMock(side_effect=DockerSbxTransportError("Not authenticated to Docker"))
 
     with pytest.raises(DockerSbxTransportError):
         await _provider(api).diagnose()
