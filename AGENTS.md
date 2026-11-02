@@ -32,6 +32,10 @@ documented in this repo.
 - Read this file and the relevant source before changing behavior.
 - The checklist and craft gate every change is held to:
   `.druks/review/checklist.md`.
+- Before you push, run `druks-house-rules check --base origin/main`. Druks runs
+  the same check on every pull request with `.druks/house_rules/config.yml`.
+  Install it with
+  `uv tool install git+https://github.com/getdruks/druks-house-rules@v0.0.5`.
 - `docs/` holds the conceptual and operational docs. Update them when behavior
   they describe changes.
 - For Python code, tests, or tooling changes, follow the style and verification
