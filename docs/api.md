@@ -41,8 +41,9 @@ warm host. Callers cannot set it. An `Idempotency-Key` belongs to the
 service account that first used it. Another one reusing it gets `409`.
 
 `POST /hosts` returns `503` with `CAPACITY` and `Retry-After` when the
-provider has `HOST_LIMITS` live hosts. A live host is not in `error` and
-has not expired.
+provider has `HOST_LIMITS` live hosts, or when the caller's service account
+has `HOST_LIMIT_PER_SERVICE_ACCOUNT` live hosts. A live host is not in
+`error` and has not expired. The admin key has no service account limit.
 
 `POST /hosts` returns `422` with `SECRET_MISSING` when a secret is missing.
 The detail is the issuer's reason, for example that the GitHub App is not

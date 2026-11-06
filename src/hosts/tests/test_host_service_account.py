@@ -54,7 +54,7 @@ async def test_pool_claim_records_service_account_and_release_clears_it(
     async with async_session_factory() as session:
         service = HostService(session)
         pool_host = await service.create_host(env={}, image=None, pool_member=True)
-        assert pool_host.service_account is None
+        assert not pool_host.service_account
         pool_host.status = HostStatus.ACTIVE.value
         await session.commit()
         pool_id = pool_host.id
@@ -70,7 +70,24 @@ async def test_pool_claim_records_service_account_and_release_clears_it(
         await HostService(session)._release_idempotency_loser(pool_host)
 
     released = await client.get(f"/hosts/{pool_id}", headers=headers)
-    assert released.json()["service_account"] is None
+    assert not released.json()["service_account"]
+
+
+async def test_a_service_account_at_its_host_limit_waits(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "host_limit_per_service_account", 1)
+    account_a = await issue(client, "account-a")
+    account_b = await issue(client, "account-b")
+    assert (await client.post("/hosts", headers=account_a)).status_code == 201
+
+    refused = await client.post("/hosts", headers=account_a)
+
+    assert refused.status_code == 503
+    assert refused.json()["error_code"] == "CAPACITY"
+    assert refused.headers["Retry-After"] == "30"
+    assert (await client.post("/hosts", headers=account_b)).status_code == 201
+    assert (await client.post("/hosts", headers=ADMIN)).status_code == 201
 
 
 async def test_idempotency_key_belongs_to_the_caller_that_used_it(client: AsyncClient) -> None:

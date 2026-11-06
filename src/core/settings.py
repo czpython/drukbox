@@ -163,6 +163,15 @@ class Settings(BaseSettings):
             "A provider it does not name has no limit."
         ),
     )
+    host_limit_per_service_account: int | None = Field(
+        default=None,
+        ge=1,
+        validation_alias="HOST_LIMIT_PER_SERVICE_ACCOUNT",
+        description=(
+            "Most live hosts per service account. Unset means no limit. The admin key "
+            "has none; HOST_LIMITS still bounds it."
+        ),
+    )
     pool_size: int = Field(
         default=0,
         ge=0,
