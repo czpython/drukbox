@@ -161,7 +161,9 @@ the real credential. It swaps every header that carries a placeholder and
 streams the request on. One refusal refuses the whole request.
 A destination that resolves to a loopback, private, link-local, or metadata
 address is refused, so a sandbox cannot reach the exchange or the API through
-the proxy. Every connection goes to the address the proxy checked, and the
+the proxy. The proxy can reach the private networks that
+`SECRETS_PROXY_PRIVATE_NETWORKS` names.
+Every connection goes to the address the proxy checked, and the
 upstream certificate is checked against the CONNECT host. A request whose
 `Host` differs from the CONNECT host is refused. On docker-sbx the sandbox gets only the placeholder. Drukbox puts
 the value in sbx's own secret store for that sandbox, and sbx's proxy swaps

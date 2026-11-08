@@ -3,7 +3,9 @@
     mitmdump -s /addon/swap.py --set exchange_url=http://127.0.0.1:8781
 
 TLS is terminated for hosts with a registered secret only. A loopback,
-private, link-local, or metadata destination is refused, for HTTP and CONNECT.
+private, link-local, or metadata destination is refused, for HTTP and CONNECT,
+unless private_networks names its network. Loopback stays refused: the
+exchange listens there.
 """
 
 import asyncio
@@ -32,6 +34,7 @@ EXCHANGE_TIMEOUT = 5.0
 _PLACEHOLDER_PREFIX = "drk."
 
 Address = ipaddress.IPv4Address | ipaddress.IPv6Address
+Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 
 class Refused(Exception):
@@ -57,13 +60,6 @@ def placeholder_in(value: str) -> str:
     if candidate.startswith(_PLACEHOLDER_PREFIX) and candidate.count(".") == 3:
         return candidate
     return ""
-
-
-def is_reachable(addresses: set[Address]) -> bool:
-    """Every address is public and none is multicast."""
-    return bool(addresses) and all(
-        address.is_global and not address.is_multicast for address in addresses
-    )
 
 
 class Exchange:
@@ -101,6 +97,7 @@ class Exchange:
 class Swap:
     def __init__(self) -> None:
         self.exchange: Exchange
+        self.private_networks: list[Network] = []
         self._upstreams: set[str] = set()
         self._upstreams_at = float("-inf")
         self._upstreams_known = False
@@ -112,10 +109,22 @@ class Swap:
             os.environ.get("SECRETS_EXCHANGE_URL", ""),
             "Address of the secrets exchange process.",
         )
+        loader.add_option(
+            "private_networks",
+            str,
+            os.environ.get("SECRETS_PROXY_PRIVATE_NETWORKS", ""),
+            "Private networks the proxy can reach, as comma-separated CIDRs.",
+        )
 
     def configure(self, updated: set[str]) -> None:
         if "exchange_url" in updated:
             self.exchange = Exchange(ctx.options.exchange_url)
+        if "private_networks" in updated:
+            self.private_networks = [
+                ipaddress.ip_network(cidr)
+                for cidr in map(str.strip, ctx.options.private_networks.split(","))
+                if cidr
+            ]
 
     async def upstreams(self) -> set[str]:
         """While the exchange gives no answer, the last list stands."""
@@ -135,8 +144,19 @@ class Swap:
             return set()
         return {ipaddress.ip_address(entry[4][0]) for entry in found}
 
+    def can_reach(self, addresses: set[Address]) -> bool:
+        """Every address is public or inside a named private network. Loopback and
+        multicast are never reachable, nor the unspecified address, which connects
+        to loopback."""
+        return bool(addresses) and all(
+            (address.is_global or any(address in network for network in self.private_networks))
+            and not (address.is_loopback or address.is_unspecified or address.is_multicast)
+            for address in addresses
+        )
+
     async def http_connect(self, flow: http.HTTPFlow) -> None:
-        if not is_reachable(await self.resolve(flow.request.host)):
+        addresses = await self.resolve(flow.request.host)
+        if not self.can_reach(addresses):
             flow.response = http.Response.make(403, b"destination refused\n")
 
     async def server_connect(self, data: server_hooks.ServerConnectionHookData) -> None:
@@ -148,7 +168,7 @@ class Swap:
             return
         host, port = data.server.address
         addresses = await self.resolve(host)
-        if not is_reachable(addresses):
+        if not self.can_reach(addresses):
             data.server.error = "destination refused"
             return
         chosen = min(addresses, key=lambda address: (address.version, address.packed))
@@ -169,7 +189,8 @@ class Swap:
 
     async def requestheaders(self, flow: http.HTTPFlow) -> None:
         if flow.request.scheme != "https":
-            if not is_reachable(await self.resolve(flow.request.host)):
+            addresses = await self.resolve(flow.request.host)
+            if not self.can_reach(addresses):
                 flow.response = http.Response.make(403, b"destination refused\n")
         else:
             found = [
