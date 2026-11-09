@@ -423,7 +423,11 @@ placeholder for the real credential on the way out. Two pieces run this:
   addon into the official image instead. It terminates TLS only for the hosts
   that have a registered secret and tunnels every other host blind. It
   refuses a destination that resolves to a loopback, private, link-local, or
-  metadata address. It makes its CA on first start and keeps it in a volume.
+  metadata address. It can reach the private networks that
+  `SECRETS_PROXY_PRIVATE_NETWORKS` names, as comma-separated CIDRs such as
+  `10.20.0.0/16`. The list is empty by default. Loopback stays refused,
+  because the exchange listens there. It makes its CA on first start and
+  keeps it in a volume.
 - **The exchange process** runs as `python -m secrets_exchange` from this
   image. The proxy asks it which hosts to terminate, and, for a request with
   a placeholder, for the header the upstream reads and the real credential.

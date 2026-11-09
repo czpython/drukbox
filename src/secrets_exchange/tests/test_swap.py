@@ -61,23 +61,17 @@ class FakeRequest:
 
 
 class FakeResponse:
-    def __init__(self, status_code: int, content: bytes, headers: dict[str, str]) -> None:
+    def __init__(self, status_code: int, content: bytes) -> None:
         self.status_code = status_code
         self.content = content
-        self.headers = headers
-
-    @classmethod
-    def make(
-        cls, status_code: int = 200, content: bytes = b"", headers: dict[str, str] | None = None
-    ) -> "FakeResponse":
-        return cls(status_code, content, headers or {})
 
 
-def _stand_ins() -> dict[str, ModuleType]:
+@pytest.fixture(scope="module")
+def swap() -> Iterator[ModuleType]:
     mitmproxy = ModuleType("mitmproxy")
     mitmproxy.ctx = SimpleNamespace(options=SimpleNamespace(exchange_url="http://exchange.test"))  # type: ignore[attr-defined]
     http = ModuleType("mitmproxy.http")
-    http.Response = FakeResponse  # type: ignore[attr-defined]
+    http.Response = SimpleNamespace(make=FakeResponse)  # type: ignore[attr-defined]
     http.HTTPFlow = object  # type: ignore[attr-defined]
     tls = ModuleType("mitmproxy.tls")
     tls.ClientHelloData = object  # type: ignore[attr-defined]
@@ -90,7 +84,7 @@ def _stand_ins() -> dict[str, ModuleType]:
     httpclient.HTTPRequest = FakeRequest  # type: ignore[attr-defined]
     httpclient.HTTPResponse = object  # type: ignore[attr-defined]
     httpclient.HTTPClientError = type("HTTPClientError", (Exception,), {})  # type: ignore[attr-defined]
-    return {
+    stand_ins = {
         "mitmproxy": mitmproxy,
         "mitmproxy.http": http,
         "mitmproxy.tls": tls,
@@ -99,11 +93,6 @@ def _stand_ins() -> dict[str, ModuleType]:
         "tornado": tornado,
         "tornado.httpclient": httpclient,
     }
-
-
-@pytest.fixture(scope="module")
-def swap() -> Iterator[ModuleType]:
-    stand_ins = _stand_ins()
     sys.modules.update(stand_ins)
     try:
         spec = importlib.util.spec_from_file_location("swap", ADDON)
@@ -221,7 +210,40 @@ def test_a_placeholder_is_read_from_a_bearer_a_basic_password_or_a_bare_value(
 def test_only_a_destination_with_public_addresses_is_reachable(
     swap: ModuleType, addresses: set[str], reachable: bool
 ) -> None:
-    assert swap.is_reachable({ipaddress.ip_address(a) for a in addresses}) is reachable
+    assert swap.Swap().can_reach({ipaddress.ip_address(a) for a in addresses}) is reachable
+
+
+@pytest.mark.parametrize(
+    ("network", "addresses", "reachable"),
+    [
+        ("172.17.0.0/16", {"172.17.0.1"}, True),
+        ("172.17.0.0/16", {"172.17.0.1", "8.8.8.8"}, True),
+        ("172.17.0.0/16", {"10.1.2.3"}, False),
+        ("fd00::/8", {"fd00::1"}, True),
+        ("127.0.0.0/8", {"127.0.0.1"}, False),
+        ("::/0", {"::1"}, False),
+        ("0.0.0.0/0", {"0.0.0.0"}, False),
+    ],
+)
+def test_a_named_private_network_is_reachable_and_loopback_never_is(
+    swap: ModuleType, network: str, addresses: set[str], reachable: bool
+) -> None:
+    addon = swap.Swap()
+    addon.private_networks = [ipaddress.ip_network(network)]
+
+    assert addon.can_reach({ipaddress.ip_address(a) for a in addresses}) is reachable
+
+
+def test_the_private_networks_option_is_read_as_comma_separated_cidrs(swap: ModuleType) -> None:
+    swap.ctx.options.private_networks = " 10.9.0.0/16, 172.17.0.1 ,"
+    addon = swap.Swap()
+
+    addon.configure({"private_networks"})
+
+    assert addon.private_networks == [
+        ipaddress.ip_network("10.9.0.0/16"),
+        ipaddress.ip_network("172.17.0.1/32"),
+    ]
 
 
 async def test_a_connect_to_a_private_destination_is_refused(swap: ModuleType) -> None:
