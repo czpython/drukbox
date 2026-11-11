@@ -3,7 +3,7 @@ from typing import ClassVar, Self
 
 from core.settings import get_settings
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import TemplateCapability
+from providers.capabilities import RecordStep, TemplateCapability
 from providers.exceptions import (
     ProviderCommandError,
     ProviderNotFoundError,
@@ -143,12 +143,14 @@ class DockerProvider(VMProvider, TemplateCapability):
         base_image: str,
         setup_script: str,
         label: str,
+        record_step: RecordStep,
     ) -> str:
         return await build_derived_image(
             self.api,
             base_image=base_image,
             setup_script=setup_script,
             label=label,
+            record_step=record_step,
         )
 
     async def delete_template_image(self, image: str) -> None:

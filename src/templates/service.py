@@ -113,6 +113,10 @@ class TemplateService:
             # Release the read transaction before a minutes-long provider build.
             await session.commit()
 
+            async def record_step(step: str) -> None:
+                template.build_step = step
+                await session.commit()
+
             try:
                 capability = resolve_capability(
                     get_vm_provider(template.provider),
@@ -122,6 +126,7 @@ class TemplateService:
                     base_image=template.base_image_ref,
                     setup_script=template.setup_script,
                     label=template.label,
+                    record_step=record_step,
                 )
             except Exception as exc:
                 logger.exception(
@@ -135,6 +140,7 @@ class TemplateService:
                 template.image = image
                 template.status = TemplateStatus.AVAILABLE.value
                 template.last_error = ""
+                template.build_step = ""
 
             template.updated_at = utc_now()
             await session.commit()
