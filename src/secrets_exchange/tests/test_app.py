@@ -18,13 +18,7 @@ from hosts.service import utc_now
 from hosts.tests.conftest import stub_provider  # noqa: F401
 from providers.exceptions import ProviderTransportError
 from providers.registry import get_vm_provider
-from secrets_exchange.app import (
-    UPSTREAM_CREDENTIAL,
-    UPSTREAM_HEADER,
-    app,
-    lifespan,
-    push_active_hosts,
-)
+from secrets_exchange import app as app_module
 from secrets_exchange.secrets import Secret, Secrets
 
 ISSUER = {"url": "https://mint.test/box/anthropic", "headers": {}, "refresh": "1h"}
@@ -35,9 +29,11 @@ async def edge() -> AsyncGenerator[AsyncClient]:
     # ASGITransport does not run the lifespan, so the test gives the app its secrets.
     async with (
         httpx.AsyncClient() as outbound,
-        AsyncClient(transport=ASGITransport(app=app), base_url="http://secrets exchange") as c,
+        AsyncClient(
+            transport=ASGITransport(app=app_module.app), base_url="http://secrets exchange"
+        ) as c,
     ):
-        app.state.secrets = Secrets(outbound)
+        app_module.app.state.secrets = Secrets(outbound)
         yield c
 
 
@@ -170,6 +166,23 @@ async def test_an_issuer_that_gives_nothing_usable_answers_503(edge) -> None:
     assert "X-Upstream-Credential" not in response.headers
 
 
+@respx.mock
+async def test_an_issuer_that_refuses_the_secret_answers_422_with_its_reason(edge) -> None:
+    host_id = uuid.uuid4()
+    minted = Placeholder.mint(host_id, "github")
+    issuer = {"url": "https://mint.test/x", "headers": {}, "refresh": "1h"}
+    await _create_host(
+        host_id, {"github": {"issuer": issuer, "placeholder_fingerprint": minted.fingerprint}}
+    )
+    respx.get("https://mint.test/x").respond(422, json={"detail": "the app is not on the repo"})
+
+    response = await edge.get("/authorize", headers=_headers(str(minted), "github.com"))
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "the app is not on the repo"}
+    assert "X-Upstream-Credential" not in response.headers
+
+
 @pytest.mark.parametrize(
     ("placeholder", "host"),
     [
@@ -240,8 +253,8 @@ async def test_no_secret_means_no_upstream(edge) -> None:
 def test_the_proxy_addon_reads_the_headers_the_exchange_answers_with() -> None:
     addon = (Path(__file__).parents[3] / "deploy" / "proxy" / "swap.py").read_text()
 
-    assert f'UPSTREAM_HEADER = "{UPSTREAM_HEADER}"' in addon
-    assert f'UPSTREAM_CREDENTIAL = "{UPSTREAM_CREDENTIAL}"' in addon
+    assert f'UPSTREAM_HEADER = "{app_module.UPSTREAM_HEADER}"' in addon
+    assert f'UPSTREAM_CREDENTIAL = "{app_module.UPSTREAM_CREDENTIAL}"' in addon
 
 
 def _headers(placeholder: str, host: str) -> dict[str, str]:
@@ -285,7 +298,7 @@ async def test_the_timer_pushes_issuer_values_to_a_provider_that_holds_them(edge
     )
     respx.get(ISSUER["url"]).respond(json={"value": "sk-ant-fresh"})
 
-    await push_active_hosts(app.state.secrets)
+    await app_module.push_active_hosts(app_module.app.state.secrets)
 
     secrets.push_secret.assert_awaited_once_with(
         vm=f"sb-{host_id.hex[:12]}", name="anthropic", value="sk-ant-fresh"
@@ -302,15 +315,15 @@ async def test_the_timer_forgets_a_deleted_host(edge) -> None:
         host_id, {"anthropic": {"issuer": ISSUER, "placeholder_fingerprint": "a"}}, provider="stub"
     )
     respx.get(ISSUER["url"]).respond(json={"value": "sk-ant-fresh"})
-    await push_active_hosts(app.state.secrets)
-    assert (host_id, "anthropic") in app.state.secrets._refreshable
+    await app_module.push_active_hosts(app_module.app.state.secrets)
+    assert (host_id, "anthropic") in app_module.app.state.secrets._refreshable
 
     async with async_session_factory() as session:
         await session.delete(await session.get(Host, host_id))
         await session.commit()
-    await push_active_hosts(app.state.secrets)
+    await app_module.push_active_hosts(app_module.app.state.secrets)
 
-    assert (host_id, "anthropic") not in app.state.secrets._refreshable
+    assert (host_id, "anthropic") not in app_module.app.state.secrets._refreshable
     secrets.push_secret.assert_awaited_once()
 
 
@@ -327,7 +340,7 @@ async def test_one_host_in_trouble_costs_no_other_host_its_value(edge, caplog) -
     respx.get(ISSUER["url"]).respond(json={"value": "sk-ant-fresh"})
 
     with caplog.at_level(logging.ERROR):
-        await push_active_hosts(app.state.secrets)
+        await app_module.push_active_hosts(app_module.app.state.secrets)
 
     secrets.push_secret.assert_awaited_once_with(
         vm=f"sb-{healthy.hex[:12]}", name="anthropic", value="sk-ant-fresh"
@@ -352,7 +365,7 @@ async def test_a_push_that_fails_unexpectedly_costs_no_other_host_its_value(edge
     respx.get(ISSUER["url"]).respond(json={"value": "sk-ant-fresh"})
 
     with caplog.at_level(logging.ERROR):
-        await push_active_hosts(app.state.secrets)
+        await app_module.push_active_hosts(app_module.app.state.secrets)
 
     secrets.push_secret.assert_any_await(
         vm=f"sb-{healthy.hex[:12]}", name="anthropic", value="sk-ant-fresh"
@@ -383,7 +396,7 @@ async def test_shutdown_waits_for_the_round_under_way_before_the_client_closes(
 
     monkeypatch.setattr(Secret, "fetch", classmethod(paused_fetch))
 
-    async with lifespan(app):
+    async with app_module.lifespan(app_module.app):
         await asyncio.wait_for(fetching.wait(), 1)
         asyncio.get_running_loop().call_soon(release.set)
 
@@ -405,7 +418,7 @@ async def test_a_refresh_order_replaces_the_held_value_at_once(edge) -> None:
     )
     headers = _headers(str(minted), "api.github.com")
     route = respx.get(ISSUER["url"]).respond(json={"value": "ghs_one"})
-    assert (await edge.get("/authorize", headers=headers)).headers[UPSTREAM_CREDENTIAL] == (
+    assert (await edge.get("/authorize", headers=headers)).headers["X-Upstream-Credential"] == (
         "Bearer ghs_one"
     )
     route.respond(json={"value": "ghs_two"})
@@ -413,7 +426,7 @@ async def test_a_refresh_order_replaces_the_held_value_at_once(edge) -> None:
     response = await edge.post(f"/refresh/{host_id}/github")
 
     assert response.status_code == 200
-    assert (await edge.get("/authorize", headers=headers)).headers[UPSTREAM_CREDENTIAL] == (
+    assert (await edge.get("/authorize", headers=headers)).headers["X-Upstream-Credential"] == (
         "Bearer ghs_two"
     )
     assert route.call_count == 2
@@ -429,7 +442,7 @@ async def test_a_refresh_order_pushes_the_new_value_to_a_provider_that_holds_it(
         host_id, {"anthropic": {"issuer": ISSUER, "placeholder_fingerprint": "a"}}, provider="stub"
     )
     route = respx.get(ISSUER["url"]).respond(json={"value": "sk-ant-one"})
-    await push_active_hosts(app.state.secrets)
+    await app_module.push_active_hosts(app_module.app.state.secrets)
     route.respond(json={"value": "sk-ant-two"})
 
     response = await edge.post(f"/refresh/{host_id}/anthropic")
@@ -439,7 +452,7 @@ async def test_a_refresh_order_pushes_the_new_value_to_a_provider_that_holds_it(
         "sk-ant-one",
         "sk-ant-two",
     ]
-    await push_active_hosts(app.state.secrets)
+    await app_module.push_active_hosts(app_module.app.state.secrets)
     assert secrets.push_secret.await_count == 2, "the timer finds the pushed value fresh"
 
 

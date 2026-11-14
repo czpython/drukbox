@@ -29,12 +29,12 @@ class IssuerError(Exception):
     """The message is safe to log."""
 
 
-class MissingSecretError(IssuerError, AppException):
-    """The secret is missing, and the message is the issuer's reason. A retry gets
-    the same answer."""
+class IssuerRefusedError(IssuerError, AppException):
+    """The issuer refuses the secret until a person acts, and the message is its
+    reason. A retry gets the same answer until then."""
 
     status_code = 422
-    error_code = "SECRET_MISSING"
+    error_code = "ISSUER_REFUSED"
 
 
 class IssuerUnavailableError(Exception):
@@ -54,7 +54,7 @@ class Secret(BaseModel):
         try:
             response = await client.get(issuer["url"], headers=issuer["headers"])
             if response.is_client_error:
-                raise MissingSecretError(response.json()["detail"])
+                raise IssuerRefusedError(response.json()["detail"])
             response.raise_for_status()
             secret = cls.model_validate(response.json())
         except httpx.LocalProtocolError:
@@ -87,18 +87,25 @@ class Secret(BaseModel):
 @dataclass
 class RefreshableSecret:
     """The latest value, the value the provider has, the fetch that runs now,
-    and the next permitted attempt."""
+    the next permitted attempt, and the issuer's reason while it refuses the
+    secret."""
 
     latest: Secret | None = None
     pushed: Secret | None = None
     fetching: asyncio.Task[None] | None = None
     next_attempt: datetime = field(default_factory=lambda: datetime.now(UTC))
     wait: timedelta = FIRST_RETRY
+    refusal: str = ""
 
     async def refresh(self, issuer: dict[str, Any], client: httpx.AsyncClient) -> None:
         if datetime.now(UTC) >= self.next_attempt:
+            self.refusal = ""
             try:
                 self.latest = await Secret.fetch(issuer, client)
+            except IssuerRefusedError as exc:
+                logger.warning("issuer %s refused: %s", issuer["url"], exc)
+                self.refusal = str(exc)
+                self.retry_later()
             except IssuerError as exc:
                 logger.warning("issuer %s failed: %s", issuer["url"], exc)
                 self.retry_later()
@@ -170,6 +177,8 @@ class Secrets:
         await refreshable.refresh(entry["issuer"], self._client)
         if refreshable.latest and refreshable.latest.is_valid(datetime.now(UTC)):
             return refreshable.latest
+        if refreshable.refusal:
+            raise IssuerRefusedError(refreshable.refusal)
         raise IssuerUnavailableError(f"no valid secret for {host.id}/{service}")
 
     async def push(self, host: Host, service: str, entry: dict[str, Any]) -> None:

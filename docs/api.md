@@ -45,9 +45,10 @@ provider has `HOST_LIMITS` live hosts, or when the caller's service account
 has `HOST_LIMIT_PER_SERVICE_ACCOUNT` live hosts. A live host is not in
 `error` and has not expired. The admin key has no service account limit.
 
-`POST /hosts` returns `422` with `SECRET_MISSING` when a secret is missing.
-The detail is the issuer's reason, for example that the GitHub App is not
-on the repository. A retry gets the same answer.
+`POST /hosts` returns `422` with `ISSUER_REFUSED` when the issuer refuses a
+secret until a person acts. The detail is the issuer's reason, for example
+that the GitHub App is not on the repository. A retry gets the same answer
+until then.
 
 ## Refresh a host secret
 
@@ -70,7 +71,7 @@ for the flow.
 
 - `GET /upstreams` — the hosts the proxy terminates TLS for
 - `GET /authorize` — the proxy's question: the header and the real credential
-  for a placeholder
+  for a placeholder. `422` with the issuer's reason when it refuses the secret.
 - `POST /refresh/{host_id}/{service}` — an issuer's order: forget the held
   value and fetch a new one now. `200` after the fetch, and after the push
   where the provider holds the value. `503` with `Retry-After` when the issuer

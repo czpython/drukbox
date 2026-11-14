@@ -38,7 +38,7 @@ Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 
 class Refused(Exception):
-    """The exchange refused the placeholder for this host."""
+    """The exchange refused the placeholder for this host. The message says why."""
 
 
 class ExchangeUnavailable(Exception):
@@ -78,7 +78,9 @@ class Exchange:
             "/authorize", {"Authorization": f"Bearer {placeholder}", FORWARDED_HOST: host}
         )
         if answer.code == 403:
-            raise Refused(host)
+            raise Refused("placeholder refused")
+        if answer.code == 422:
+            raise Refused(json.loads(answer.body)["detail"])
         if answer.code != 200:
             raise ExchangeUnavailable(f"authorize answered {answer.code}")
         return answer.headers[UPSTREAM_HEADER], answer.headers[UPSTREAM_CREDENTIAL]
@@ -216,9 +218,12 @@ class Swap:
         for _, placeholder in found:
             try:
                 header, credential = await self.exchange.authorize(placeholder, approved)
-            except Refused:
-                logger.info("refused a placeholder for %s", approved)
-                flow.response = http.Response.make(403, b"placeholder refused\n")
+            except Refused as exc:
+                logger.info("refused a placeholder for %s: %s", approved, exc)
+                # git prints a text/plain body to its user.
+                flow.response = http.Response.make(
+                    403, f"{exc}\n".encode(), {"Content-Type": "text/plain; charset=utf-8"}
+                )
                 return
             except ExchangeUnavailable as exc:
                 logger.warning("the exchange gave no answer for %s: %s", approved, exc)

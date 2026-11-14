@@ -97,9 +97,9 @@ a provider into the contract?*
 
 `POST /hosts` provisions inline on the event loop and returns
 `201 Created` with the active host, or `502 Bad Gateway` with the row
-left in `error` state. When a secret is missing, the response is `422`
-with the issuer's reason, not `502`. A retry gets the same answer. States
-live in `hosts.models.HostStatus`:
+left in `error` state. When the issuer refuses a secret, the response is
+`422` with its reason, not `502`. A retry gets the same answer until a person
+acts. States live in `hosts.models.HostStatus`:
 `provisioning → creating_network → creating_vm → bootstrapping →
 active`, with `error` as the terminal failure.
 
@@ -122,11 +122,12 @@ the request headers, and the refresh interval. Drukbox never stores a fetched
 token. The exchange fetches it on demand, keeps it in memory, and fetches again
 when less than a minute of its life remains. The issuer answers
 `{"value": "…", "expires_at": "…"}`. `expires_at` is optional, and without it
-the refresh interval sets the expiry. When the secret is missing, the issuer
-answers `4xx` with `{"detail": "…"}`, the reason. Any other answer is a
-failure. While an issuer fails, the exchange serves the last value it holds,
-as long as that value is still valid. With nothing valid in memory it answers
-`503`.
+the refresh interval sets the expiry. When the issuer refuses the secret
+until a person acts, it answers `4xx` with `{"detail": "…"}`, the reason. Any
+other answer is a failure. While an issuer fails, the exchange serves the last
+value it holds, as long as that value is still valid. With nothing valid in
+memory it answers `422` with the reason while the issuer refuses, and `503`
+otherwise.
 
 A provider that holds the value never asks the exchange. For it, a timer
 fetches a fresh value when less than a minute of the pushed one remains and
@@ -158,7 +159,9 @@ hosts with a registered secret, and tunnels every other host blind. For a
 request with a placeholder it asks the exchange at `/authorize`, with the
 placeholder and the destination host, for the header the upstream reads and
 the real credential. It swaps every header that carries a placeholder and
-streams the request on. One refusal refuses the whole request.
+streams the request on. One refusal refuses the whole request. When the
+issuer refuses the secret, the sandbox gets `403` with the issuer's reason as
+plain text, which git prints to its user.
 A destination that resolves to a loopback, private, link-local, or metadata
 address is refused, so a sandbox cannot reach the exchange or the API through
 the proxy. The proxy can reach the private networks that

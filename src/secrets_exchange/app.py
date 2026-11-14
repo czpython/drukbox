@@ -18,7 +18,7 @@ from host_secrets import catalog
 from host_secrets.placeholder import Placeholder
 from hosts.models import Host, HostStatus
 from providers.exceptions import ProviderError
-from secrets_exchange.secrets import IssuerUnavailableError, Secrets
+from secrets_exchange.secrets import IssuerRefusedError, IssuerUnavailableError, Secrets
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +134,8 @@ async def authorize(
 
     try:
         secret = await secrets.current(host, placeholder.service, entry)
+    except IssuerRefusedError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from None
     except IssuerUnavailableError:
         return Response(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, headers={"Retry-After": "5"}

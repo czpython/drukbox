@@ -12,12 +12,7 @@ from hosts.models import Host
 from hosts.tests.conftest import stub_provider  # noqa: F401
 from providers.exceptions import ProviderTransportError
 from providers.registry import get_vm_provider
-from secrets_exchange.secrets import (
-    IssuerError,
-    IssuerUnavailableError,
-    Secret,
-    Secrets,
-)
+from secrets_exchange import secrets as secrets_module
 
 ISSUER = {
     "url": "https://mint.test/box/github",
@@ -42,7 +37,7 @@ def _holding() -> MagicMock:
 @pytest.fixture
 async def secrets():
     async with httpx.AsyncClient() as client:
-        yield Secrets(client)
+        yield secrets_module.Secrets(client)
 
 
 @respx.mock
@@ -65,7 +60,7 @@ async def test_a_static_entry_never_touches_the_issuer(secrets) -> None:
 
     secret = await secrets.current(_host(), "github", {"value": "ghs_static"})
 
-    assert secret == Secret(value="ghs_static")
+    assert secret == secrets_module.Secret(value="ghs_static")
     assert route.call_count == 0
 
 
@@ -74,7 +69,7 @@ async def test_the_issuer_expiry_wins_over_the_refresh_interval() -> None:
     expires_at = datetime.now(UTC) + timedelta(minutes=5)
     respx.get(ISSUER["url"]).respond(json={"value": "x", "expires_at": expires_at.isoformat()})
     async with httpx.AsyncClient() as client:
-        secret = await Secret.fetch(ISSUER, client)
+        secret = await secrets_module.Secret.fetch(ISSUER, client)
     assert secret.expires_at == expires_at
 
 
@@ -109,10 +104,23 @@ async def test_nothing_usable_and_nothing_held_is_unavailable_then_waits(secrets
     host = _host()
     route = respx.get(ISSUER["url"]).respond(**answer)
 
-    with pytest.raises(IssuerUnavailableError):
+    with pytest.raises(secrets_module.IssuerUnavailableError):
         await secrets.current(host, "github", ENTRY)
     route.respond(json={"value": "ghs_fine"})
-    with pytest.raises(IssuerUnavailableError):
+    with pytest.raises(secrets_module.IssuerUnavailableError):
+        await secrets.current(host, "github", ENTRY)
+
+    assert route.call_count == 1, "the second request waits out the retry delay"
+
+
+@respx.mock
+async def test_a_refusal_keeps_the_issuer_reason_through_the_retry_wait(secrets) -> None:
+    host = _host()
+    route = respx.get(ISSUER["url"]).respond(422, json={"detail": "the app is not on the repo"})
+
+    with pytest.raises(secrets_module.IssuerRefusedError, match="the app is not on the repo"):
+        await secrets.current(host, "github", ENTRY)
+    with pytest.raises(secrets_module.IssuerRefusedError, match="the app is not on the repo"):
         await secrets.current(host, "github", ENTRY)
 
     assert route.call_count == 1, "the second request waits out the retry delay"
@@ -122,7 +130,7 @@ async def test_nothing_usable_and_nothing_held_is_unavailable_then_waits(secrets
 async def test_a_wrong_answer_is_logged_without_its_content(secrets, caplog) -> None:
     respx.get(ISSUER["url"]).respond(json={"token": "secret-xyz"})
 
-    with caplog.at_level(logging.WARNING), pytest.raises(IssuerUnavailableError):
+    with caplog.at_level(logging.WARNING), pytest.raises(secrets_module.IssuerUnavailableError):
         await secrets.current(_host(), "github", ENTRY)
 
     assert "answer has the wrong shape" in caplog.text
@@ -134,7 +142,7 @@ async def test_an_answer_that_has_already_expired_is_a_failure(secrets) -> None:
     past = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
     respx.get(ISSUER["url"]).respond(json={"value": "ghs_dead", "expires_at": past})
 
-    with pytest.raises(IssuerUnavailableError):
+    with pytest.raises(secrets_module.IssuerUnavailableError):
         await secrets.current(_host(), "github", ENTRY)
 
 
@@ -145,7 +153,7 @@ async def test_a_value_that_expires_during_a_failed_fetch_is_not_served(
 
     async def slow_failure(cls, issuer, client):
         await asyncio.sleep(0.3)
-        raise IssuerError("ConnectError")
+        raise secrets_module.IssuerError("ConnectError")
 
     with respx.mock:
         soon = (datetime.now(UTC) + timedelta(seconds=0.2)).isoformat()
@@ -153,8 +161,8 @@ async def test_a_value_that_expires_during_a_failed_fetch_is_not_served(
         assert (await secrets.current(*key, ENTRY)).value == "ghs_old"
     await asyncio.sleep(0.25)
 
-    monkeypatch.setattr(Secret, "fetch", classmethod(slow_failure))
-    with pytest.raises(IssuerUnavailableError):
+    monkeypatch.setattr(secrets_module.Secret, "fetch", classmethod(slow_failure))
+    with pytest.raises(secrets_module.IssuerUnavailableError):
         await secrets.current(*key, ENTRY)
 
 
@@ -171,9 +179,11 @@ async def test_the_old_value_serves_while_a_fetch_is_under_way(secrets, monkeypa
         nonlocal fetches
         fetches += 1
         await release.wait()
-        return Secret(value="ghs_new", expires_at=datetime.now(UTC) + timedelta(hours=1))
+        return secrets_module.Secret(
+            value="ghs_new", expires_at=datetime.now(UTC) + timedelta(hours=1)
+        )
 
-    monkeypatch.setattr(Secret, "fetch", classmethod(paused_fetch))
+    monkeypatch.setattr(secrets_module.Secret, "fetch", classmethod(paused_fetch))
     assert (await secrets.current(*key, ENTRY)).value == "ghs_old"
     assert (await secrets.current(*key, ENTRY)).value == "ghs_old"
     await asyncio.sleep(0)
@@ -193,13 +203,13 @@ async def test_the_retry_wait_starts_when_a_slow_fetch_fails(secrets, monkeypatc
         nonlocal attempts
         attempts += 1
         await asyncio.sleep(0.2)
-        raise IssuerError("ReadTimeout")
+        raise secrets_module.IssuerError("ReadTimeout")
 
-    monkeypatch.setattr(Secret, "fetch", classmethod(slow_failure))
+    monkeypatch.setattr(secrets_module.Secret, "fetch", classmethod(slow_failure))
     monkeypatch.setattr("secrets_exchange.secrets.FIRST_RETRY", timedelta(seconds=0.1))
-    with pytest.raises(IssuerUnavailableError):
+    with pytest.raises(secrets_module.IssuerUnavailableError):
         await secrets.current(*key, ENTRY)
-    with pytest.raises(IssuerUnavailableError):
+    with pytest.raises(secrets_module.IssuerUnavailableError):
         await secrets.current(*key, ENTRY)
 
     assert attempts == 1, "the wait counts from the failure, not from the start of the fetch"
@@ -296,8 +306,8 @@ async def test_a_header_h11_refuses_never_reaches_the_error_chain() -> None:
         raise httpx.LocalProtocolError("Illegal header value b'Bearer sk-live\\n'")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(refuse)) as client:
-        with pytest.raises(IssuerError, match="not valid HTTP") as caught:
-            await Secret.fetch(ISSUER, client)
+        with pytest.raises(secrets_module.IssuerError, match="not valid HTTP") as caught:
+            await secrets_module.Secret.fetch(ISSUER, client)
 
     assert not caught.value.__cause__
     assert "sk-live" not in repr(caught.value)
