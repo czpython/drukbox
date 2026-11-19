@@ -39,6 +39,7 @@ class Template(Base):
     image: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), default=TemplateStatus.BUILDING.value)
     last_error: Mapped[str] = mapped_column(Text, default="")
+    build_step: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
     last_used_at: Mapped[datetime | None] = mapped_column(

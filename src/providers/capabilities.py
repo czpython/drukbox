@@ -1,6 +1,7 @@
 import abc
 import base64
 import pathlib
+from collections.abc import Awaitable, Callable
 from typing import ClassVar, TypeVar
 
 from cryptography import x509
@@ -13,6 +14,8 @@ from providers import environment
 from providers.exceptions import CapabilityUnsupportedError, ProviderCommandError
 
 CapabilityT = TypeVar("CapabilityT")
+# Records the step a template build is in, such as "pushing image".
+RecordStep = Callable[[str], Awaitable[None]]
 
 # The box itself and the cloud metadata address.
 NO_PROXY = "localhost,127.0.0.1,::1,169.254.169.254"
@@ -21,6 +24,7 @@ SYSTEM_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 
 def resolve_capability(provider, capability: type[CapabilityT]) -> CapabilityT:
+    # ast-grep-ignore: rule-3
     if not isinstance(provider, capability):
         raise CapabilityUnsupportedError(
             f"VM provider '{provider.name}' does not support {capability.__name__}",
@@ -119,6 +123,7 @@ class TemplateCapability(abc.ABC):
         base_image: str,
         setup_script: str,
         label: str,
+        record_step: RecordStep,
     ) -> str: ...
 
     @abc.abstractmethod

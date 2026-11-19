@@ -4,7 +4,7 @@ import pytest
 
 from providers import registry as registry_module
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import TemplateCapability
+from providers.capabilities import RecordStep, TemplateCapability
 from providers.docker.images import derive_image_name
 from providers.exceptions import ProviderError
 
@@ -67,8 +67,10 @@ class StubTemplateProvider(TemplateCapability, VMProvider):
         base_image: str,
         setup_script: str,
         label: str,
+        record_step: RecordStep,
     ) -> str:
         self.built.append((base_image, setup_script, label))
+        await record_step("running setup script")
         if self.build_error:
             raise self.build_error
         return derive_image_name(base_image=base_image, setup_script=setup_script, label=label)

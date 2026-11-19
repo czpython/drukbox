@@ -28,7 +28,7 @@ def _fake_docker(**overrides: object) -> SimpleNamespace:
         ),
         images=SimpleNamespace(
             pull=AsyncMock(return_value=[{"status": "Digest: sha256:" + "a" * 64}]),
-            build=AsyncMock(),
+            build=MagicMock(),
             delete=AsyncMock(),
             push=AsyncMock(),
         ),
@@ -111,18 +111,27 @@ async def test_remove_container_forces_and_drops_volumes() -> None:
     fake.containers.container.return_value.delete.assert_awaited_once_with(force=True, v=True)
 
 
-async def test_build_image_sends_the_context_tar_under_the_tag() -> None:
+async def test_build_image_sends_the_context_tar_and_yields_its_output() -> None:
     fake = _fake_docker()
+    fake.images.build.return_value.__aiter__.return_value = [
+        {"stream": "Step 3/3 : RUN sh /drukbox-setup.sh\n"},
+        {"aux": {"ID": "sha256:abc"}},
+        {"stream": "Reading package lists...\nInstalling nodejs\n"},
+    ]
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz"):
         pass
     context_tar = buffer.getvalue()
 
-    await _api(fake).build_image("drukbox-template:123456789abc", context_tar)
+    output = [
+        line async for line in _api(fake).build_image("drukbox-template:123456789abc", context_tar)
+    ]
 
-    kwargs = fake.images.build.await_args.kwargs
+    assert output == ["Step 3/3 : RUN sh /drukbox-setup.sh", "Installing nodejs"]
+    kwargs = fake.images.build.call_args.kwargs
     assert kwargs["tag"] == "drukbox-template:123456789abc"
     assert kwargs["encoding"] == "gzip"
+    assert kwargs["stream"] is True
     assert kwargs["fileobj"].getvalue() == context_tar
 
 
@@ -131,7 +140,8 @@ async def test_build_failure_keeps_the_engine_detail() -> None:
     fake.images.build.side_effect = DockerError(0, "RUN sh /drukbox-setup.sh: exit code 127")
 
     with pytest.raises(DockerTransportError, match="exit code 127"):
-        await _api(fake).build_image("drukbox-template:123456789abc", b"")
+        async for _ in _api(fake).build_image("drukbox-template:123456789abc", b""):
+            pass
 
 
 @pytest.mark.parametrize(

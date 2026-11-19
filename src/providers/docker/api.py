@@ -1,4 +1,5 @@
 import io
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import aiodocker
@@ -93,13 +94,17 @@ class DockerAPI:
         except aiohttp.ClientError as exc:
             raise DockerTransportError(str(exc)) from exc
 
-    async def build_image(self, image: str, context_tar: bytes) -> None:
+    async def build_image(self, image: str, context_tar: bytes) -> AsyncIterator[str]:
+        """Build the image and yield the last line of each output chunk."""
         try:
-            await self._get_client().images.build(
+            async for event in self._get_client().images.build(
                 fileobj=io.BytesIO(context_tar),
                 encoding="gzip",
                 tag=image,
-            )
+                stream=True,
+            ):
+                if output := event.get("stream", "").strip():
+                    yield output.splitlines()[-1]
         except (aiodocker.DockerError, aiohttp.ClientError) as exc:
             raise DockerTransportError(_detail(exc)) from exc
 

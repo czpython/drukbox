@@ -10,7 +10,7 @@ import asyncssh
 from core.settings import get_settings
 from providers import environment
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import TemplateCapability
+from providers.capabilities import RecordStep, TemplateCapability
 from providers.docker.api import DockerAPI
 from providers.docker.exceptions import DockerProviderError
 from providers.docker.images import build_derived_image
@@ -188,18 +188,22 @@ class DockerSbxProvider(VMProvider, TemplateCapability):
         base_image: str,
         setup_script: str,
         label: str,
+        record_step: RecordStep,
     ) -> str:
         image = await build_derived_image(
             self.docker,
             base_image=base_image,
             setup_script=setup_script,
             label=label,
+            record_step=record_step,
         )
         # sbx keeps its own image store. The Docker image only carries the build.
         try:
             with tempfile.TemporaryDirectory() as directory:
                 archive = Path(directory) / "template.tar"
+                await record_step("saving image")
                 await self.docker.save_image(image, archive)
+                await record_step("loading into sbx")
                 await self.api.load_template(archive)
             await self.docker.remove_image(image)
         except (OSError, DockerProviderError, DockerSbxProviderError) as exc:

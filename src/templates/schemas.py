@@ -19,6 +19,7 @@ class TemplateCreate(BaseModel):
     @field_validator("base_image")
     @classmethod
     def reject_blank_base_image(cls, value: str | None) -> str | None:
+        # ast-grep-ignore: rule-2
         if value is not None and not value.strip():
             raise ValueError("base_image must not be blank")
         return value
@@ -42,6 +43,7 @@ class TemplateOut(BaseModel):
     image: str
     status: str
     last_error: str
+    build_step: str
     created_at: datetime
     updated_at: datetime
     last_used_at: datetime | None

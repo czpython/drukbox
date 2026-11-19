@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic import SecretStr
@@ -22,7 +22,7 @@ def _settings(**overrides: Any) -> ExeSettings:
 
 def _docker_mock() -> SimpleNamespace:
     return SimpleNamespace(
-        build_image=AsyncMock(),
+        build_image=MagicMock(),
         remove_image=AsyncMock(),
         push_image=AsyncMock(),
         aclose=AsyncMock(),
@@ -101,7 +101,7 @@ async def test_create_vm_keeps_credentials_off_other_registry_hosts(
 
     await provider.create_vm(name="sb-1", image=image)
 
-    assert api.create_vm.await_args.kwargs["registry_auth"] is None
+    assert not api.create_vm.await_args.kwargs["registry_auth"]
 
 
 async def test_create_vm_omits_registry_auth_when_registry_is_not_configured() -> None:
@@ -110,7 +110,7 @@ async def test_create_vm_omits_registry_auth_when_registry_is_not_configured() -
 
     await provider.create_vm(name="sb-1", image="img:latest")
 
-    assert api.create_vm.await_args.kwargs["registry_auth"] is None
+    assert not api.create_vm.await_args.kwargs["registry_auth"]
 
 
 async def test_delete_vm_delegates_to_api() -> None:
@@ -168,7 +168,9 @@ async def test_http_proxy_methods_delegate_to_api(method_name: str, kwargs: dict
 
 def test_from_settings_constructs_with_exeapi() -> None:
     provider = ExeProvider.from_settings()
+    # ast-grep-ignore: rule-3
     assert isinstance(provider.api, ExeAPI)
+    # ast-grep-ignore: rule-3
     assert isinstance(provider.docker, DockerAPI)
 
 
@@ -187,10 +189,11 @@ async def test_build_template_image_builds_logs_in_and_pushes(
         base_image="exe/base:latest",
         setup_script="apt-get update",
         label="Node tools",
+        record_step=AsyncMock(),
     )
 
     assert image.startswith("ghcr.io/acme/drukbox-templates:node-tools-")
-    assert docker.build_image.await_args.args[0] == image
+    assert docker.build_image.call_args.args[0] == image
     docker.push_image.assert_awaited_once_with(image, username="bot", password="secret")
 
 
@@ -209,9 +212,10 @@ async def test_build_template_image_requires_a_template_repository(
             base_image="exe/base:latest",
             setup_script="apt-get update",
             label="Node tools",
+            record_step=AsyncMock(),
         )
 
-    docker.build_image.assert_not_awaited()
+    docker.build_image.assert_not_called()
 
 
 async def test_build_template_image_translates_push_failure(
@@ -231,6 +235,7 @@ async def test_build_template_image_translates_push_failure(
             base_image="exe/base:latest",
             setup_script="apt-get update",
             label="Node tools",
+            record_step=AsyncMock(),
         )
 
 

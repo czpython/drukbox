@@ -2,12 +2,17 @@ import hashlib
 import io
 import re
 import tarfile
+import time
 
 from core.settings import get_settings
+from providers.capabilities import RecordStep
 from providers.exceptions import ProviderNotFoundError, ProviderTransportError
 
 from .api import DockerAPI
 from .exceptions import DockerImageNotFoundError, DockerProviderError
+
+# A setup script can print thousands of lines. The step shows one per interval.
+SETUP_OUTPUT_INTERVAL_SECONDS = 3.0
 
 
 def derive_image_name(
@@ -49,6 +54,7 @@ async def build_derived_image(
     base_image: str,
     setup_script: str,
     label: str,
+    record_step: RecordStep,
 ) -> str:
     settings = get_settings()
     repository = "drukbox-template"
@@ -62,8 +68,14 @@ async def build_derived_image(
     )
     context_tar = create_build_context(base_image=base_image, setup_script=setup_script)
     try:
-        await docker.build_image(image, context_tar)
+        await record_step("running setup script")
+        shown_at = time.monotonic()
+        async for line in docker.build_image(image, context_tar):
+            if time.monotonic() - shown_at >= SETUP_OUTPUT_INTERVAL_SECONDS:
+                await record_step(f"running setup script: {line}")
+                shown_at = time.monotonic()
         if settings.template_repository:
+            await record_step("pushing image")
             await docker.push_image(
                 image,
                 username=settings.registry_username,

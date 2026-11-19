@@ -28,7 +28,7 @@ def _api_mock() -> MagicMock:
     api.run_container = AsyncMock(return_value="container-id")
     api.published_ssh_port = AsyncMock(return_value=49160)
     api.remove_container = AsyncMock()
-    api.build_image = AsyncMock()
+    api.build_image = MagicMock()
     api.remove_image = AsyncMock()
     api.server_version = AsyncMock(return_value="27.0.3")
     return api
@@ -174,10 +174,11 @@ async def test_build_template_image_builds_and_returns_the_derived_tag():
         base_image="sandbox:base",
         setup_script="apt-get update",
         label="Node tools",
+        record_step=AsyncMock(),
     )
 
     assert image.startswith("drukbox-template:node-tools-")
-    assert api.build_image.await_args.args[0] == image
+    assert api.build_image.call_args.args[0] == image
 
 
 @pytest.mark.asyncio
@@ -191,6 +192,7 @@ async def test_build_template_image_translates_build_failure():
             base_image="sandbox:base",
             setup_script="apt-get update",
             label="Node tools",
+            record_step=AsyncMock(),
         )
 
 

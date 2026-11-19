@@ -1,19 +1,12 @@
 from typing import ClassVar, Self
 
 from core.settings import get_settings
+from providers import exceptions
 from providers.base import VMCreateResult, VMProvider
-from providers.capabilities import TemplateCapability
+from providers.capabilities import RecordStep, TemplateCapability
 from providers.docker.api import DockerAPI
 from providers.docker.exceptions import DockerProviderError
 from providers.docker.images import build_derived_image, remove_derived_image
-from providers.exceptions import (
-    ProviderCommandError,
-    ProviderHttpProxyExistsError,
-    ProviderHttpProxyNotFoundError,
-    ProviderNotFoundError,
-    ProviderTargetVMNotFoundError,
-    ProviderTransportError,
-)
 from providers.exe.api import ExeAPI
 from providers.exe.exceptions import (
     ExeIntegrationAlreadyExistsError,
@@ -99,7 +92,7 @@ class ExeProvider(VMProvider, TemplateCapability):
         try:
             await self.api.delete_vm(name)
         except ExeVMNotFoundError as exc:
-            raise ProviderNotFoundError(str(exc)) from exc
+            raise exceptions.ProviderNotFoundError(str(exc)) from exc
 
     async def refresh_base_image(self, image: str) -> str:
         try:
@@ -107,7 +100,7 @@ class ExeProvider(VMProvider, TemplateCapability):
                 image, registry_auth=get_settings().get_registry_auth(image)
             )
         except DockerProviderError as exc:
-            raise ProviderTransportError(str(exc)) from exc
+            raise exceptions.ProviderTransportError(str(exc)) from exc
 
     async def build_template_image(
         self,
@@ -115,10 +108,11 @@ class ExeProvider(VMProvider, TemplateCapability):
         base_image: str,
         setup_script: str,
         label: str,
+        record_step: RecordStep,
     ) -> str:
         # exe.dev pulls every image from a registry, so a local template cannot boot.
         if not get_settings().template_repository:
-            raise ProviderCommandError(
+            raise exceptions.ProviderCommandError(
                 "Template repository is not configured. Set TEMPLATE_REPOSITORY."
             )
 
@@ -127,6 +121,7 @@ class ExeProvider(VMProvider, TemplateCapability):
             base_image=base_image,
             setup_script=setup_script,
             label=label,
+            record_step=record_step,
         )
 
     async def delete_template_image(self, image: str) -> None:
@@ -152,26 +147,26 @@ class ExeProvider(VMProvider, TemplateCapability):
         try:
             await self.api.create_http_proxy(name=name, target=target, headers=headers)
         except ExeIntegrationAlreadyExistsError as exc:
-            raise ProviderHttpProxyExistsError(str(exc)) from exc
+            raise exceptions.ProviderHttpProxyExistsError(str(exc)) from exc
 
     async def delete_http_proxy(self, name: str) -> None:
         try:
             await self.api.delete_http_proxy(name)
         except ExeIntegrationNotFoundError as exc:
-            raise ProviderHttpProxyNotFoundError(str(exc)) from exc
+            raise exceptions.ProviderHttpProxyNotFoundError(str(exc)) from exc
 
     async def attach_http_proxy(self, name: str, *, attach_vm: str) -> None:
         try:
             await self.api.attach_http_proxy(name, attach_vm=attach_vm)
         except ExeVMNotFoundError as exc:
-            raise ProviderTargetVMNotFoundError(str(exc)) from exc
+            raise exceptions.ProviderTargetVMNotFoundError(str(exc)) from exc
         except ExeIntegrationNotFoundError as exc:
-            raise ProviderHttpProxyNotFoundError(str(exc)) from exc
+            raise exceptions.ProviderHttpProxyNotFoundError(str(exc)) from exc
 
     async def detach_http_proxy(self, name: str, *, attach_vm: str) -> None:
         try:
             await self.api.detach_http_proxy(name, attach_vm=attach_vm)
         except ExeVMNotFoundError as exc:
-            raise ProviderTargetVMNotFoundError(str(exc)) from exc
+            raise exceptions.ProviderTargetVMNotFoundError(str(exc)) from exc
         except ExeIntegrationNotFoundError as exc:
-            raise ProviderHttpProxyNotFoundError(str(exc)) from exc
+            raise exceptions.ProviderHttpProxyNotFoundError(str(exc)) from exc
