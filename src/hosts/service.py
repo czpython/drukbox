@@ -31,7 +31,7 @@ from providers.base import VMProvider
 from providers.environment import get_persist
 from providers.registry import get_provider_names, get_vm_provider
 from secrets_exchange.client import SecretsExchange
-from secrets_exchange.secrets import IssuerError, MissingSecretError, Secret
+from secrets_exchange.secrets import IssuerError, IssuerRefusedError, Secret
 from service_accounts.models import ServiceAccount
 from templates.exceptions import TemplateNotAvailableError, UnknownTemplateError
 from templates.models import Template, TemplateStatus
@@ -522,7 +522,7 @@ class HostService:
         try:
             environment.update(await self.put_secrets(host, vm))
             get_persist(environment)
-        except MissingSecretError as exc:
+        except IssuerRefusedError as exc:
             await self.mark_failed(host, exc)
             raise
         except (IssuerError, provider_exceptions.ProviderError, ValueError) as exc:

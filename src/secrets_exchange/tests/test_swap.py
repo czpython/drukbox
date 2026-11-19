@@ -61,9 +61,12 @@ class FakeRequest:
 
 
 class FakeResponse:
-    def __init__(self, status_code: int, content: bytes) -> None:
+    def __init__(
+        self, status_code: int, content: bytes, headers: dict[str, str] | None = None
+    ) -> None:
         self.status_code = status_code
         self.content = content
+        self.headers = headers or {}
 
 
 @pytest.fixture(scope="module")
@@ -120,6 +123,7 @@ class FakeExchange:
         self.asked: list[tuple[str, str]] = []
         self.upstreams_calls = 0
         self.unavailable = False
+        self.refusal = ""
 
     async def upstreams(self) -> set[str]:
         self.upstreams_calls += 1
@@ -131,8 +135,10 @@ class FakeExchange:
         self.asked.append((placeholder, host))
         if self.unavailable:
             raise self.swap.ExchangeUnavailable("down")
+        if self.refusal:
+            raise self.swap.Refused(self.refusal)
         if (placeholder, host) not in self.answers:
-            raise self.swap.Refused(host)
+            raise self.swap.Refused("placeholder refused")
         return self.answers[(placeholder, host)]
 
 
@@ -637,6 +643,22 @@ async def test_a_refused_placeholder_answers_403_and_never_reaches_the_upstream(
     assert flow.request.stream is False
 
 
+async def test_a_refusal_answers_403_with_its_reason_as_plain_text(
+    swap: ModuleType,
+) -> None:
+    exchange = FakeExchange(swap, {"api.anthropic.com"}, {})
+    exchange.refusal = "the key is revoked"
+    addon = _swap(swap, exchange, "104.18.0.1")
+    flow = _flow("https", "api.anthropic.com", {"Authorization": f"Bearer {PLACEHOLDER}"})
+
+    await addon.requestheaders(flow)
+
+    assert flow.response.status_code == 403
+    assert flow.response.content == b"the key is revoked\n"
+    assert flow.response.headers == {"Content-Type": "text/plain; charset=utf-8"}
+    assert flow.request.stream is False
+
+
 async def test_an_exchange_without_an_answer_gives_503(swap: ModuleType) -> None:
     exchange = FakeExchange(swap, {"api.anthropic.com"}, {})
     exchange.unavailable = True
@@ -685,6 +707,7 @@ def test_a_websocket_keeps_only_the_current_message(swap: ModuleType) -> None:
 async def test_the_exchange_client_reads_the_answers(swap: ModuleType) -> None:
     exchange = swap.Exchange("http://exchange.test/")
     fetched: list[Any] = []
+    revoked = "drk.0123abcd.anthropic.revoked"
 
     async def fetch(request: Any, raise_error: bool) -> Any:
         fetched.append(request)
@@ -696,6 +719,8 @@ async def test_the_exchange_client_reads_the_answers(swap: ModuleType) -> None:
                 headers={"X-Upstream-Header": "Authorization", "X-Upstream-Credential": "Bearer r"},
                 body=b"",
             )
+        if request.headers["Authorization"] == f"Bearer {revoked}":
+            return SimpleNamespace(code=422, headers={}, body=b'{"detail": "the key is revoked"}')
         return SimpleNamespace(code=403, headers={}, body=b"")
 
     exchange.client = SimpleNamespace(fetch=fetch)
@@ -705,8 +730,10 @@ async def test_the_exchange_client_reads_the_answers(swap: ModuleType) -> None:
         "Authorization",
         "Bearer r",
     )
-    with pytest.raises(swap.Refused):
+    with pytest.raises(swap.Refused, match="placeholder refused"):
         await exchange.authorize("drk.0123abcd.anthropic.wrong", "api.anthropic.com")
+    with pytest.raises(swap.Refused, match="the key is revoked"):
+        await exchange.authorize(revoked, "api.anthropic.com")
     assert fetched[1].url == "http://exchange.test/authorize"
     assert fetched[1].headers["X-Forwarded-Host"] == "api.anthropic.com"
 
